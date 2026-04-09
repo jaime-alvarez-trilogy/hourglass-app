@@ -49,6 +49,9 @@ build-*.ipa
 # Claude Code session state
 .claude/
 
+# App Store Connect API keys (private key — never commit)
+.appstore/
+
 # generated native folders
 /ios
 /android
