@@ -25,7 +25,6 @@ import { Tabs } from 'expo-router';
 import React, { useMemo } from 'react';
 import { View, Platform } from 'react-native';
 
-import { IconSymbol } from '@/components/ui/icon-symbol';
 import NoiseOverlay from '@/src/components/NoiseOverlay';
 import { FloatingPillTabBar } from '@/src/components/FloatingPillTabBar';
 import { colors } from '@/src/lib/colors';
@@ -52,7 +51,6 @@ const TAB_SCREENS = [
   { name: 'overview',  title: 'Overview', icon: 'chart.bar.fill' },
   { name: 'ai',        title: 'AI',       icon: 'sparkles' },
   { name: 'approvals', title: 'Requests', icon: 'checkmark.circle.fill' },
-  { name: 'explore',   title: '',         icon: '',  href: null },
 ] as const;
 
 export default function TabLayout() {
@@ -114,7 +112,6 @@ export default function TabLayout() {
               <NativeTabs.Trigger.Badge>{String(approvalBadge)}</NativeTabs.Trigger.Badge>
             )}
           </NativeTabs.Trigger>
-          <NativeTabs.Trigger name="explore" hidden />
         </NativeTabs>
         <NoiseOverlay />
       </View>
@@ -143,24 +140,12 @@ export default function TabLayout() {
         )}
       >
         {TAB_SCREENS.map((screen) => {
-          if (screen.href === null) {
-            return (
-              <Tabs.Screen
-                key={screen.name}
-                name={screen.name}
-                options={{ href: null }}
-              />
-            );
-          }
           return (
             <Tabs.Screen
               key={screen.name}
               name={screen.name}
               options={{
                 title: screen.title,
-                tabBarIcon: ({ color }: { color: string }) => (
-                  <IconSymbol size={28} name={screen.icon as any} color={color} />
-                ),
                 ...(screen.name === 'approvals' && { tabBarBadge: approvalBadge }),
               }}
             />

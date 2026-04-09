@@ -43,6 +43,11 @@ gauntlet-output/
 gauntlet-runs/
 Brand Revamp/
 simulator_screenshot*.png
+announcement_*.png
+build-*.ipa
+
+# Claude Code session state
+.claude/
 
 # generated native folders
 /ios

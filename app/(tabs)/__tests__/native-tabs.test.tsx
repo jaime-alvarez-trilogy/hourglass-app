@@ -117,10 +117,6 @@ describe('06-native-tabs — FR3: TAB_SCREENS shared constant', () => {
     expect(source).toContain("'approvals'");
   });
 
-  it('SC3.2 — TAB_SCREENS explore entry has href: null', () => {
-    expect(source).toContain('href: null');
-  });
-
   it('SC3.4 — TAB_SCREENS uses house.fill icon for Home tab', () => {
     expect(source).toContain('house.fill');
   });
@@ -190,9 +186,6 @@ describe('06-native-tabs — FR4: NativeTabs render path', () => {
     expect(source).toContain('tabBarBadge');
   });
 
-  it('SC4.7 — explore tab hidden via href: null', () => {
-    expect(source).toContain('href: null');
-  });
 });
 
 // ─── FR5: Legacy Tabs fallback — HapticTab removal ───────────────────────────
