@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy — Hourglass</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0D1117;
+      color: #C9D1D9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 16px;
+      line-height: 1.7;
+      padding: 48px 24px 80px;
+    }
+
+    .container {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    .logo {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 48px;
+      text-decoration: none;
+    }
+
+    .logo-mark {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, #00FF88 0%, #00CC6A 100%);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+
+    .logo-name {
+      font-size: 20px;
+      font-weight: 600;
+      color: #E6EDF3;
+    }
+
+    h1 {
+      font-size: 32px;
+      font-weight: 700;
+      color: #E6EDF3;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      color: #8B949E;
+      font-size: 14px;
+      margin-bottom: 48px;
+    }
+
+    h2 {
+      font-size: 18px;
+      font-weight: 600;
+      color: #E6EDF3;
+      margin-top: 40px;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #21262D;
+    }
+
+    p {
+      color: #C9D1D9;
+      margin-bottom: 12px;
+    }
+
+    ul {
+      padding-left: 20px;
+      margin-bottom: 12px;
+    }
+
+    ul li {
+      color: #C9D1D9;
+      margin-bottom: 6px;
+    }
+
+    .highlight {
+      background: #161B22;
+      border: 1px solid #21262D;
+      border-left: 3px solid #00FF88;
+      border-radius: 6px;
+      padding: 16px 20px;
+      margin: 24px 0;
+    }
+
+    .highlight p {
+      margin: 0;
+      color: #8B949E;
+      font-size: 14px;
+    }
+
+    .highlight strong {
+      color: #00FF88;
+    }
+
+    a {
+      color: #00FF88;
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    footer {
+      margin-top: 64px;
+      padding-top: 24px;
+      border-top: 1px solid #21262D;
+      color: #8B949E;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <a class="logo" href="#">
+      <div class="logo-mark">⏳</div>
+      <span class="logo-name">Hourglass</span>
+    </a>
+
+    <h1>Privacy Policy</h1>
+    <p class="subtitle">Last updated: April 8, 2026</p>
+
+    <div class="highlight">
+      <p><strong>Summary:</strong> Hourglass is an internal tool for Crossover employees. Your credentials stay on your device. We do not collect, store, or share your personal data on any external server.</p>
+    </div>
+
+    <h2>1. About This App</h2>
+    <p>Hourglass is a mobile application built exclusively for employees of Crossover for Work. It provides a convenient view of your tracked hours, earnings, AI usage metrics, and team approval requests by connecting directly to your existing Crossover account.</p>
+    <p>Access requires an active Crossover employee account. The app is not available to the general public and cannot be used without valid Crossover credentials.</p>
+
+    <h2>2. Information We Access</h2>
+    <p>To display your work data, Hourglass connects to the Crossover API using credentials you provide. The following data is accessed:</p>
+    <ul>
+      <li>Your Crossover account credentials (email and password)</li>
+      <li>Work diary entries, tracked hours, and timesheet data</li>
+      <li>Earnings and payment summaries</li>
+      <li>AI usage and BrainLift session tags</li>
+      <li>Pending time approval requests (for managers)</li>
+    </ul>
+    <p>This data is fetched directly from Crossover's servers and displayed in the app. It is not sent to any third-party service.</p>
+
+    <h2>3. How Your Data Is Stored</h2>
+    <p>Your credentials are stored exclusively on your device using the platform's secure storage (iOS Keychain via Expo SecureStore). They are never transmitted to any server operated by this application.</p>
+    <p>Work data may be temporarily cached on your device to allow the app and home screen widgets to display information when offline. This cache is stored locally and is never uploaded or shared.</p>
+
+    <h2>4. Data We Do Not Collect</h2>
+    <ul>
+      <li>We do not operate any user accounts or databases</li>
+      <li>We do not collect analytics, crash reports, or usage telemetry</li>
+      <li>We do not use advertising SDKs or tracking libraries</li>
+      <li>We do not sell, rent, or share any personal data with third parties</li>
+      <li>We do not export your data to any external system</li>
+    </ul>
+
+    <h2>5. Background Refresh</h2>
+    <p>Hourglass uses a lightweight background ping mechanism to keep your home screen widget up to date. This service sends a silent push notification to your device to trigger a local data refresh. No personal data is transmitted as part of this process — the notification contains no payload other than a refresh signal.</p>
+
+    <h2>6. Permissions</h2>
+    <p>The app may request the following device permissions:</p>
+    <ul>
+      <li><strong>Notifications:</strong> To deliver reminders about approval deadlines and weekly summaries. You can disable these at any time in iOS Settings.</li>
+      <li><strong>Background App Refresh:</strong> To keep widget data current.</li>
+    </ul>
+
+    <h2>7. Children's Privacy</h2>
+    <p>This app is intended for working adults who are Crossover employees. It is not directed at children under the age of 13 and we do not knowingly collect data from minors.</p>
+
+    <h2>8. Changes to This Policy</h2>
+    <p>If this policy is updated, the revised version will be posted at this URL with an updated date. Continued use of the app after any changes constitutes acceptance of the updated policy.</p>
+
+    <h2>9. Contact</h2>
+    <p>For questions about this privacy policy, reach out to:</p>
+    <p>
+      Jaime Alvarez<br />
+      <a href="mailto:jaime.alvarez@trilogy.com">jaime.alvarez@trilogy.com</a>
+    </p>
+
+    <footer>
+      <p>Hourglass &mdash; Internal tool for Crossover employees &mdash; Not affiliated with or endorsed by Crossover for Work, Inc.</p>
+    </footer>
+
+  </div>
+</body>
+</html>

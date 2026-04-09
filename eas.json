@@ -1,0 +1,26 @@
+{
+  "cli": {
+    "version": ">= 18.0.0"
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "jalvarez0907@proton.me"
+      }
+    }
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "channel": "development"
+    },
+    "preview": {
+      "distribution": "internal",
+      "channel": "preview"
+    },
+    "production": {
+      "channel": "production"
+    }
+  }
+}
