@@ -4,6 +4,8 @@ A mobile app for Crossover employees to track weekly hours, earnings, AI usage, 
 
 Built with Expo (React Native), available on iOS and Android.
 
+**Download on TestFlight (iOS):** https://testflight.apple.com/join/eV25Wbvh
+
 ---
 
 ## What it does
