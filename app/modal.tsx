@@ -38,7 +38,7 @@ export default function ModalScreen() {
     }
   }, [config, togglesInitialized]);
 
-  const isMe = username === 'jalvarez0907@outlook.com';
+  const isMe = username === process.env.EXPO_PUBLIC_DEV_USERNAME;
 
   async function handleSignOut() {
     Alert.alert('Sign Out', 'This will clear your saved credentials and return to the login screen.', [
