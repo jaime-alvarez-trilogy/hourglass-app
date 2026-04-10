@@ -111,6 +111,20 @@ jest.mock('@tanstack/react-query', () => ({
     const mockReact = require('react');
     return mockReact.createElement('QueryClientProvider', null, children);
   },
+  focusManager: {
+    setEventListener: jest.fn(),
+  },
+}));
+
+jest.mock('@tanstack/react-query-persist-client', () => ({
+  PersistQueryClientProvider: ({ children }: any) => {
+    const mockReact = require('react');
+    return mockReact.createElement('PersistQueryClientProvider', null, children);
+  },
+}));
+
+jest.mock('@tanstack/query-async-storage-persister', () => ({
+  createAsyncStoragePersister: jest.fn(() => ({})),
 }));
 
 jest.mock('react-native-gesture-handler', () => ({

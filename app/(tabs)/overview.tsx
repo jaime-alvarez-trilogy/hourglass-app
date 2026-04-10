@@ -126,7 +126,7 @@ function ChartSection({
   const gesture = useMemo(() => Gesture.Pan()
     .minDistance(5)
     .activeOffsetX([-5, 5])
-    .failOffsetY([-10, 10])
+    .failOffsetY([-5, 5])
     .onUpdate((e) => {
       if (data.length === 0 || cardWidth === 0) return;
       const idx = Math.max(0, Math.min(Math.round((e.x / cardWidth) * (data.length - 1)), data.length - 1));

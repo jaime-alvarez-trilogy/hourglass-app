@@ -263,7 +263,8 @@ export function calculateHours(
 // ─── computeDeadlineCountdown ─────────────────────────────────────────────────
 
 /**
- * Returns time remaining until end of the Crossover work week (Sunday 23:59:59 UTC).
+ * Returns time remaining until the Crossover timesheet deadline (Thursday 23:59:59 UTC).
+ * Mon–Thu: deadline is this Thursday. Fri–Sun: deadline is next Thursday.
  *
  * - urgency: 'none' (>48h), 'warning' (24–48h), 'critical' (<24h)
  * - label: "2d 14h left" | "23h 45m left" | "45m left"
@@ -273,13 +274,13 @@ export function computeDeadlineCountdown(now = new Date()): {
   label: string;
   urgency: 'none' | 'warning' | 'critical';
 } {
-  // Use Sunday 23:59:59 UTC as the week cutoff (Mon–Sun work week)
+  // Thursday (UTC day 4) is the Crossover timesheet deadline
   const utcDay = now.getUTCDay(); // 0 = Sunday
-  const daysUntilSunday = utcDay === 0 ? 0 : 7 - utcDay;
+  const daysUntilThursday = (4 - utcDay + 7) % 7; // 0 on Thursday, 6 on Friday
   const deadline = new Date(Date.UTC(
     now.getUTCFullYear(),
     now.getUTCMonth(),
-    now.getUTCDate() + daysUntilSunday,
+    now.getUTCDate() + daysUntilThursday,
     23, 59, 59, 0
   ));
 

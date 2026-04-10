@@ -7,6 +7,14 @@ import { computeDeadlineCountdown, computePacingSignal } from '../hours';
 // ─── computeDeadlineCountdown ─────────────────────────────────────────────────
 
 describe('computeDeadlineCountdown', () => {
+  beforeEach(() => {
+    // Freeze clock to a known Monday so any internal new Date() calls are stable
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-04-06T12:00:00.000Z'));
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
   it('Monday UTC → > 48h → urgency none', () => {
     // Monday 09:00 UTC — deadline is Thursday 23:59:59 UTC = ~86h away
     const monday = new Date('2026-04-06T09:00:00.000Z'); // A known Monday
@@ -81,6 +89,13 @@ describe('computeDeadlineCountdown', () => {
 // ─── computePacingSignal ──────────────────────────────────────────────────────
 
 describe('computePacingSignal', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-04-06T12:00:00.000Z'));
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
   it('computePacingSignal(20, 40, monday) → "5.0h/day needed"', () => {
     // Monday: 4 working days remain (Mon, Tue, Wed, Thu)
     // (40 - 20) / 4 = 5.0h/day
