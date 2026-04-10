@@ -167,7 +167,8 @@ describe('FR7+FR8: useAIData', () => {
     const { get } = setupHook();
     await flushAsync();
     expect(get().error).toBe('network');
-    expect(get().data).toBeNull();
+    // data is kept (not wiped) on network error so stale cache remains visible
+    expect(get().data).not.toBeUndefined();
   });
 
   it('error is null on successful fetch', async () => {

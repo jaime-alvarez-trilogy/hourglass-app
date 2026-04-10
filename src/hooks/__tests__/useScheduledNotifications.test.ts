@@ -196,8 +196,9 @@ describe('FR2: scheduleThursdayReminder — via scheduleAll orchestration', () =
   });
 
   it('SC2.1 — reads notif_thursday_id from AsyncStorage before scheduling', async () => {
-    // Set up to be on a weekday (Tuesday = 2)
-    jest.spyOn(Date.prototype, 'getUTCDay').mockReturnValue(2);
+    // Set up to be on a weekday (Tuesday = 2, 10am)
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(2);
+    jest.spyOn(Date.prototype, 'getHours').mockReturnValue(10);
 
     mockAsyncGetItem.mockImplementation((key: string) => {
       if (key === 'notif_thursday_id') return Promise.resolve('old-thursday-id');
@@ -219,7 +220,8 @@ describe('FR2: scheduleThursdayReminder — via scheduleAll orchestration', () =
   });
 
   it('SC2.2 — cancels existing notification when ID found in AsyncStorage', async () => {
-    jest.spyOn(Date.prototype, 'getUTCDay').mockReturnValue(2); // Tuesday
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(2); // Tuesday
+    jest.spyOn(Date.prototype, 'getHours').mockReturnValue(10);
 
     mockAsyncGetItem.mockImplementation((key: string) => {
       if (key === 'notif_thursday_id') return Promise.resolve('existing-id-123');
@@ -239,7 +241,8 @@ describe('FR2: scheduleThursdayReminder — via scheduleAll orchestration', () =
   });
 
   it('SC2.3 — skips cancel when no existing ID in AsyncStorage', async () => {
-    jest.spyOn(Date.prototype, 'getUTCDay').mockReturnValue(2); // Tuesday
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(2); // Tuesday
+    jest.spyOn(Date.prototype, 'getHours').mockReturnValue(10);
 
     mockAsyncGetItem.mockResolvedValue(null);
 
@@ -256,8 +259,9 @@ describe('FR2: scheduleThursdayReminder — via scheduleAll orchestration', () =
     jest.restoreAllMocks();
   });
 
-  it('SC2.4a — skips scheduling on Friday (UTC day 5)', async () => {
-    jest.spyOn(Date.prototype, 'getUTCDay').mockReturnValue(5); // Friday
+  it('SC2.4a — skips scheduling on Friday (local day 5)', async () => {
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(5); // Friday
+    jest.spyOn(Date.prototype, 'getHours').mockReturnValue(10);
 
     const mod = require('../useScheduledNotifications');
     if (mod.__testOnly?.scheduleThursdayReminder) {
@@ -265,15 +269,15 @@ describe('FR2: scheduleThursdayReminder — via scheduleAll orchestration', () =
       expect(mockScheduleNotification).not.toHaveBeenCalled();
     } else {
       const source = fs.readFileSync(HOOK_FILE, 'utf8');
-      // Guard: skip on day 5 (Fri) or day 6 (Sat)
-      expect(source).toMatch(/getUTCDay\(\)\s*===?\s*5|=== 5/);
+      expect(source).toMatch(/localDay\s*===\s*5|=== 5/);
     }
 
     jest.restoreAllMocks();
   });
 
-  it('SC2.4b — skips scheduling on Saturday (UTC day 6)', async () => {
-    jest.spyOn(Date.prototype, 'getUTCDay').mockReturnValue(6); // Saturday
+  it('SC2.4b — skips scheduling on Saturday (local day 6)', async () => {
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(6); // Saturday
+    jest.spyOn(Date.prototype, 'getHours').mockReturnValue(10);
 
     const mod = require('../useScheduledNotifications');
     if (mod.__testOnly?.scheduleThursdayReminder) {
@@ -287,24 +291,25 @@ describe('FR2: scheduleThursdayReminder — via scheduleAll orchestration', () =
     jest.restoreAllMocks();
   });
 
-  it('SC2.4c — schedules notification on Sunday (UTC day 0)', async () => {
-    jest.spyOn(Date.prototype, 'getUTCDay').mockReturnValue(0); // Sunday
+  it('SC2.4c — schedules notification on Sunday (local day 0)', async () => {
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(0); // Sunday
+    jest.spyOn(Date.prototype, 'getHours').mockReturnValue(10);
 
     const mod = require('../useScheduledNotifications');
     if (mod.__testOnly?.scheduleThursdayReminder) {
       await mod.__testOnly.scheduleThursdayReminder(5.5, 40);
       expect(mockScheduleNotification).toHaveBeenCalledTimes(1);
     } else {
-      // Source should only guard on 5 and 6
       const source = fs.readFileSync(HOOK_FILE, 'utf8');
-      expect(source).not.toMatch(/getUTCDay\(\)\s*===?\s*0/);
+      expect(source).not.toMatch(/localDay\s*===\s*0/);
     }
 
     jest.restoreAllMocks();
   });
 
   it('SC2.5 — trigger has weekday: 5, hour: 18, minute: 0, repeats: false', async () => {
-    jest.spyOn(Date.prototype, 'getUTCDay').mockReturnValue(2); // Tuesday
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(2); // Tuesday
+    jest.spyOn(Date.prototype, 'getHours').mockReturnValue(10);
 
     const mod = require('../useScheduledNotifications');
     if (mod.__testOnly?.scheduleThursdayReminder) {
@@ -331,7 +336,8 @@ describe('FR2: scheduleThursdayReminder — via scheduleAll orchestration', () =
   });
 
   it('SC2.6 — notification title is "Hours Deadline Tonight"', async () => {
-    jest.spyOn(Date.prototype, 'getUTCDay').mockReturnValue(2);
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(2);
+    jest.spyOn(Date.prototype, 'getHours').mockReturnValue(10);
 
     const mod = require('../useScheduledNotifications');
     if (mod.__testOnly?.scheduleThursdayReminder) {
@@ -347,7 +353,8 @@ describe('FR2: scheduleThursdayReminder — via scheduleAll orchestration', () =
   });
 
   it('SC2.7 — body shows "X.Xh to go" when hoursRemaining > 0', async () => {
-    jest.spyOn(Date.prototype, 'getUTCDay').mockReturnValue(2);
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(2);
+    jest.spyOn(Date.prototype, 'getHours').mockReturnValue(10);
 
     const mod = require('../useScheduledNotifications');
     if (mod.__testOnly?.scheduleThursdayReminder) {
@@ -363,7 +370,8 @@ describe('FR2: scheduleThursdayReminder — via scheduleAll orchestration', () =
   });
 
   it('SC2.8 — body shows target-hit message when hoursRemaining <= 0', async () => {
-    jest.spyOn(Date.prototype, 'getUTCDay').mockReturnValue(2);
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(2);
+    jest.spyOn(Date.prototype, 'getHours').mockReturnValue(10);
 
     const mod = require('../useScheduledNotifications');
     if (mod.__testOnly?.scheduleThursdayReminder) {
@@ -379,7 +387,8 @@ describe('FR2: scheduleThursdayReminder — via scheduleAll orchestration', () =
   });
 
   it('SC2.9 — saves new notification ID to AsyncStorage notif_thursday_id', async () => {
-    jest.spyOn(Date.prototype, 'getUTCDay').mockReturnValue(2);
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(2);
+    jest.spyOn(Date.prototype, 'getHours').mockReturnValue(10);
     mockScheduleNotification.mockResolvedValue('new-id-abc');
 
     const mod = require('../useScheduledNotifications');
@@ -396,7 +405,8 @@ describe('FR2: scheduleThursdayReminder — via scheduleAll orchestration', () =
   });
 
   it('SC2.10 — swallows error from scheduleNotificationAsync throwing', async () => {
-    jest.spyOn(Date.prototype, 'getUTCDay').mockReturnValue(2);
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(2);
+    jest.spyOn(Date.prototype, 'getHours').mockReturnValue(10);
     mockScheduleNotification.mockRejectedValue(new Error('Notification error'));
 
     const mod = require('../useScheduledNotifications');
