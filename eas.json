@@ -5,7 +5,11 @@
   "submit": {
     "production": {
       "ios": {
-        "appleId": "jalvarez0907@proton.me"
+        "appleId": "jalvarez0907@proton.me",
+        "ascApiKeyPath": ".appstore/AuthKey_W4UV4XTKPC.p8",
+        "ascApiKeyIssuerId": "670b18b2-97d4-496c-8482-2d1560d7028d",
+        "ascApiKeyId": "W4UV4XTKPC",
+        "ascAppId": "6761698411"
       }
     }
   },
