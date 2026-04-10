@@ -64,8 +64,8 @@ describe('useAIData — FR4: source file contract (static analysis)', () => {
     expect(source).toContain('getItem');
   });
 
-  it('SC4.7 — source includes useState for previousWeekPercent', () => {
-    expect(source).toMatch(/useState.*undefined|useState<.*number.*undefined/);
+  it('SC4.7 — source uses useRef for previousWeekPercent (no stale closure)', () => {
+    expect(source).toMatch(/useRef.*undefined|useRef<.*number.*undefined/);
   });
 
   it('SC4.8 — source handles AsyncStorage read failure silently (.catch)', () => {
