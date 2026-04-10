@@ -135,7 +135,7 @@ function mapDailyToChartData(daily: DailyEntry[]): DailyHours[] {
       day,
       hours: entry?.hours ?? 0,
       isToday: entry?.isToday ?? false,
-      isFuture: !entry || (!entry.isToday && entry.hours === 0),
+      isFuture: !entry,
     };
   });
 }
@@ -183,10 +183,16 @@ export default function HoursDashboard() {
   const panelState: PanelState = config?.devOvertimePreview ? 'overtime' : basePanelState;
 
   // FR2/FR3/FR4/FR5 (01-week-countdown-pacing): deadline countdown + pacing signal
-  const countdown = useMemo(() => computeDeadlineCountdown(), []);
+  // 60-second clock keeps countdown and pacing fresh while screen is visible (02-deadline-clock)
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  const countdown = useMemo(() => computeDeadlineCountdown(now), [now]);
   const pacing = useMemo(
-    () => computePacingSignal(data?.total ?? 0, weeklyLimit),
-    [data?.total, weeklyLimit],
+    () => computePacingSignal(data?.total ?? 0, weeklyLimit, now),
+    [data?.total, weeklyLimit, now],
   );
 
   // FR3: Pulsing opacity animation for critical urgency
