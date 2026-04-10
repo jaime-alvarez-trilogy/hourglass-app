@@ -106,7 +106,7 @@ export function useAIData(): UseAIDataResult {
   const [isLoading, setIsLoading] = useState(false);
   const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [previousWeekPercent, setPreviousWeekPercent] = useState<number | undefined>(undefined);
+  const prevWeekPercentRef = useRef<number | undefined>(undefined);
   const isFetchingRef = useRef(false);
 
   // FR4 (06-ai-tab): Load cached previous week AI% on mount for delta badge.
@@ -115,7 +115,7 @@ export function useAIData(): UseAIDataResult {
     AsyncStorage.getItem(PREV_WEEK_KEY)
       .then((val) => {
         if (val !== null) {
-          setPreviousWeekPercent(Number(val));
+          prevWeekPercentRef.current = Number(val);
         }
       })
       .catch(() => {}); // silent failure
@@ -254,7 +254,7 @@ export function useAIData(): UseAIDataResult {
 
       // Fallback: if previousWeekPercent is still undefined (first run / data wipe),
       // fetch last week's work diary to compute it. Fire-and-forget, silent failure.
-      if (previousWeekPercent === undefined) {
+      if (prevWeekPercentRef.current === undefined) {
         const prevMonday = addDays(getMondayOfWeek(today), -7);
         const prevSunday = addDays(getMondayOfWeek(today), -1);
         const prevDays = dateRange(prevMonday, prevSunday);
@@ -276,7 +276,7 @@ export function useAIData(): UseAIDataResult {
           if (tagged > 0) {
             const pct = (aiSlots / tagged) * 100;
             AsyncStorage.setItem(PREV_WEEK_KEY, String(pct)).catch(() => {});
-            setPreviousWeekPercent(pct);
+            prevWeekPercentRef.current = pct;
           }
         }).catch(() => {});
       }
@@ -289,7 +289,7 @@ export function useAIData(): UseAIDataResult {
       if (isMonday && freshData.taggedSlots > 0) {
         const midpoint = (freshData.aiPctLow + freshData.aiPctHigh) / 2;
         AsyncStorage.setItem(PREV_WEEK_KEY, String(midpoint)).catch(() => {});
-        setPreviousWeekPercent(midpoint);
+        prevWeekPercentRef.current = midpoint;
 
         // FR4 (06-overview-history): flush AI%+BrainLift snapshot for the week just ended.
         // prevWeekStart = Monday 7 days before today (the week we are finishing).
@@ -347,5 +347,5 @@ export function useAIData(): UseAIDataResult {
     void fetchData(true);
   }, [fetchData]);
 
-  return { data, isLoading, lastFetchedAt, error, refetch, previousWeekPercent };
+  return { data, isLoading, lastFetchedAt, error, refetch, previousWeekPercent: prevWeekPercentRef.current };
 }
