@@ -82,12 +82,13 @@ export default function ModalScreen() {
               const newConfig = await fetchAndBuildConfig(creds.username, creds.password, targetIsQA);
               await saveConfig(newConfig);
               startTransition(() => {
-                queryClient.setQueryData(['config'], newConfig);
                 // 05-cache-hygiene FR3: resetQueries clears all stale-env data and
                 // triggers immediate refetch for active queries.
                 // The old invalidateQueries calls used ['hours'] and ['approvals'] — keys
                 // that no registered query uses — so they were silent no-ops.
                 queryClient.resetQueries();
+                // Set config AFTER reset so it isn't immediately wiped.
+                queryClient.setQueryData(['config'], newConfig);
               });
               router.dismiss();
             } catch {
