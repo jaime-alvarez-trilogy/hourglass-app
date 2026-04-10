@@ -4,6 +4,7 @@
 import { View, Text, Switch, StyleSheet, Alert, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { AnimatedPressable } from '@/src/components/AnimatedPressable';
 import { BlurView } from 'expo-blur';
+import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
 import { useEffect, useState, startTransition } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -49,7 +50,9 @@ export default function ModalScreen() {
         onPress: async () => {
           await unregisterPushToken().catch(() => {});
           await clearAll();
-          queryClient.setQueryData(['config'], null);
+          // 05-cache-hygiene FR2: clear TanStack in-memory cache and cancel notifications
+          try { queryClient.clear(); } catch { /* non-blocking */ }
+          try { await Notifications.cancelAllScheduledNotificationsAsync(); } catch { /* non-blocking */ }
           router.replace('/(auth)/welcome');
         },
       },
@@ -80,8 +83,11 @@ export default function ModalScreen() {
               await saveConfig(newConfig);
               startTransition(() => {
                 queryClient.setQueryData(['config'], newConfig);
-                queryClient.invalidateQueries({ queryKey: ['hours'] });
-                queryClient.invalidateQueries({ queryKey: ['approvals'] });
+                // 05-cache-hygiene FR3: resetQueries clears all stale-env data and
+                // triggers immediate refetch for active queries.
+                // The old invalidateQueries calls used ['hours'] and ['approvals'] — keys
+                // that no registered query uses — so they were silent no-ops.
+                queryClient.resetQueries();
               });
               router.dismiss();
             } catch {
