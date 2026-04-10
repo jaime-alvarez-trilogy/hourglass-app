@@ -240,4 +240,38 @@ describe('FR7+FR8: useAIData', () => {
       await flushAsync();
     })).resolves.not.toThrow();
   });
+
+  // FR3 (04-ai-data-closure): Stale closure regression test.
+  // With the original useState, previousWeekPercent is always undefined inside fetchData
+  // (stale closure), causing 7 extra fetchWorkDiary calls on EVERY refresh.
+  // After the fix (useRef), prevWeekPercentRef.current is set after the first fetch,
+  // so the second refetch() does NOT trigger another 7 prev-week calls.
+  //
+  // This test FAILS with the original useState code and PASSES after the useRef fix.
+  it('does not re-fetch previous week on subsequent refreshes (stale closure fix)', async () => {
+    // Ensure no previousWeekAIPercent in storage — simulates first-run (ref starts undefined)
+    await AsyncStorage.removeItem('previousWeekAIPercent');
+
+    const { get } = setupHook();
+
+    // First fetch cycle — prev-week branch fires (ref is undefined)
+    await flushAsync();
+    const callsAfterFirstFetch = mockFetchWorkDiary.mock.calls.length;
+
+    // First fetch should have called fetchWorkDiary for current-week days + 7 prev-week days
+    // We just need it to be > 0 to confirm the first fetch ran
+    expect(callsAfterFirstFetch).toBeGreaterThan(0);
+
+    // Second fetch cycle via refetch() — prev-week branch must NOT fire again
+    await act(async () => {
+      get().refetch();
+      await flushAsync();
+    });
+    const callsAfterSecondFetch = mockFetchWorkDiary.mock.calls.length;
+
+    // The increment on the second fetch must be < 7 (current-week days only, not prev-week again).
+    // With the stale closure bug, the increment would be >= 7 (another full prev-week fetch).
+    const increment = callsAfterSecondFetch - callsAfterFirstFetch;
+    expect(increment).toBeLessThan(7);
+  });
 });
