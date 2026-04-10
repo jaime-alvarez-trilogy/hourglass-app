@@ -143,3 +143,124 @@ describe('FR4: unregisterPushToken', () => {
     expect(AsyncStorage.removeItem).toHaveBeenCalledWith('push_token');
   });
 });
+
+// ---------------------------------------------------------------------------
+// FR3: registerPushToken — response.ok check
+// ---------------------------------------------------------------------------
+
+describe('FR3: registerPushToken — response.ok validation', () => {
+  it('saves token to AsyncStorage when server returns 200 (ok)', async () => {
+    mockRequestPermissions.mockResolvedValueOnce({ granted: true });
+    mockGetExpoPushToken.mockResolvedValueOnce({ data: VALID_TOKEN });
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 200 });
+
+    await registerPushToken();
+
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith('push_token', VALID_TOKEN);
+  });
+
+  it('does NOT save token to AsyncStorage when server returns 500', async () => {
+    mockRequestPermissions.mockResolvedValueOnce({ granted: true });
+    mockGetExpoPushToken.mockResolvedValueOnce({ data: VALID_TOKEN });
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 500 });
+
+    await registerPushToken();
+
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('emits console.warn when server returns non-ok status', async () => {
+    mockRequestPermissions.mockResolvedValueOnce({ granted: true });
+    mockGetExpoPushToken.mockResolvedValueOnce({ data: VALID_TOKEN });
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 500 });
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await registerPushToken();
+
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('does NOT save token when fetch() throws a network error', async () => {
+    mockRequestPermissions.mockResolvedValueOnce({ granted: true });
+    mockGetExpoPushToken.mockResolvedValueOnce({ data: VALID_TOKEN });
+    mockFetch.mockRejectedValueOnce(new TypeError('Network request failed'));
+
+    await registerPushToken();
+
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('emits console.warn when fetch() throws', async () => {
+    mockRequestPermissions.mockResolvedValueOnce({ granted: true });
+    mockGetExpoPushToken.mockResolvedValueOnce({ data: VALID_TOKEN });
+    mockFetch.mockRejectedValueOnce(new TypeError('Network request failed'));
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await registerPushToken();
+
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('resolves without throwing when server returns error', async () => {
+    mockRequestPermissions.mockResolvedValueOnce({ granted: true });
+    mockGetExpoPushToken.mockResolvedValueOnce({ data: VALID_TOKEN });
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 500 });
+
+    await expect(registerPushToken()).resolves.toBeUndefined();
+  });
+
+  it('resolves without throwing when fetch() throws', async () => {
+    mockRequestPermissions.mockResolvedValueOnce({ granted: true });
+    mockGetExpoPushToken.mockResolvedValueOnce({ data: VALID_TOKEN });
+    mockFetch.mockRejectedValueOnce(new Error('Network error'));
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(registerPushToken()).resolves.toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FR4 (extended): unregisterPushToken — response.ok check
+// ---------------------------------------------------------------------------
+
+describe('FR4: unregisterPushToken — response.ok validation', () => {
+  it('emits console.warn when server returns non-ok status', async () => {
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(VALID_TOKEN);
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 404 });
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await unregisterPushToken();
+
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('emits console.warn when fetch() throws during unregister', async () => {
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(VALID_TOKEN);
+    mockFetch.mockRejectedValueOnce(new TypeError('Network request failed'));
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await unregisterPushToken();
+
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('resolves without throwing when server returns error during unregister', async () => {
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(VALID_TOKEN);
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 500 });
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(unregisterPushToken()).resolves.toBeUndefined();
+  });
+
+  it('resolves without throwing when fetch() throws during unregister', async () => {
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(VALID_TOKEN);
+    mockFetch.mockRejectedValueOnce(new Error('Network error'));
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(unregisterPushToken()).resolves.toBeUndefined();
+  });
+});
