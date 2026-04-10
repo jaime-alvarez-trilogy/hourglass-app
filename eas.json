@@ -5,7 +5,7 @@
   "submit": {
     "production": {
       "ios": {
-        "appleId": "${APPLE_ID}"
+        "appleId": "jalvarez0907@proton.me"
       }
     }
   },
