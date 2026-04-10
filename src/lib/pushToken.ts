@@ -61,22 +61,19 @@ export async function unregisterPushToken(): Promise<void> {
     return;
   }
 
-  let unregisterResponse: Response;
   try {
-    unregisterResponse = await fetch(`${PING_SERVER_URL}/unregister`, {
+    const unregisterResponse = await fetch(`${PING_SERVER_URL}/unregister`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token }),
     });
+    if (!unregisterResponse.ok) {
+      console.warn('[pushToken] Unregistration failed:', unregisterResponse.status);
+    }
   } catch (err) {
     console.warn('[pushToken] Unregistration error:', err);
-    return;
   }
 
-  if (!unregisterResponse.ok) {
-    console.warn('[pushToken] Unregistration failed:', unregisterResponse.status);
-    return;
-  }
-
+  // Always clean up local token regardless of server response
   await AsyncStorage.removeItem(PUSH_TOKEN_KEY);
 }
