@@ -83,6 +83,7 @@ export function useHoursData(): UseHoursDataResult {
   ]);
 
   const bothError = timesheetQuery.isError && paymentsQuery.isError;
+  const eitherError = timesheetQuery.isError || paymentsQuery.isError;
   const eitherLoading = timesheetQuery.isLoading || paymentsQuery.isLoading;
   const hasLiveData =
     timesheetQuery.data !== undefined && paymentsQuery.data !== undefined && !bothError;
@@ -119,8 +120,8 @@ export function useHoursData(): UseHoursDataResult {
     };
   }
 
-  // Total failure — serve from cache
-  if (bothError && cache) {
+  // Either query failed — serve from cache if available
+  if (eitherError && cache) {
     return {
       data: cache.data,
       isLoading: false,
@@ -159,7 +160,23 @@ export function useHoursData(): UseHoursDataResult {
     };
   }
 
-  // No config yet
+  // Either query failed, no cache available
+  if (eitherError) {
+    const errorMsg =
+      (timesheetQuery.error as Error)?.message ||
+      (paymentsQuery.error as Error)?.message ||
+      'Failed to load hours data';
+    return {
+      data: null,
+      isLoading: false,
+      isStale: false,
+      cachedAt: null,
+      error: errorMsg,
+      refetch,
+    };
+  }
+
+  // No config yet / genuine loading
   return {
     data: null,
     isLoading: true,
