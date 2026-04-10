@@ -133,7 +133,7 @@ export function useMyRequests(): UseMyRequestsResult {
     queryFn: buildMyRequestsQueryFn(),
     staleTime: 60_000,
     enabled: !!assignmentId,
-    retry: false,
+    retry: 2,
   });
 
   return {

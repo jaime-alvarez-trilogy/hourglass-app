@@ -41,9 +41,15 @@ async function scheduleThursdayReminder(
       await Notifications.cancelScheduledNotificationAsync(existingId);
     }
 
-    // Guard: skip if deadline already passed for this week (Fri=5 or Sat=6)
-    const utcDay = new Date().getUTCDay(); // 0=Sun,1=Mon,...,5=Fri,6=Sat
-    if (utcDay === 5 || utcDay === 6) return;
+    // Guard: skip if deadline window has already passed this week.
+    // Use local time — notification fires at local 6pm Thursday.
+    const now = new Date();
+    const localDay = now.getDay(); // 0=Sun,1=Mon,...,4=Thu,5=Fri,6=Sat
+    const localHour = now.getHours();
+    // Fri or Sat: deadline passed
+    if (localDay === 5 || localDay === 6) return;
+    // Thursday after 6pm: window closed — scheduling now would fire immediately
+    if (localDay === 4 && localHour >= 18) return;
 
     // Build notification content
     const body =
@@ -155,7 +161,10 @@ export function useScheduledNotifications(
         const raw = await AsyncStorage.getItem(WIDGET_DATA_KEY);
         if (!raw) return;
         const parsed = JSON.parse(raw) as Record<string, unknown>;
-        const hoursRemaining = (parsed?.hoursRemaining as number) ?? 0;
+        // hoursRemaining in widget_data is a formatted string ("12.2h left", "2.5h OT").
+        // parseFloat extracts the leading number; NaN (missing/malformed) falls back to 0.
+        const hoursRemainingStr = typeof parsed?.hoursRemaining === 'string' ? parsed.hoursRemaining : '';
+        const hoursRemaining = parseFloat(hoursRemainingStr) || 0;
 
         await scheduleThursdayReminder(hoursRemaining, config.weeklyLimit);
         await scheduleMondaySummary();

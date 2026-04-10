@@ -323,13 +323,13 @@ export function useAIData(): UseAIDataResult {
       setIsLoading(false);
       if (err instanceof AuthError) {
         setError('auth');
-        setData(null);
+        setData(null); // Auth failure — cached data is likely wrong too, clear it
       } else if (err instanceof NetworkError) {
         setError('network');
-        setData(null);
+        // Keep existing data — show stale cache rather than blank on network failure
       } else {
         setError('unknown');
-        setData(null);
+        // Keep existing data — transient errors shouldn't wipe the display
       }
     } finally {
       isFetchingRef.current = false;
