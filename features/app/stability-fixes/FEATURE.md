@@ -24,6 +24,7 @@
 
 ### Hooks
 - `src/hooks/useHoursData.ts` (modify)
+- `src/hooks/__tests__/useHoursData.test.ts` (create)
 - `src/hooks/useAIData.ts` (modify)
 - `src/hooks/useScheduledNotifications.ts` (modify)
 
