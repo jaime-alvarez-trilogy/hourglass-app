@@ -226,7 +226,7 @@ export default function HoursDashboard() {
   const earningsPaceSignal = panelState === 'critical' ? 1.0
     : panelState === 'behind' ? 0.5
     : 0.0;
-  const urgencyLevel = data ? getUrgencyLevel(data.timeRemaining) : 'none';
+  const urgencyLevel = data ? getUrgencyLevel(computeDeadlineCountdown(now).msRemaining) : 'none';
 
   // Approval mesh signal: amber (behind) Mon-Wed, coral (critical) Thu-Sun UTC.
   // When non-null, overrides earningsPace for Node C and adds floor glow at Requests tab.
@@ -354,23 +354,25 @@ export default function HoursDashboard() {
                 {/* FR2: StateBadge + countdown pill row */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <StateBadge state={panelState} />
-                  {/* FR2/FR3: Countdown pill with urgency color, pulsing when critical */}
-                  <Animated.View
-                    style={[
-                      {
-                        backgroundColor: colors.surface,
-                        borderRadius: 10,
-                        paddingHorizontal: 8,
-                        paddingVertical: 3,
-                      },
-                      countdown.urgency === 'critical' ? criticalPulseStyle : undefined,
-                    ]}
-                    testID="countdown-pill"
-                  >
-                    <Text style={{ color: countdownColor, fontSize: 11, fontWeight: '600' }}>
-                      {countdown.label}
-                    </Text>
-                  </Animated.View>
+                  {/* FR2/FR3: Countdown pill — hidden Fri/Sat/Sun (deadline already passed) */}
+                  {[1, 2, 3, 4].includes(now.getUTCDay()) && (
+                    <Animated.View
+                      style={[
+                        {
+                          backgroundColor: colors.surface,
+                          borderRadius: 10,
+                          paddingHorizontal: 8,
+                          paddingVertical: 3,
+                        },
+                        countdown.urgency === 'critical' ? criticalPulseStyle : undefined,
+                      ]}
+                      testID="countdown-pill"
+                    >
+                      <Text style={{ color: countdownColor, fontSize: 11, fontWeight: '600' }}>
+                        {countdown.label}
+                      </Text>
+                    </Animated.View>
+                  )}
                 </View>
                 {/* Sub-metrics row */}
                 <View className="flex-row mt-4">

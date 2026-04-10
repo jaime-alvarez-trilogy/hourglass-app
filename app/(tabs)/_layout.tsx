@@ -58,7 +58,7 @@ export default function TabLayout() {
 
   // Widget sync: keep home screen widget up-to-date on every app open
   const { data: hoursData } = useHoursData();
-  const { data: aiData } = useAIData();
+  const { data: aiData, isLoading: aiIsLoading } = useAIData();
   const { items } = useApprovalItems();
   const { config } = useConfig();
 
@@ -71,7 +71,7 @@ export default function TabLayout() {
     return prev ? { hours: prev.hours, earnings: prev.earnings } : null;
   }, [snapshots]);
 
-  useWidgetSync(hoursData, aiData, items.length, config, items, undefined, prevWeekSnapshot);
+  useWidgetSync(hoursData, aiData, aiIsLoading, items.length, config, items, undefined, prevWeekSnapshot);
 
   // Approvals badge: show count when pending > 0, omit otherwise
   const approvalBadge = items.length > 0 ? items.length : undefined;

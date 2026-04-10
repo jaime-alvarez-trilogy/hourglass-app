@@ -103,7 +103,7 @@ export interface UseAIDataResult {
 export function useAIData(): UseAIDataResult {
   const { config } = useConfig();
   const [data, setData] = useState<AIWeekData | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true); // true until first fetch completes or fails
   const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const prevWeekPercentRef = useRef<number | undefined>(undefined);
@@ -135,6 +135,7 @@ export function useAIData(): UseAIDataResult {
       const credentials = await loadCredentials();
       if (!credentials) {
         isFetchingRef.current = false;
+        setIsLoading(false);
         return;
       }
 
@@ -339,6 +340,8 @@ export function useAIData(): UseAIDataResult {
   useEffect(() => {
     if (config) {
       void fetchData();
+    } else {
+      setIsLoading(false); // no config — nothing to fetch
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config?.assignmentId]);

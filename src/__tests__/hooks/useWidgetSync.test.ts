@@ -71,7 +71,7 @@ beforeEach(() => {
 describe('FR5: useWidgetSync', () => {
   it('calls updateWidgetData on first render when hoursData and config are non-null', () => {
     renderHook(() =>
-      useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, 2, MOCK_CONFIG)
+      useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, 2, MOCK_CONFIG)
     );
 
     expect(mockUpdateWidgetData).toHaveBeenCalledTimes(1);
@@ -88,7 +88,7 @@ describe('FR5: useWidgetSync', () => {
 
   it('does NOT call updateWidgetData when hoursData is null', () => {
     renderHook(() =>
-      useWidgetSync(null, MOCK_AI_DATA, 0, MOCK_CONFIG)
+      useWidgetSync(null, MOCK_AI_DATA, false, 0, MOCK_CONFIG)
     );
 
     expect(mockUpdateWidgetData).not.toHaveBeenCalled();
@@ -96,7 +96,7 @@ describe('FR5: useWidgetSync', () => {
 
   it('does NOT call updateWidgetData when config is null', () => {
     renderHook(() =>
-      useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, 0, null)
+      useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, 0, null)
     );
 
     expect(mockUpdateWidgetData).not.toHaveBeenCalled();
@@ -104,7 +104,7 @@ describe('FR5: useWidgetSync', () => {
 
   it('calls updateWidgetData again when hoursData changes (new reference)', () => {
     const { rerender } = renderHook<void, { hoursData: typeof MOCK_HOURS_DATA }>(
-      ({ hoursData }) => useWidgetSync(hoursData, MOCK_AI_DATA, 0, MOCK_CONFIG),
+      ({ hoursData }) => useWidgetSync(hoursData, MOCK_AI_DATA, false, 0, MOCK_CONFIG),
       { initialProps: { hoursData: MOCK_HOURS_DATA } }
     );
 
@@ -119,7 +119,7 @@ describe('FR5: useWidgetSync', () => {
   it('calls updateWidgetData again when pendingCount changes', () => {
     const { rerender } = renderHook<void, { pendingCount: number }>(
       ({ pendingCount }) =>
-        useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, pendingCount, MOCK_CONFIG),
+        useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, pendingCount, MOCK_CONFIG),
       { initialProps: { pendingCount: 0 } }
     );
 
@@ -139,9 +139,9 @@ describe('FR5: useWidgetSync', () => {
     );
   });
 
-  it('passes aiData = null to updateWidgetData when aiData is null (not blocked)', () => {
+  it('passes aiData = null to updateWidgetData when aiData is null and aiIsLoading is false (settled)', () => {
     renderHook(() =>
-      useWidgetSync(MOCK_HOURS_DATA, null, 0, MOCK_CONFIG)
+      useWidgetSync(MOCK_HOURS_DATA, null, false, 0, MOCK_CONFIG)
     );
 
     expect(mockUpdateWidgetData).toHaveBeenCalledTimes(1);
@@ -156,6 +156,28 @@ describe('FR5: useWidgetSync', () => {
     );
   });
 
+  it('does NOT call updateWidgetData when aiIsLoading=true and aiData=null (wait for AI to settle)', () => {
+    renderHook(() =>
+      useWidgetSync(MOCK_HOURS_DATA, null, true, 0, MOCK_CONFIG)
+    );
+
+    expect(mockUpdateWidgetData).not.toHaveBeenCalled();
+  });
+
+  it('calls updateWidgetData once aiIsLoading transitions false with aiData still null', () => {
+    const { rerender } = renderHook<void, { aiIsLoading: boolean }>(
+      ({ aiIsLoading }) =>
+        useWidgetSync(MOCK_HOURS_DATA, null, aiIsLoading, 0, MOCK_CONFIG),
+      { initialProps: { aiIsLoading: true } }
+    );
+
+    expect(mockUpdateWidgetData).not.toHaveBeenCalled();
+
+    rerender({ aiIsLoading: false });
+
+    expect(mockUpdateWidgetData).toHaveBeenCalledTimes(1);
+  });
+
   it('does not throw when updateWidgetData rejects (error is swallowed)', async () => {
     mockUpdateWidgetData.mockRejectedValue(new Error('Widget write failed'));
 
@@ -164,7 +186,7 @@ describe('FR5: useWidgetSync', () => {
     // renderHook should not throw even when updateWidgetData rejects
     expect(() => {
       renderHook(() =>
-        useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, 0, MOCK_CONFIG)
+        useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, 0, MOCK_CONFIG)
       );
     }).not.toThrow();
 
@@ -180,7 +202,7 @@ describe('FR5: useWidgetSync', () => {
 
   it('does not call updateWidgetData when both hoursData and config are null', () => {
     renderHook(() =>
-      useWidgetSync(null, null, 0, null)
+      useWidgetSync(null, null, false, 0, null)
     );
 
     expect(mockUpdateWidgetData).not.toHaveBeenCalled();
@@ -190,7 +212,7 @@ describe('FR5: useWidgetSync', () => {
 
   it('4-arg call (no approvalItems/myRequests) still works — updateWidgetData called once', () => {
     renderHook(() =>
-      useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, 0, MOCK_CONFIG)
+      useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, 0, MOCK_CONFIG)
     );
     expect(mockUpdateWidgetData).toHaveBeenCalledTimes(1);
   });
@@ -200,7 +222,7 @@ describe('FR5: useWidgetSync', () => {
       { id: 'mt-1', category: 'MANUAL' as const, name: 'Alice', hours: '1.0' },
     ];
     renderHook(() =>
-      useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, 1, MOCK_CONFIG, approvalItems)
+      useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, 1, MOCK_CONFIG, approvalItems)
     );
     expect(mockUpdateWidgetData).toHaveBeenCalledWith(
       MOCK_HOURS_DATA,
@@ -218,7 +240,7 @@ describe('FR5: useWidgetSync', () => {
       { id: 'req-1', date: 'Wed Mar 18', hours: '1.0h', memo: 'Fix', status: 'PENDING' as const },
     ];
     renderHook(() =>
-      useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, 0, MOCK_CONFIG, [], myRequests)
+      useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, 0, MOCK_CONFIG, [], myRequests)
     );
     expect(mockUpdateWidgetData).toHaveBeenCalledWith(
       MOCK_HOURS_DATA,
@@ -240,7 +262,7 @@ describe('FR5: useWidgetSync', () => {
 
     const { rerender } = renderHook<void, { approvalItems: typeof initialApprovals }>(
       ({ approvalItems }) =>
-        useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, approvalItems.length, MOCK_CONFIG, approvalItems),
+        useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, approvalItems.length, MOCK_CONFIG, approvalItems),
       { initialProps: { approvalItems: initialApprovals } }
     );
 
@@ -259,7 +281,7 @@ describe('FR6 (01-data-extensions): useWidgetSync prevWeekSnapshot param', () =>
 
   it('FR6: prevWeekSnapshot forwarded to bridge.updateWidgetData when provided', () => {
     renderHook(() =>
-      useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, 0, MOCK_CONFIG, [], [], MOCK_SNAPSHOT)
+      useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, 0, MOCK_CONFIG, [], [], MOCK_SNAPSHOT)
     );
     expect(mockUpdateWidgetData).toHaveBeenCalledWith(
       MOCK_HOURS_DATA,
@@ -274,7 +296,7 @@ describe('FR6 (01-data-extensions): useWidgetSync prevWeekSnapshot param', () =>
 
   it('FR6: null prevWeekSnapshot forwarded as null', () => {
     renderHook(() =>
-      useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, 0, MOCK_CONFIG, [], [], null)
+      useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, 0, MOCK_CONFIG, [], [], null)
     );
     expect(mockUpdateWidgetData).toHaveBeenCalledWith(
       MOCK_HOURS_DATA,
@@ -289,7 +311,7 @@ describe('FR6 (01-data-extensions): useWidgetSync prevWeekSnapshot param', () =>
 
   it('FR6: existing 5-arg callers still work (backward compat)', () => {
     renderHook(() =>
-      useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, 0, MOCK_CONFIG)
+      useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, 0, MOCK_CONFIG)
     );
     expect(mockUpdateWidgetData).toHaveBeenCalledTimes(1);
   });
@@ -306,7 +328,7 @@ describe('FR6 (01-data-extensions): useWidgetSync prevWeekSnapshot param', () =>
       { snap: typeof snap1 | typeof snap2 }
     >(
       ({ snap }) =>
-        useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, 0, MOCK_CONFIG, stableApprovals, stableRequests, snap),
+        useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, 0, MOCK_CONFIG, stableApprovals, stableRequests, snap),
       { initialProps: { snap: snap1 } }
     );
 

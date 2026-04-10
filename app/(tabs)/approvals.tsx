@@ -57,6 +57,7 @@ export default function ApprovalsScreen() {
 
   const [rejectTarget, setRejectTarget] = useState<ApprovalItem | null>(null)
   const [isApprovingAll, setIsApprovingAll] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const { getEntryStyle } = useStaggeredEntry({ count: 2 })
   const { getItemStyle } = useListCascade({ count: items.length }, [items.length])
@@ -76,8 +77,11 @@ export default function ApprovalsScreen() {
 
   async function handleApproveAll() {
     setIsApprovingAll(true)
+    setActionError(null)
     try {
       await approveAll()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to approve items')
     } finally {
       setIsApprovingAll(false)
     }
@@ -87,10 +91,20 @@ export default function ApprovalsScreen() {
     if (!rejectTarget) return
     const target = rejectTarget
     setRejectTarget(null)
+    setActionError(null)
     try {
       await rejectItem(target, reason)
-    } catch {
-      // Error surfaced via hook's error state
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to reject item')
+    }
+  }
+
+  async function handleApproveItem(item: ApprovalItem) {
+    setActionError(null)
+    try {
+      await approveItem(item)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to approve item')
     }
   }
 
@@ -99,7 +113,7 @@ export default function ApprovalsScreen() {
       <Animated.View style={getItemStyle(index)}>
         <ApprovalCard
           item={item}
-          onApprove={() => approveItem(item)}
+          onApprove={() => handleApproveItem(item)}
           onReject={() => setRejectTarget(item)}
         />
       </Animated.View>
@@ -157,6 +171,16 @@ export default function ApprovalsScreen() {
             <Text className="text-critical text-sm flex-1">{teamError}</Text>
             <AnimatedPressable onPress={teamRefetch}>
               <Text className="text-violet font-sans-semibold text-sm">Retry</Text>
+            </AnimatedPressable>
+          </View>
+        )}
+
+        {/* Action error banner — approve/reject failures */}
+        {actionError && (
+          <View className="flex-row items-center bg-critical/10 px-4 py-2.5 gap-3">
+            <Text className="text-critical text-sm flex-1">{actionError}</Text>
+            <AnimatedPressable onPress={() => setActionError(null)}>
+              <Text className="text-violet font-sans-semibold text-sm">Dismiss</Text>
             </AnimatedPressable>
           </View>
         )}

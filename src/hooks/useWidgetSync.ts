@@ -30,6 +30,7 @@ import type { ManualRequestEntry } from '../types/requests';
 export function useWidgetSync(
   hoursData: HoursData | null,
   aiData: AIWeekData | null,
+  aiIsLoading: boolean,
   pendingCount: number,
   config: CrossoverConfig | null,
   approvalItems?: ApprovalItem[],
@@ -39,6 +40,12 @@ export function useWidgetSync(
   useEffect(() => {
     // Guard: only sync when we have the minimum required data
     if (hoursData === null || config === null) {
+      return;
+    }
+    // Wait for AI data to settle (either loaded or definitively failed/empty)
+    // so the widget isn't written with a null aiData placeholder that persists
+    // if iOS kills the app before the second sync fires.
+    if (aiIsLoading && aiData === null) {
       return;
     }
 
@@ -59,5 +66,5 @@ export function useWidgetSync(
   // prevWeekSnapshot intentionally omitted: history changes don't need independent re-trigger;
   //   hoursData change is sufficient to pick up the latest snapshot value.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hoursData, pendingCount, config, approvalItems, aiData]);
+  }, [hoursData, pendingCount, config, approvalItems, aiData, aiIsLoading]);
 }
