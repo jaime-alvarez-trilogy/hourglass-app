@@ -106,7 +106,9 @@ describe('FR8: Credentials Layer — SecureStore', () => {
   });
 });
 
-// --- FR9: Clear All ---
+// --- FR9 + 05-cache-hygiene FR1: Clear All ---
+// clearAll now uses AsyncStorage.multiRemove with all 14 known keys (atomic, performant).
+// SecureStore credentials are included as raw string literals to avoid import cycles.
 describe('FR9: clearAll', () => {
   it('after clearAll, loadConfig returns null', async () => {
     await saveConfig(sampleConfig);
@@ -122,24 +124,36 @@ describe('FR9: clearAll', () => {
     expect(result).toBeNull();
   });
 
-  it('clearAll calls AsyncStorage.removeItem for crossover_config', async () => {
+  it('clearAll calls AsyncStorage.multiRemove with all 14 keys', async () => {
     await clearAll();
-    expect(mockAsyncStorage.removeItem).toHaveBeenCalledWith('crossover_config');
+    expect(mockAsyncStorage.multiRemove).toHaveBeenCalledTimes(1);
+    const [keys] = (mockAsyncStorage.multiRemove as jest.Mock).mock.calls[0];
+    expect(keys).toHaveLength(14);
+    expect(keys).toContain('crossover_config');
+    expect(keys).toContain('crossover_username');
+    expect(keys).toContain('crossover_password');
   });
 
-  it('clearAll calls SecureStore.deleteItemAsync for crossover_username', async () => {
+  it('clearAll includes all data keys beyond the original 3', async () => {
     await clearAll();
-    expect(mockSecureStore.deleteItemAsync).toHaveBeenCalledWith('crossover_username');
+    const [keys] = (mockAsyncStorage.multiRemove as jest.Mock).mock.calls[0];
+    // Verify the additional 11 keys that were missing in the original clearAll
+    expect(keys).toContain('hours_cache');
+    expect(keys).toContain('ai_cache');
+    expect(keys).toContain('previousWeekAIPercent');
+    expect(keys).toContain('earnings_history_v1');
+    expect(keys).toContain('weekly_history_v2');
+    expect(keys).toContain('push_token');
+    expect(keys).toContain('ai_app_history');
+    expect(keys).toContain('widget_data');
+    expect(keys).toContain('notif_thursday_id');
+    expect(keys).toContain('notif_monday_id');
+    expect(keys).toContain('prev_approval_count');
   });
 
-  it('clearAll calls SecureStore.deleteItemAsync for crossover_password', async () => {
-    await clearAll();
-    expect(mockSecureStore.deleteItemAsync).toHaveBeenCalledWith('crossover_password');
-  });
-
-  it('clearAll propagates errors — does not swallow deletion failures', async () => {
-    const error = new Error('SecureStore delete failed');
-    mockSecureStore.deleteItemAsync.mockRejectedValueOnce(error);
-    await expect(clearAll()).rejects.toThrow('SecureStore delete failed');
+  it('clearAll propagates AsyncStorage.multiRemove errors — does not swallow', async () => {
+    const error = new Error('AsyncStorage multiRemove failed');
+    (mockAsyncStorage.multiRemove as jest.Mock).mockRejectedValueOnce(error);
+    await expect(clearAll()).rejects.toThrow('AsyncStorage multiRemove failed');
   });
 });

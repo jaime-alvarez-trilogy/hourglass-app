@@ -65,24 +65,31 @@ export async function saveCredentials(username: string, password: string): Promi
   ]);
 }
 
-// FR9 + 05-cache-hygiene FR1: Clear all stored data (all 14 known AsyncStorage keys)
-// Raw string literals are used here intentionally — importing constants from hook files
-// would create import cycles (those hooks import from config.ts).
+// FR9 + 05-cache-hygiene FR1: Clear all stored data.
+// AsyncStorage keys: removed via multiRemove (atomic, one call).
+// SecureStore credentials: removed via secureDelete (cross-platform: SecureStore on iOS, AsyncStorage on web).
+// Raw string literals intentionally avoid importing constants from hook files (would create import cycles).
 export async function clearAll(): Promise<void> {
-  await AsyncStorage.multiRemove([
-    'crossover_config',
-    'crossover_username',
-    'crossover_password',
-    'hours_cache',
-    'ai_cache',
-    'previousWeekAIPercent',
-    'earnings_history_v1',
-    'weekly_history_v2',
-    'push_token',
-    'ai_app_history',
-    'widget_data',
-    'notif_thursday_id',
-    'notif_monday_id',
-    'prev_approval_count',
+  await Promise.all([
+    // All AsyncStorage keys (12 data keys + config, plus credential fallback for web)
+    AsyncStorage.multiRemove([
+      'crossover_config',
+      'crossover_username',   // web fallback — on iOS these live in SecureStore below
+      'crossover_password',   // web fallback — on iOS these live in SecureStore below
+      'hours_cache',
+      'ai_cache',
+      'previousWeekAIPercent',
+      'earnings_history_v1',
+      'weekly_history_v2',
+      'push_token',
+      'ai_app_history',
+      'widget_data',
+      'notif_thursday_id',
+      'notif_monday_id',
+      'prev_approval_count',
+    ]),
+    // Credentials stored in SecureStore on iOS (no-op if not available)
+    secureDelete(USERNAME_KEY),
+    secureDelete(PASSWORD_KEY),
   ]);
 }
