@@ -155,18 +155,27 @@ export function useScheduledNotifications(
         const { granted } = await Notifications.getPermissionsAsync();
         if (!granted) return;
 
-        // Read hoursRemaining from the last widget bridge write.
-        // If no widget data exists yet (new install, first open), skip the
-        // Thursday reminder entirely — it will be scheduled once real data loads.
+        // Default to 1 (positive sentinel): assume hours remain when widget data
+        // is not yet available (fresh install, first open before useWidgetSync fires).
+        // This ensures the Thursday deadline notification is always scheduled on week 1.
+        let hoursRemaining = 1;
         const raw = await AsyncStorage.getItem(WIDGET_DATA_KEY);
-        if (!raw) return;
-        const parsed = JSON.parse(raw) as Record<string, unknown>;
-        // hoursRemaining in widget_data is a formatted string ("12.2h left", "2.5h OT").
-        // parseFloat extracts the leading number; NaN (missing/malformed) falls back to 0.
-        const hoursRemainingStr = typeof parsed?.hoursRemaining === 'string' ? parsed.hoursRemaining : '';
-        const hoursRemaining = parseFloat(hoursRemainingStr) || 0;
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw) as Record<string, unknown>;
+            // hoursRemaining in widget_data is a formatted string ("12.2h left", "2.5h OT").
+            // parseFloat extracts the leading number; only override default if valid.
+            const hoursRemainingStr = typeof parsed?.hoursRemaining === 'string' ? parsed.hoursRemaining : '';
+            const hoursFloat = parseFloat(hoursRemainingStr);
+            if (!isNaN(hoursFloat)) hoursRemaining = hoursFloat;
+          } catch {
+            // JSON parse failed — keep hoursRemaining = 1 (schedule notification)
+          }
+        }
 
-        await scheduleThursdayReminder(hoursRemaining, config.weeklyLimit);
+        if (hoursRemaining > 0) {
+          await scheduleThursdayReminder(hoursRemaining, config.weeklyLimit);
+        }
         await scheduleMondaySummary();
       } catch {
         // Silently swallow — notifications are best-effort
