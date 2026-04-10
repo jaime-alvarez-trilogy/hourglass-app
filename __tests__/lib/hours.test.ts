@@ -8,6 +8,7 @@ import {
   getUrgencyLevel,
   formatTimeRemaining,
   getWeekStartDate,
+  getThursdayDeadlineGMT,
 } from '../../src/lib/hours';
 
 // ─── Test Fixtures ────────────────────────────────────────────────────────────
@@ -398,5 +399,145 @@ describe('getWeekStartDate', () => {
     jest.setSystemTime(new Date('2026-03-02T09:00:00.000Z'));
     const result = getWeekStartDate(true);
     expect(result).toBe('2026-03-02');
+  });
+});
+
+// ─── getThursdayDeadlineGMT (FR1: 02-deadline-clock) ─────────────────────────
+//
+// SC1.1 — Monday UTC → this Thursday same week at 23:59:59.999 UTC
+// SC1.2 — Tuesday UTC → this Thursday same week at 23:59:59.999 UTC
+// SC1.3 — Wednesday UTC → this Thursday same week at 23:59:59.999 UTC
+// SC1.4 — Thursday UTC → today at 23:59:59.999 UTC (0 days ahead)
+// SC1.5 — Friday UTC → next Thursday at 23:59:59.999 UTC
+// SC1.6 — Saturday UTC → next Thursday at 23:59:59.999 UTC
+// SC1.7 — Sunday UTC → next Thursday at 23:59:59.999 UTC
+// SC1.8 — Thursday at 23:59:58 → still returns same-day deadline (not next week)
+// SC1.9 — return value always has UTC day === 4 (Thursday)
+// SC1.10 — return value has UTC hours=23, minutes=59, seconds=59
+
+describe('getThursdayDeadlineGMT', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  // Helper: assert the returned date is a Thursday at 23:59:59 UTC
+  function assertThursdayDeadline(result: Date) {
+    expect(result.getUTCDay()).toBe(4); // SC1.9 — Thursday
+    expect(result.getUTCHours()).toBe(23); // SC1.10
+    expect(result.getUTCMinutes()).toBe(59);
+    expect(result.getUTCSeconds()).toBe(59);
+  }
+
+  it('SC1.1 — Monday UTC → Thursday same week (3 days ahead)', () => {
+    // 2026-04-06 is a Monday UTC
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-04-06T12:00:00.000Z'));
+    const result = getThursdayDeadlineGMT();
+    assertThursdayDeadline(result);
+    // 2026-04-09 is Thursday of that week
+    expect(result.getUTCFullYear()).toBe(2026);
+    expect(result.getUTCMonth()).toBe(3); // April = 3
+    expect(result.getUTCDate()).toBe(9);
+  });
+
+  it('SC1.2 — Tuesday UTC → Thursday same week (2 days ahead)', () => {
+    // 2026-04-07 is a Tuesday UTC
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-04-07T09:00:00.000Z'));
+    const result = getThursdayDeadlineGMT();
+    assertThursdayDeadline(result);
+    expect(result.getUTCDate()).toBe(9); // 2026-04-09
+  });
+
+  it('SC1.3 — Wednesday UTC → Thursday same week (1 day ahead)', () => {
+    // 2026-04-08 is a Wednesday UTC
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-04-08T15:00:00.000Z'));
+    const result = getThursdayDeadlineGMT();
+    assertThursdayDeadline(result);
+    expect(result.getUTCDate()).toBe(9); // 2026-04-09
+  });
+
+  it('SC1.4 — Thursday UTC → today at 23:59:59 UTC (0 days ahead)', () => {
+    // 2026-04-09 is a Thursday UTC
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-04-09T08:00:00.000Z'));
+    const result = getThursdayDeadlineGMT();
+    assertThursdayDeadline(result);
+    expect(result.getUTCDate()).toBe(9); // same Thursday
+  });
+
+  it('SC1.5 — Friday UTC → next Thursday (6 days ahead)', () => {
+    // 2026-04-10 is a Friday UTC
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-04-10T12:00:00.000Z'));
+    const result = getThursdayDeadlineGMT();
+    assertThursdayDeadline(result);
+    expect(result.getUTCDate()).toBe(16); // 2026-04-16 (next Thursday)
+  });
+
+  it('SC1.6 — Saturday UTC → next Thursday (5 days ahead)', () => {
+    // 2026-04-11 is a Saturday UTC
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-04-11T10:00:00.000Z'));
+    const result = getThursdayDeadlineGMT();
+    assertThursdayDeadline(result);
+    expect(result.getUTCDate()).toBe(16); // 2026-04-16
+  });
+
+  it('SC1.7 — Sunday UTC → next Thursday (4 days ahead)', () => {
+    // 2026-04-12 is a Sunday UTC
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-04-12T18:00:00.000Z'));
+    const result = getThursdayDeadlineGMT();
+    assertThursdayDeadline(result);
+    expect(result.getUTCDate()).toBe(16); // 2026-04-16
+  });
+
+  it('SC1.8 — Thursday at 23:59:58 → still same-day deadline, not next week', () => {
+    // 2026-04-09 Thursday at 23:59:58 UTC — just 1 second before deadline
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-04-09T23:59:58.000Z'));
+    const result = getThursdayDeadlineGMT();
+    assertThursdayDeadline(result);
+    expect(result.getUTCDate()).toBe(9); // still Apr 9, not Apr 16
+  });
+});
+
+// ─── calculateHours deadline regression (FR2: 02-deadline-clock) ──────────────
+//
+// SC2.1 — When called on Tuesday UTC, HoursData.deadline is a Thursday
+// SC2.2 — HoursData.timeRemaining is positive when called before Thursday 23:59:59 UTC
+// SC2.3 — Return type HoursData shape is unchanged (deadline is a Date)
+
+describe('calculateHours — deadline is Thursday (FR2 regression)', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('SC2.1 — deadline.getUTCDay() === 4 (Thursday) when called on Tuesday', () => {
+    // 2026-04-07 is a Tuesday UTC
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-04-07T12:00:00.000Z'));
+    const result = calculateHours(null, null, 25, 40);
+    expect(result.deadline.getUTCDay()).toBe(4); // Thursday
+  });
+
+  it('SC2.2 — timeRemaining is positive when called before Thursday 23:59:59 UTC', () => {
+    // Monday — Thursday deadline is days away, timeRemaining should be large positive
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-04-06T09:00:00.000Z')); // Monday
+    const result = calculateHours(null, null, 25, 40);
+    expect(result.timeRemaining).toBeGreaterThan(0);
+    // Should be approximately 3 days + some hours in ms
+    expect(result.timeRemaining).toBeGreaterThan(2 * 24 * 60 * 60 * 1000);
+  });
+
+  it('SC2.3 — deadline is a Date instance (HoursData shape unchanged)', () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-04-07T12:00:00.000Z'));
+    const result = calculateHours(null, null, 25, 40);
+    expect(result.deadline).toBeInstanceOf(Date);
+    expect(isNaN(result.deadline.getTime())).toBe(false);
   });
 });
