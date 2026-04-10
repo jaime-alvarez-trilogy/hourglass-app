@@ -252,7 +252,7 @@ export function useAIData(): UseAIDataResult {
       setLastFetchedAt(newLastFetchedAt);
       setIsLoading(false);
 
-      // Fallback: if previousWeekPercent is still undefined (first run / data wipe),
+      // Fallback: if prevWeekPercentRef is still undefined (first run / data wipe),
       // fetch last week's work diary to compute it. Fire-and-forget, silent failure.
       if (prevWeekPercentRef.current === undefined) {
         const prevMonday = addDays(getMondayOfWeek(today), -7);
