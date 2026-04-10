@@ -55,6 +55,29 @@ export function getSundayMidnightGMT(): Date {
   return deadline;
 }
 
+// ─── getThursdayDeadlineGMT ───────────────────────────────────────────────────
+
+/**
+ * Returns Thursday 23:59:59.999 UTC of the current UTC work week.
+ * Mon–Thu: this Thursday. Fri–Sun: next Thursday.
+ *
+ * Mirrors the day-offset logic in computeDeadlineCountdown but returns
+ * a Date object for use in calculateHours.
+ */
+export function getThursdayDeadlineGMT(): Date {
+  const now = new Date();
+  const utcDay = now.getUTCDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  // Thursday = 4. Days until next/current Thursday:
+  // Mon(1)→3, Tue(2)→2, Wed(3)→1, Thu(4)→0, Fri(5)→6, Sat(6)→5, Sun(0)→4
+  const daysUntilThursday = (4 - utcDay + 7) % 7;
+
+  const deadline = new Date(now);
+  deadline.setUTCDate(deadline.getUTCDate() + daysUntilThursday);
+  deadline.setUTCHours(23, 59, 59, 999);
+
+  return deadline;
+}
+
 // ─── getWeekStartDate ─────────────────────────────────────────────────────────
 
 /**
@@ -177,7 +200,7 @@ export function calculateHours(
   hourlyRate: number,
   weeklyLimit: number
 ): HoursData {
-  const deadline = getSundayMidnightGMT();
+  const deadline = getThursdayDeadlineGMT();
   const now = Date.now();
   const timeRemaining = deadline.getTime() - now;
   const limit = weeklyLimit || 40;
