@@ -60,10 +60,15 @@ export async function apiGet<T>(
   useQA: boolean
 ): Promise<T> {
   const url = buildUrl(getApiBase(useQA), path, params);
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: { 'x-auth-token': token },
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'GET',
+      headers: { 'x-auth-token': token },
+    });
+  } catch (err) {
+    throw new NetworkError(err instanceof Error ? err.message : 'Connection failed');
+  }
   if (!response.ok) handleStatus(response.status);
   return response.json() as Promise<T>;
 }
@@ -76,14 +81,19 @@ export async function apiPut<T>(
   useQA: boolean
 ): Promise<T> {
   const base = getApiBase(useQA);
-  const response = await fetch(`${base}${path}`, {
-    method: 'PUT',
-    headers: {
-      'x-auth-token': token,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${base}${path}`, {
+      method: 'PUT',
+      headers: {
+        'x-auth-token': token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    throw new NetworkError(err instanceof Error ? err.message : 'Connection failed');
+  }
   if (!response.ok) handleStatus(response.status);
   return response.json() as Promise<T>;
 }

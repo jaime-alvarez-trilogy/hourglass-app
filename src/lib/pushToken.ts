@@ -30,11 +30,22 @@ export async function registerPushToken(): Promise<void> {
 
   const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
 
-  await fetch(`${PING_SERVER_URL}/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token }),
-  });
+  let registerResponse: Response;
+  try {
+    registerResponse = await fetch(`${PING_SERVER_URL}/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+  } catch (err) {
+    console.warn('[pushToken] Registration error:', err);
+    return;
+  }
+
+  if (!registerResponse.ok) {
+    console.warn('[pushToken] Registration failed:', registerResponse.status);
+    return;
+  }
 
   await AsyncStorage.setItem(PUSH_TOKEN_KEY, token);
 }
@@ -50,11 +61,22 @@ export async function unregisterPushToken(): Promise<void> {
     return;
   }
 
-  await fetch(`${PING_SERVER_URL}/unregister`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token }),
-  });
+  let unregisterResponse: Response;
+  try {
+    unregisterResponse = await fetch(`${PING_SERVER_URL}/unregister`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+  } catch (err) {
+    console.warn('[pushToken] Unregistration error:', err);
+    return;
+  }
+
+  if (!unregisterResponse.ok) {
+    console.warn('[pushToken] Unregistration failed:', unregisterResponse.status);
+    return;
+  }
 
   await AsyncStorage.removeItem(PUSH_TOKEN_KEY);
 }
