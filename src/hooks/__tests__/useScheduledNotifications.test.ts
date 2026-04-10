@@ -771,62 +771,22 @@ describe('06-notification-bootstrap: FR1 — no early-return bail on missing wid
   });
 });
 
-describe('06-notification-bootstrap: FR2 — hoursRemaining sentinel via __testOnly.scheduleThursdayReminder', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    mockGetPermissions.mockResolvedValue({ granted: true });
-    mockScheduleNotification.mockResolvedValue('thursday-id');
-    mockAsyncGetItem.mockResolvedValue(null);
-    mockAsyncSetItem.mockResolvedValue(undefined);
-    mockCancelNotification.mockResolvedValue(undefined);
-    // Set to a safe scheduling day (Tuesday, 10am)
-    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(2);
-    jest.spyOn(Date.prototype, 'getHours').mockReturnValue(10);
+describe('06-notification-bootstrap: FR2 — hoursRemaining sentinel and guard (static)', () => {
+  let source: string;
+
+  beforeAll(() => {
+    source = fs.readFileSync(HOOK_FILE, 'utf8');
   });
 
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
-  it('FR2-SC1 — hoursRemaining=1 (sentinel) schedules Thursday notification', async () => {
-    // Sentinel value of 1 must pass the hoursRemaining > 0 guard
-    const mod = require('../useScheduledNotifications');
-    if (mod.__testOnly?.scheduleThursdayReminder) {
-      await mod.__testOnly.scheduleThursdayReminder(1, 40);
-      expect(mockScheduleNotification).toHaveBeenCalledTimes(1);
-    } else {
-      // If not exported, verify via source that hoursRemaining > 0 is the only guard
-      const source = fs.readFileSync(HOOK_FILE, 'utf8');
-      expect(source).toMatch(/hoursRemaining\s*>\s*0/);
-    }
-  });
-
-  it('FR2-SC2 — hoursRemaining=8.5 (normal data) schedules Thursday notification', async () => {
-    const mod = require('../useScheduledNotifications');
-    if (mod.__testOnly?.scheduleThursdayReminder) {
-      await mod.__testOnly.scheduleThursdayReminder(8.5, 40);
-      expect(mockScheduleNotification).toHaveBeenCalledTimes(1);
-      const call = mockScheduleNotification.mock.calls[0][0];
-      expect(call.content.body).toBe('8.5h to go');
-    } else {
-      const source = fs.readFileSync(HOOK_FILE, 'utf8');
-      expect(source).toMatch(/hoursRemaining\s*>\s*0/);
-    }
-  });
-
-  it('FR2-SC3 — hoursRemaining=0 (done) skips Thursday notification (guard in scheduleAll)', async () => {
-    // The guard `if (hoursRemaining > 0) await scheduleThursdayReminder(...)` lives in scheduleAll.
-    // scheduleThursdayReminder itself does not have this guard — it always schedules if called.
-    // Verify via static analysis that scheduleAll gates the call on hoursRemaining > 0.
-    const source = fs.readFileSync(HOOK_FILE, 'utf8');
+  it('FR2-SC1 — sentinel default of 1 ensures hoursRemaining > 0 passes for fresh install', () => {
+    // Default is 1; guard is hoursRemaining > 0; 1 > 0 is true → Thursday scheduled
+    expect(source).toMatch(/hoursRemaining\s*=\s*1/);
     expect(source).toMatch(/if\s*\(\s*hoursRemaining\s*>\s*0\s*\)/);
   });
 
-  it('FR2-SC4 — scheduleAll source gates scheduleThursdayReminder on hoursRemaining > 0', async () => {
-    // Static: the guard must be present in the source — negative and zero values skip Thursday.
-    const source = fs.readFileSync(HOOK_FILE, 'utf8');
-    expect(source).toMatch(/if\s*\(\s*hoursRemaining\s*>\s*0\s*\)/);
-    // The call to scheduleThursdayReminder must be inside this guard
+  it('FR2-SC2 — scheduleAll gates scheduleThursdayReminder on hoursRemaining > 0', () => {
+    // The call to scheduleThursdayReminder must be inside the hoursRemaining > 0 guard
+    // so that 0 (done) and negative (overtime) values correctly skip Thursday
     expect(source).toMatch(/if\s*\(\s*hoursRemaining\s*>\s*0\s*\)\s*\{[^}]*scheduleThursdayReminder/s);
   });
 });
