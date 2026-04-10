@@ -129,25 +129,40 @@ export function parseManualItems(
 // ---------------------------------------------------------------------------
 
 export function parseOvertimeItems(raw: RawOvertimeResponse[]): OvertimeApprovalItem[] {
-  return raw.map((entry) => {
-    const { overtimeRequest, assignment } = entry
-    const candidate = assignment.selection.marketplaceMember.application.candidate
-    const hours = overtimeRequest.durationMinutes / 60
-    const cost = Math.round(hours * assignment.salary * 100) / 100
-    const weekStartDate = getWeekStartDate(new Date(overtimeRequest.startDateTime))
-    return {
-      id: `ot-${overtimeRequest.id}`,
-      category: 'OVERTIME',
-      overtimeId: overtimeRequest.id,
-      userId: candidate.id,
-      fullName: candidate.printableName,
-      jobTitle: candidate.jobTitle,
-      durationMinutes: overtimeRequest.durationMinutes,
-      hours: hours.toFixed(1),
-      cost,
-      description: overtimeRequest.description,
-      startDateTime: overtimeRequest.startDateTime,
-      weekStartDate,
-    }
-  })
+  return raw
+    .map((entry) => {
+      const { overtimeRequest, assignment } = entry
+
+      if (!overtimeRequest) {
+        console.warn('[parseOvertimeItems] Skipping entry with missing overtimeRequest')
+        return null
+      }
+
+      const candidate = assignment?.selection?.marketplaceMember?.application?.candidate
+
+      if (!candidate) {
+        console.warn('[parseOvertimeItems] Skipping entry with missing candidate:', overtimeRequest?.id)
+        return null
+      }
+
+      const hours = overtimeRequest.durationMinutes / 60
+      const cost = Math.round(hours * (assignment?.salary ?? 0) * 100) / 100
+      const weekStartDate = getWeekStartDate(new Date(overtimeRequest.startDateTime))
+
+      return {
+        id: `ot-${overtimeRequest.id}`,
+        category: 'OVERTIME' as const,
+        overtimeId: overtimeRequest.id,
+        userId: candidate.id,
+        fullName: candidate.printableName,
+        jobTitle: candidate.jobTitle,
+        durationMinutes: overtimeRequest.durationMinutes,
+        hours: hours.toFixed(1),
+        cost,
+        description: overtimeRequest.description,
+        startDateTime: overtimeRequest.startDateTime,
+        weekStartDate,
+      }
+    })
+    .filter((item): item is OvertimeApprovalItem => item !== null)
 }
