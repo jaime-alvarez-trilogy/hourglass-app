@@ -7,7 +7,7 @@
 import { Platform } from 'react-native';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getUrgencyLevel } from '../lib/hours';
+import { getUrgencyLevel, getThursdayDeadlineGMT } from '../lib/hours';
 import type { HoursData, DailyEntry } from '../lib/hours';
 import type { AIWeekData } from '../lib/ai';
 import type { CrossoverConfig } from '../types/config';
@@ -327,7 +327,13 @@ function buildWidgetData(
     };
   }
 
-  const deadlineMs = hoursData.deadline.getTime();
+  // deadline may be a Date, an ISO string (JSON-deserialized from cache), or
+  // undefined (old cache written before the deadline field was added). Handle all three.
+  const deadlineMs = hoursData.deadline instanceof Date
+    ? hoursData.deadline.getTime()
+    : typeof hoursData.deadline === 'string'
+      ? new Date(hoursData.deadline).getTime()
+      : getThursdayDeadlineGMT().getTime();
   const urgency: WidgetUrgency = getUrgencyLevel(deadlineMs - now);
 
   // pendingCount is derived from approvalItems, not the passed-in parameter
