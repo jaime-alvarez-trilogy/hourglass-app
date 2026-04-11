@@ -87,8 +87,26 @@ export async function fetchFreshData(): Promise<CrossoverSnapshot> {
     fetchPayments(config, token).catch(() => null),
   ]);
 
-  // 6. Compute hours (handles null inputs — returns zero-state)
-  const hoursData = calculateHours(timesheetData, paymentsData, config.hourlyRate, config.weeklyLimit);
+  // 6. Compute hours — fall back to hours_cache if timesheet API failed.
+  // Without this, a network blip during background refresh overwrites the widget
+  // with zeros (calculateHours returns zero-state for null inputs), erasing the
+  // last known good values that would otherwise display correctly.
+  let hoursData: HoursData;
+  if (timesheetData !== null) {
+    hoursData = calculateHours(timesheetData, paymentsData, config.hourlyRate, config.weeklyLimit);
+  } else {
+    // Timesheet fetch failed — try to preserve the last known hours before writing zeros
+    let cachedHours: HoursData | null = null;
+    try {
+      const raw = await AsyncStorage.getItem('hours_cache');
+      if (raw) {
+        cachedHours = (JSON.parse(raw) as { data: HoursData }).data;
+      }
+    } catch {
+      // Corrupt cache — fall through to zero-state
+    }
+    hoursData = cachedHours ?? calculateHours(null, paymentsData, config.hourlyRate, config.weeklyLimit);
+  }
 
   // 7. AI data: read existing cache + fetch today fresh
   const today = getTodayLocal();
@@ -124,6 +142,10 @@ export async function fetchFreshData(): Promise<CrossoverSnapshot> {
     const todayTags = countDiaryTags(slots);
     const mergedCache: Record<string, TagData> = { ...existingCache, [today]: todayTags };
     aiData = aggregateAICache(mergedCache, today);
+  } else if (Object.keys(existingCache).length > 0) {
+    // Today's work diary fetch failed — compute AI% from cached days (Mon–yesterday).
+    // Avoids writing N/A to the widget when we have partial-week data in ai_cache.
+    aiData = aggregateAICache(existingCache, today);
   }
 
   // 8. Approval count (manager only)

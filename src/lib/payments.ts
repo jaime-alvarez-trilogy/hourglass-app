@@ -5,12 +5,15 @@
 // when called with a date range (from/to spanning multiple weeks).
 
 export interface Payment {
-  amount: number;           // Total payment amount for the period
-  periodStartDate: string;  // YYYY-MM-DD Monday (week start)
-  periodEndDate: string;    // YYYY-MM-DD Sunday (week end)
-  paidHours: number;        // "Payment hours" — hours paid for (capped at weekly limit unless approved OT)
-  workedHours: number;      // Uncapped total hours worked (logged + manual); "Actual Overtime" = workedHours - paidHours
-  status: string;           // "CURRENT" | "PENDING" | "PAID" etc.
+  amount: number;                    // Total payment amount for the period
+  periodStartDate: string;           // YYYY-MM-DD Monday (week start)
+  periodEndDate: string;             // YYYY-MM-DD Sunday (week end)
+  paidHours: number;                 // "Payment hours" — source of truth for total hours (regular + approved OT)
+  workedHours: number;               // Raw tracked hours (auto + manual, uncapped)
+  overtimeHours: number;             // Actual OT worked this week (hours beyond weekly limit)
+  approvedOvertimeHours: number;     // OT authorized for this week (may not be fully worked)
+  manualMinutes: number;             // Manual/logbook minutes included in paidHours
+  status: string;                    // "CURRENT" | "PENDING" | "PROCESSED" etc.
 }
 
 /**

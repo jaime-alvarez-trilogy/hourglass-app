@@ -87,6 +87,7 @@ export async function clearAll(): Promise<void> {
       'notif_thursday_id',
       'notif_monday_id',
       'prev_approval_count',
+      'HOURGLASS_QUERY_CACHE',  // TanStack Query persisted cache
     ]),
     // Credentials stored in SecureStore on iOS (no-op if not available)
     secureDelete(USERNAME_KEY),

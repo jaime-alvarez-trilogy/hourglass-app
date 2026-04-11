@@ -101,7 +101,7 @@ export interface UseAIDataResult {
 }
 
 export function useAIData(): UseAIDataResult {
-  const { config } = useConfig();
+  const { config, isLoading: configLoading } = useConfig();
   const [data, setData] = useState<AIWeekData | null>(null);
   const [isLoading, setIsLoading] = useState(true); // true until first fetch completes or fails
   const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(null);
@@ -340,11 +340,13 @@ export function useAIData(): UseAIDataResult {
   useEffect(() => {
     if (config) {
       void fetchData();
-    } else {
-      setIsLoading(false); // no config — nothing to fetch
+    } else if (!configLoading) {
+      setIsLoading(false); // config query settled with no result — user not signed in
     }
+    // While configLoading is true, keep isLoading=true so the spinner stays up
+    // and the widget sync guard (aiIsLoading && aiData===null) blocks premature null writes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config?.assignmentId]);
+  }, [config?.assignmentId, configLoading]);
 
   const refetch = useCallback(() => {
     void fetchData(true);

@@ -134,10 +134,8 @@ export function useEarningsHistory(
       const weekFrom = p.periodStartDate.slice(0, 10);
       weeks[weekFrom] = (weeks[weekFrom] ?? 0) + p.amount;
       hoursMap[weekFrom] = (hoursMap[weekFrom] ?? 0) + p.paidHours;
-      // actualOvertime = workedHours - paidHours: workedHours is the uncapped total,
-      // paidHours is capped at the weekly limit. Their difference is exactly the
-      // "Actual Overtime" column shown on the Crossover payments dashboard.
-      overtimeMap[weekFrom] = (overtimeMap[weekFrom] ?? 0) + Math.max(0, (p.workedHours ?? 0) - p.paidHours);
+      // overtimeHours is the direct API field — no math needed.
+      overtimeMap[weekFrom] = (overtimeMap[weekFrom] ?? 0) + (p.overtimeHours ?? 0);
     }
 
     // Merge with existing persisted data (keep weeks not in this API response)

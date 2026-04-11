@@ -51,14 +51,22 @@ describe('calculateHours', () => {
     jest.useRealTimers();
   });
 
-  it('returns payments.workedHours when > 0 (prefers payments over timesheet)', () => {
+  it('returns payments.paidHours when > 0 (matches Crossover "payment hours")', () => {
+    // paidHours = auto-tracked + approved manual — what Crossover shows as "payment hours"
     const ts = makeTimesheet({ totalHours: 10 });
-    const pay = makePayments({ workedHours: 35 });
+    const pay = makePayments({ paidHours: 33 });
+    const result = calculateHours(ts, pay, HOURLY_RATE, WEEKLY_LIMIT);
+    expect(result.total).toBe(33);
+  });
+
+  it('falls back to workedHours when paidHours === 0', () => {
+    const ts = makeTimesheet({ totalHours: 10 });
+    const pay = makePayments({ paidHours: 0, workedHours: 35 });
     const result = calculateHours(ts, pay, HOURLY_RATE, WEEKLY_LIMIT);
     expect(result.total).toBe(35);
   });
 
-  it('falls back to timesheet.totalHours when workedHours === 0', () => {
+  it('falls back to timesheet.totalHours when both paidHours and workedHours === 0', () => {
     const ts = makeTimesheet({ totalHours: 28 });
     const pay = makePayments({ paidHours: 0, workedHours: 0 });
     const result = calculateHours(ts, pay, HOURLY_RATE, WEEKLY_LIMIT);
@@ -77,18 +85,13 @@ describe('calculateHours', () => {
     expect(result.total).toBe(0);
   });
 
-  it('uses payments.amount for weeklyEarnings when > 0', () => {
-    const ts = makeTimesheet();
-    const pay = makePayments({ amount: 750 });
-    const result = calculateHours(ts, pay, HOURLY_RATE, WEEKLY_LIMIT);
-    expect(result.weeklyEarnings).toBe(750);
-  });
-
-  it('falls back to total * hourlyRate when payments.amount === 0', () => {
+  it('derives weeklyEarnings from total * hourlyRate (mathematically consistent with hero hours)', () => {
+    // payments.amount (paidHours × rate) is ignored — weeklyEarnings = workedHours × rate
+    // so the earnings card always matches the hero: e.g. 20h shown → $20×rate shown
     const ts = makeTimesheet({ totalHours: 20 });
-    const pay = makePayments({ paidHours: 0, amount: 0 });
+    const pay = makePayments({ workedHours: 20, amount: 750 });
     const result = calculateHours(ts, pay, HOURLY_RATE, WEEKLY_LIMIT);
-    expect(result.weeklyEarnings).toBe(20 * HOURLY_RATE);
+    expect(result.weeklyEarnings).toBe(20 * HOURLY_RATE); // 20 * 25 = 500
   });
 
   it('computes todayEarnings = today * hourlyRate', () => {

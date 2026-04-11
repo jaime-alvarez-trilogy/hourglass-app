@@ -27,6 +27,7 @@ export interface HoursData {
 export interface TimesheetResponse {
   totalHours?: number;
   hourWorked?: number;
+  manualHourWorked?: number | string; // manual/logbook hours (includes pending entries)
   averageHoursPerDay: number;
   stats?: Array<{ date: string; hours: number }>;
 }
@@ -34,6 +35,9 @@ export interface TimesheetResponse {
 export interface PaymentsResponse {
   paidHours: number;
   workedHours: number;
+  overtimeHours: number;
+  approvedOvertimeHours: number;
+  manualMinutes: number;
   amount: number;
 }
 
@@ -190,8 +194,9 @@ export function getWeekLabels(count: number): string[] {
  * Pure function — no side effects, fully testable.
  *
  * Priority rules:
- * - total: payments.paidHours > 0 → use it; else timesheet.totalHours/hourWorked
- * - weeklyEarnings: payments.amount > 0 → use it; else total * hourlyRate
+ * - total: payments.workedHours when > 0 (includes auto-tracked + manual/logbook hours);
+ *          falls back to timesheet.totalHours/hourWorked (auto-tracked only)
+ * - weeklyEarnings: total * hourlyRate (derived from displayed hours for consistency)
  * - today: matched by local YYYY-MM-DD date string from stats array
  */
 export function calculateHours(
@@ -228,13 +233,17 @@ export function calculateHours(
   const averageHours = parseFloat(String(timesheetData.averageHoursPerDay ?? 0));
   const stats = timesheetData.stats ?? [];
 
-  // For hours display and panel state, prefer payments.workedHours (actual hours tracked,
-  // uncapped). payments.paidHours is capped at weeklyLimit so it hides overtime.
-  // Fall back to timesheetTotal if workedHours is absent.
+  // Crossover's "payment hours" on the earnings page = paidHours.
+  // It includes auto-tracked + approved manual time, and matches what the user
+  // expects to see as their hours for the week.
+  // workedHours is auto-tracked only (lower number, doesn't include approved manual).
+  // Fall back chain: paidHours → workedHours → timesheetTotal (auto-tracked only)
   const total =
-    paymentsData && paymentsData.workedHours > 0
-      ? paymentsData.workedHours
-      : timesheetTotal;
+    paymentsData && paymentsData.paidHours > 0
+      ? paymentsData.paidHours
+      : paymentsData && paymentsData.workedHours > 0
+        ? paymentsData.workedHours
+        : timesheetTotal;
 
   // Today's hours by local date string match
   const todayLocal = (() => {
@@ -256,11 +265,11 @@ export function calculateHours(
     isToday: s.date.startsWith(todayLocal),
   }));
 
-  // Earnings
-  const weeklyEarnings =
-    paymentsData && paymentsData.amount > 0
-      ? paymentsData.amount
-      : total * hourlyRate;
+  // Earnings always derived from displayed hours × rate for internal consistency.
+  // The payments API amount (paidHours × rate) is finalized data used in the historical
+  // sparkline (useEarningsHistory), not here. Using total × hourlyRate ensures
+  // the hero number and earnings card are always mathematically consistent.
+  const weeklyEarnings = total * hourlyRate;
   const todayEarnings = todayHours * hourlyRate;
 
   // Remaining / overtime
