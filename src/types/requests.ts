@@ -30,7 +30,7 @@ export interface ManualRequestEntry {
  * Return type of the useMyRequests hook.
  */
 export interface UseMyRequestsResult {
-  /** Manual time request entries for the current week, sorted by date descending */
+  /** Manual time request entries for the current and 2 prior weeks, sorted by date descending */
   entries: ManualRequestEntry[];
   isLoading: boolean;
   /** 'auth' for 401/403 errors, 'network' for connectivity errors, null if ok */

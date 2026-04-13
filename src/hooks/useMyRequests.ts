@@ -73,9 +73,13 @@ export function buildMyRequestsQueryFn(
 
     const { assignmentId, useQA } = config;
 
-    // Build date range: Monday of current week through today
-    const monday = getWeekStartDate(new Date(today + 'T12:00:00'));
-    const dates = dateRange(monday, today);
+    // Build date range: 2 Mondays ago through today
+    // Noon anchor (T12:00:00) avoids DST boundary edge cases
+    const currentMonday = getWeekStartDate(new Date(today + 'T12:00:00'));
+    const d2 = new Date(currentMonday + 'T12:00:00');
+    d2.setDate(d2.getDate() - 14);
+    const prevMonday2 = getWeekStartDate(d2);
+    const dates = dateRange(prevMonday2, today);
 
     // Fetch all days in parallel, tolerating individual failures
     const settled = await Promise.allSettled(
