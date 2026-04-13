@@ -34,8 +34,85 @@ import { useListCascade } from '@/src/hooks/useListCascade'
 import { AnimatedPressable } from '@/src/components/AnimatedPressable'
 import AnimatedMeshBackground from '@/src/components/AnimatedMeshBackground'
 import { colors } from '@/src/lib/colors'
+import { getWeekStartDate } from '@/src/lib/approvals'
 import type { ApprovalItem } from '@/src/lib/approvals'
+import type { ManualRequestEntry } from '@/src/types/requests'
 import type { PanelState } from '@/src/lib/panelState'
+
+// ─── Team Queue row type (FR1: 01-manager-history) ───────────────────────────
+// Injected into the Team Requests FlatList to group items by week without
+// migrating to SectionList.
+
+export type TeamQueueRow =
+  | { type: 'header'; label: 'This Week' | 'Last Week' | '2 Weeks Ago' }
+  | { type: 'item'; item: ApprovalItem; showUrgency: boolean }
+
+// buildTeamQueueRows: accepts items pre-sorted descending by startDateTime.
+// isUrgencyWindow: true when it's Monday before 15:00 UTC — caller computes this
+// so the function stays pure and easily testable.
+export function buildTeamQueueRows(
+  items: ApprovalItem[],
+  currentMonday: string,
+  prevMonday1: string,
+  prevMonday2: string,
+  isUrgencyWindow: boolean,
+): TeamQueueRow[] {
+  const rows: TeamQueueRow[] = []
+
+  const weekGroups: Array<{ key: string; label: 'This Week' | 'Last Week' | '2 Weeks Ago' }> = [
+    { key: currentMonday, label: 'This Week' },
+    { key: prevMonday1, label: 'Last Week' },
+    { key: prevMonday2, label: '2 Weeks Ago' },
+  ]
+
+  for (const { key, label } of weekGroups) {
+    const weekItems = items.filter((i) => i.weekStartDate === key)
+    if (weekItems.length === 0) continue
+    rows.push({ type: 'header', label })
+    for (const item of weekItems) {
+      rows.push({
+        type: 'item',
+        item,
+        showUrgency: isUrgencyWindow && item.weekStartDate === prevMonday2,
+      })
+    }
+  }
+
+  return rows
+}
+
+// ─── My Requests section helpers ─────────────────────────────────────────────
+
+type MyRequestRow =
+  | { type: 'header'; label: 'This Week' | 'Last Week' | '2 Weeks Ago' }
+  | { type: 'entry'; entry: ManualRequestEntry }
+
+function buildMyRequestRows(
+  entries: ManualRequestEntry[],
+  currentMonday: string,
+  prevMonday1: string,
+): MyRequestRow[] {
+  const rows: MyRequestRow[] = []
+
+  const thisWeek = entries.filter((e) => e.date >= currentMonday)
+  const lastWeek = entries.filter((e) => e.date >= prevMonday1 && e.date < currentMonday)
+  const twoWeeksAgo = entries.filter((e) => e.date < prevMonday1)
+
+  if (thisWeek.length > 0) {
+    rows.push({ type: 'header', label: 'This Week' })
+    thisWeek.forEach((entry) => rows.push({ type: 'entry', entry }))
+  }
+  if (lastWeek.length > 0) {
+    rows.push({ type: 'header', label: 'Last Week' })
+    lastWeek.forEach((entry) => rows.push({ type: 'entry', entry }))
+  }
+  if (twoWeeksAgo.length > 0) {
+    rows.push({ type: 'header', label: '2 Weeks Ago' })
+    twoWeeksAgo.forEach((entry) => rows.push({ type: 'entry', entry }))
+  }
+
+  return rows
+}
 
 export default function ApprovalsScreen() {
   const { config } = useConfig()
@@ -108,14 +185,26 @@ export default function ApprovalsScreen() {
     }
   }
 
-  function renderApprovalItem({ item, index }: { item: ApprovalItem; index: number }) {
+  function renderTeamQueueRow({ item: row, index }: { item: TeamQueueRow; index: number }) {
+    if (row.type === 'header') {
+      return (
+        <SectionLabel className="px-4 mt-3 mb-1">{row.label}</SectionLabel>
+      )
+    }
     return (
       <Animated.View style={getItemStyle(index)}>
         <ApprovalCard
-          item={item}
-          onApprove={() => handleApproveItem(item)}
-          onReject={() => setRejectTarget(item)}
+          item={row.item}
+          onApprove={() => handleApproveItem(row.item)}
+          onReject={() => setRejectTarget(row.item)}
         />
+        {row.showUrgency && (
+          <View className="px-4 -mt-1 mb-2">
+            <Text className="text-warning text-xs font-sans-semibold text-center">
+              Expires today 3pm UTC
+            </Text>
+          </View>
+        )}
       </Animated.View>
     )
   }
@@ -124,6 +213,23 @@ export default function ApprovalsScreen() {
 
   const showTeamSkeletons = isManager && teamLoading && items.length === 0
   const showMySkeletons = myLoading && entries.length === 0
+
+  // ─── Week boundaries (shared by Team Requests and My Requests) ──────────────
+
+  const currentMonday = getWeekStartDate()
+  const d1 = new Date(currentMonday + 'T12:00:00')
+  d1.setDate(d1.getDate() - 7)
+  const prevMonday1 = getWeekStartDate(d1)
+  const d2 = new Date(currentMonday + 'T12:00:00')
+  d2.setDate(d2.getDate() - 14)
+  const prevMonday2 = getWeekStartDate(d2)
+
+  // Urgency window: Monday before 15:00 UTC — items from prevMonday2 expire then
+  const _now = new Date()
+  const isUrgencyWindow = _now.getUTCDay() === 1 && _now.getUTCHours() < 15
+
+  const teamQueueRows = buildTeamQueueRows(items, currentMonday, prevMonday1, prevMonday2, isUrgencyWindow)
+  const myRequestRows = buildMyRequestRows(entries, currentMonday, prevMonday1)
 
   // ─── Mesh background signal ─────────────────────────────────────────────────
   // critical (coral glow) when manager has pending approvals; null (idle) otherwise.
@@ -220,9 +326,11 @@ export default function ApprovalsScreen() {
                 </View>
               ) : (
                 <FlatList
-                  data={items}
-                  keyExtractor={(item) => item.id}
-                  renderItem={renderApprovalItem}
+                  data={teamQueueRows}
+                  keyExtractor={(row) =>
+                    row.type === 'header' ? `header-${row.label}` : row.item.id
+                  }
+                  renderItem={renderTeamQueueRow}
                   scrollEnabled={false}
                   contentContainerStyle={{ paddingBottom: 8 }}
                 />
@@ -254,18 +362,24 @@ export default function ApprovalsScreen() {
                 <SkeletonLoader className="h-16 rounded-2xl" />
               </View>
             ) : entries.length === 0 ? (
-              /* FR4: Empty own requests */
+              /* FR4: Empty own requests — spans 3 weeks now */
               <View className="px-4">
                 <Card>
                   <Text className="text-textSecondary text-sm text-center">
-                    No requests this week
+                    No requests yet
                   </Text>
                 </Card>
               </View>
             ) : (
-              entries.map((entry) => (
-                <MyRequestCard key={entry.id} entry={entry} />
-              ))
+              myRequestRows.map((row, index) =>
+                row.type === 'header' ? (
+                  <SectionLabel key={`header-${row.label}-${index}`} className="px-4 mt-3 mb-1">
+                    {row.label}
+                  </SectionLabel>
+                ) : (
+                  <MyRequestCard key={row.entry.id} entry={row.entry} />
+                )
+              )
             )}
           </Animated.View>
         </ScrollView>

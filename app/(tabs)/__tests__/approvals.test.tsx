@@ -439,12 +439,12 @@ describe('ApprovalsScreen — pull-to-refresh (SC3.5)', () => {
 
 describe('ApprovalsScreen — empty states (FR4)', () => {
   // SC4.1 — Contributor with empty entries
-  it('SC4.1 — contributor with no entries: shows "No requests this week"', () => {
+  it('SC4.1 — contributor with no entries: shows "No requests yet"', () => {
     setupMocks({ isManager: false, entries: [] });
     let tree: any;
     act(() => { tree = create(React.createElement(ApprovalsScreen)); });
     const text = JSON.stringify(tree.toJSON());
-    expect(text).toContain('No requests this week');
+    expect(text).toContain('No requests yet');
   });
 
   // SC4.2 — Manager with empty team queue shows "All caught up"
@@ -457,21 +457,21 @@ describe('ApprovalsScreen — empty states (FR4)', () => {
   });
 
   // SC4.3 — Manager with empty own requests
-  it('SC4.3 — manager with empty own requests: shows "No requests this week" in MY REQUESTS', () => {
+  it('SC4.3 — manager with empty own requests: shows "No requests yet" in MY REQUESTS', () => {
     setupMocks({ isManager: true, entries: [], items: [MOCK_APPROVAL_ITEM] });
     let tree: any;
     act(() => { tree = create(React.createElement(ApprovalsScreen)); });
     const text = JSON.stringify(tree.toJSON());
-    expect(text).toContain('No requests this week');
+    expect(text).toContain('No requests yet');
   });
 
   // SC4.4 — Manager with both empty: both empty states render independently
-  it('SC4.4 — manager with both empty: both "All caught up" and "No requests this week" present', () => {
+  it('SC4.4 — manager with both empty: both "All caught up" and "No requests yet" present', () => {
     setupMocks({ isManager: true, entries: [], items: [] });
     let tree: any;
     act(() => { tree = create(React.createElement(ApprovalsScreen)); });
     const text = JSON.stringify(tree.toJSON());
     expect(text).toContain('All caught up');
-    expect(text).toContain('No requests this week');
+    expect(text).toContain('No requests yet');
   });
 });
