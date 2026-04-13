@@ -929,3 +929,249 @@ describe('06-notification-bootstrap: FR3 — Monday summary always fires when pe
     expect(grantedIdx).toBeLessThan(summaryCallIdx);
   });
 });
+
+// ── FR4: scheduleMondayExpiryReminder ─────────────────────────────────────────
+//
+// Manager-only Monday 9am notification: warns that pending approvals expire
+// at 15:00 UTC today. Only fires on Mondays before the 15:00 UTC cutoff.
+// Reads pendingCount from widget_data; skips if zero or data unavailable.
+
+describe('FR4: scheduleMondayExpiryReminder — expiry notification for managers', () => {
+  const makeWidgetData = (pendingCount: number) =>
+    JSON.stringify({ hoursRemaining: '12.0h left', pendingCount });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockScheduleNotification.mockResolvedValue('new-expiry-id');
+    mockAsyncGetItem.mockResolvedValue(null);
+    mockAsyncSetItem.mockResolvedValue(undefined);
+    mockCancelNotification.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  // ── Schedule cases ────────────────────────────────────────────────────────
+
+  it('SC4.1 — Monday 14:00 UTC, isManager=true, pendingCount=3 → schedules with plural body', async () => {
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(1);  // Monday
+    jest.spyOn(Date.prototype, 'getUTCHours').mockReturnValue(14);
+    mockAsyncGetItem.mockImplementation((key: string) => {
+      if (key === 'widget_data') return Promise.resolve(makeWidgetData(3));
+      return Promise.resolve(null);
+    });
+
+    const mod = require('../useScheduledNotifications');
+    await mod.__testOnly.scheduleMondayExpiryReminder(true);
+
+    expect(mockScheduleNotification).toHaveBeenCalledTimes(1);
+    const call = mockScheduleNotification.mock.calls[0][0];
+    expect(call.content.title).toBe('Approvals Expiring Today');
+    expect(call.content.body).toBe('3 pending approvals — must be reviewed by 3pm UTC');
+  });
+
+  it('SC4.2 — Monday 14:00 UTC, isManager=true, pendingCount=1 → singular "1 pending approval"', async () => {
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(1);
+    jest.spyOn(Date.prototype, 'getUTCHours').mockReturnValue(14);
+    mockAsyncGetItem.mockImplementation((key: string) => {
+      if (key === 'widget_data') return Promise.resolve(makeWidgetData(1));
+      return Promise.resolve(null);
+    });
+
+    const mod = require('../useScheduledNotifications');
+    await mod.__testOnly.scheduleMondayExpiryReminder(true);
+
+    expect(mockScheduleNotification).toHaveBeenCalledTimes(1);
+    const call = mockScheduleNotification.mock.calls[0][0];
+    expect(call.content.body).toBe('1 pending approval — must be reviewed by 3pm UTC');
+  });
+
+  it('SC4.3 — Monday 14:00 UTC, isManager=true, pendingCount=0 → NOT called', async () => {
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(1);
+    jest.spyOn(Date.prototype, 'getUTCHours').mockReturnValue(14);
+    mockAsyncGetItem.mockImplementation((key: string) => {
+      if (key === 'widget_data') return Promise.resolve(makeWidgetData(0));
+      return Promise.resolve(null);
+    });
+
+    const mod = require('../useScheduledNotifications');
+    await mod.__testOnly.scheduleMondayExpiryReminder(true);
+
+    expect(mockScheduleNotification).not.toHaveBeenCalled();
+  });
+
+  it('SC4.4 — non-Monday (Tuesday), pendingCount=5 → NOT called', async () => {
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(2);  // Tuesday
+    jest.spyOn(Date.prototype, 'getUTCHours').mockReturnValue(14);
+    mockAsyncGetItem.mockImplementation((key: string) => {
+      if (key === 'widget_data') return Promise.resolve(makeWidgetData(5));
+      return Promise.resolve(null);
+    });
+
+    const mod = require('../useScheduledNotifications');
+    await mod.__testOnly.scheduleMondayExpiryReminder(true);
+
+    expect(mockScheduleNotification).not.toHaveBeenCalled();
+  });
+
+  it('SC4.5 — Monday 15:00 UTC (deadline passed), pendingCount=3 → NOT called', async () => {
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(1);  // Monday
+    jest.spyOn(Date.prototype, 'getUTCHours').mockReturnValue(15);
+    mockAsyncGetItem.mockImplementation((key: string) => {
+      if (key === 'widget_data') return Promise.resolve(makeWidgetData(3));
+      return Promise.resolve(null);
+    });
+
+    const mod = require('../useScheduledNotifications');
+    await mod.__testOnly.scheduleMondayExpiryReminder(true);
+
+    expect(mockScheduleNotification).not.toHaveBeenCalled();
+  });
+
+  it('SC4.6 — isManager=false, Monday 14:00 UTC, pendingCount=3 → NOT called', async () => {
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(1);
+    jest.spyOn(Date.prototype, 'getUTCHours').mockReturnValue(14);
+    mockAsyncGetItem.mockImplementation((key: string) => {
+      if (key === 'widget_data') return Promise.resolve(makeWidgetData(3));
+      return Promise.resolve(null);
+    });
+
+    const mod = require('../useScheduledNotifications');
+    await mod.__testOnly.scheduleMondayExpiryReminder(false);
+
+    expect(mockScheduleNotification).not.toHaveBeenCalled();
+  });
+
+  // ── Cancel + reschedule ───────────────────────────────────────────────────
+
+  it('SC4.7 — existing notif_expiry_id → cancelScheduledNotificationAsync called before new schedule', async () => {
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(1);
+    jest.spyOn(Date.prototype, 'getUTCHours').mockReturnValue(14);
+    mockAsyncGetItem.mockImplementation((key: string) => {
+      if (key === 'widget_data') return Promise.resolve(makeWidgetData(2));
+      if (key === 'notif_expiry_id') return Promise.resolve('old-expiry-id');
+      return Promise.resolve(null);
+    });
+
+    const mod = require('../useScheduledNotifications');
+    await mod.__testOnly.scheduleMondayExpiryReminder(true);
+
+    expect(mockCancelNotification).toHaveBeenCalledWith('old-expiry-id');
+    expect(mockScheduleNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('SC4.8 — no existing notif_expiry_id → cancelScheduledNotificationAsync NOT called', async () => {
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(1);
+    jest.spyOn(Date.prototype, 'getUTCHours').mockReturnValue(14);
+    mockAsyncGetItem.mockImplementation((key: string) => {
+      if (key === 'widget_data') return Promise.resolve(makeWidgetData(2));
+      return Promise.resolve(null);  // no existing ID
+    });
+
+    const mod = require('../useScheduledNotifications');
+    await mod.__testOnly.scheduleMondayExpiryReminder(true);
+
+    expect(mockCancelNotification).not.toHaveBeenCalled();
+    expect(mockScheduleNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('SC4.9 — saves new notification ID to AsyncStorage notif_expiry_id', async () => {
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(1);
+    jest.spyOn(Date.prototype, 'getUTCHours').mockReturnValue(14);
+    mockAsyncGetItem.mockImplementation((key: string) => {
+      if (key === 'widget_data') return Promise.resolve(makeWidgetData(4));
+      return Promise.resolve(null);
+    });
+    mockScheduleNotification.mockResolvedValue('fresh-expiry-id');
+
+    const mod = require('../useScheduledNotifications');
+    await mod.__testOnly.scheduleMondayExpiryReminder(true);
+
+    expect(mockAsyncSetItem).toHaveBeenCalledWith('notif_expiry_id', 'fresh-expiry-id');
+  });
+
+  // ── Widget data edge cases ────────────────────────────────────────────────
+
+  it('SC4.10 — widget_data absent → skip notification, no crash', async () => {
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(1);
+    jest.spyOn(Date.prototype, 'getUTCHours').mockReturnValue(14);
+    mockAsyncGetItem.mockResolvedValue(null);  // nothing in storage
+
+    const mod = require('../useScheduledNotifications');
+    await expect(mod.__testOnly.scheduleMondayExpiryReminder(true)).resolves.toBeUndefined();
+
+    expect(mockScheduleNotification).not.toHaveBeenCalled();
+  });
+
+  it('SC4.11 — widget_data JSON parse fails → skip notification, no crash', async () => {
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(1);
+    jest.spyOn(Date.prototype, 'getUTCHours').mockReturnValue(14);
+    mockAsyncGetItem.mockImplementation((key: string) => {
+      if (key === 'widget_data') return Promise.resolve('not valid json {{{');
+      return Promise.resolve(null);
+    });
+
+    const mod = require('../useScheduledNotifications');
+    await expect(mod.__testOnly.scheduleMondayExpiryReminder(true)).resolves.toBeUndefined();
+
+    expect(mockScheduleNotification).not.toHaveBeenCalled();
+  });
+
+  it('SC4.12 — widget_data has no pendingCount field → skip notification', async () => {
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(1);
+    jest.spyOn(Date.prototype, 'getUTCHours').mockReturnValue(14);
+    mockAsyncGetItem.mockImplementation((key: string) => {
+      if (key === 'widget_data') return Promise.resolve(JSON.stringify({ hoursRemaining: '10.0h left' }));
+      return Promise.resolve(null);
+    });
+
+    const mod = require('../useScheduledNotifications');
+    await mod.__testOnly.scheduleMondayExpiryReminder(true);
+
+    expect(mockScheduleNotification).not.toHaveBeenCalled();
+  });
+
+  // ── Trigger shape ─────────────────────────────────────────────────────────
+
+  it('SC4.13 — trigger has weekday: 2, hour: 9, minute: 0, repeats: false', async () => {
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(1);
+    jest.spyOn(Date.prototype, 'getUTCHours').mockReturnValue(14);
+    mockAsyncGetItem.mockImplementation((key: string) => {
+      if (key === 'widget_data') return Promise.resolve(makeWidgetData(2));
+      return Promise.resolve(null);
+    });
+
+    const mod = require('../useScheduledNotifications');
+    await mod.__testOnly.scheduleMondayExpiryReminder(true);
+
+    expect(mockScheduleNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trigger: expect.objectContaining({
+          weekday: 2,
+          hour: 9,
+          minute: 0,
+          repeats: false,
+        }),
+      }),
+    );
+  });
+
+  // ── Static analysis ───────────────────────────────────────────────────────
+
+  it('SC4.14 — source exports scheduleMondayExpiryReminder in __testOnly', () => {
+    const source = fs.readFileSync(HOOK_FILE, 'utf8');
+    expect(source).toContain('scheduleMondayExpiryReminder');
+    expect(source).toMatch(/__testOnly\s*=\s*\{[^}]*scheduleMondayExpiryReminder/s);
+  });
+
+  it('SC4.15 — source stores expiry notification id as notif_expiry_id', () => {
+    const source = fs.readFileSync(HOOK_FILE, 'utf8');
+    expect(source).toContain("'notif_expiry_id'");
+  });
+
+  it('SC4.16 — source calls scheduleMondayExpiryReminder from scheduleAll', () => {
+    const source = fs.readFileSync(HOOK_FILE, 'utf8');
+    expect(source).toContain('await scheduleMondayExpiryReminder(');
+  });
+});
