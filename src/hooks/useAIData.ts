@@ -7,6 +7,7 @@
 // On each successful fetch on Monday, writes the midpoint AI% as the new previous week value.
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useConfig } from './useConfig';
 import { loadCredentials } from '../store/config';
@@ -108,6 +109,7 @@ export function useAIData(): UseAIDataResult {
   const [error, setError] = useState<string | null>(null);
   const prevWeekPercentRef = useRef<number | undefined>(undefined);
   const isFetchingRef = useRef(false);
+  const fetchDataRef = useRef<(forceRefetchToday?: boolean) => Promise<void>>(() => Promise.resolve());
 
   // FR4 (06-ai-tab): Load cached previous week AI% on mount for delta badge.
   // Silently ignores AsyncStorage failures — badge simply stays hidden.
@@ -131,15 +133,9 @@ export function useAIData(): UseAIDataResult {
     const today = todayUTC();
 
     try {
-      // Load credentials
-      const credentials = await loadCredentials();
-      if (!credentials) {
-        isFetchingRef.current = false;
-        setIsLoading(false);
-        return;
-      }
-
-      // Load existing cache
+      // Load existing cache first — AsyncStorage works on locked device.
+      // Data is set from cache BEFORE credentials are attempted, so a locked-device
+      // SecureStore throw leaves the UI with cached data rather than null.
       let rawCache: AIRawCache = {};
       try {
         const stored = await AsyncStorage.getItem(CACHE_KEY);
@@ -149,6 +145,9 @@ export function useAIData(): UseAIDataResult {
       } catch {
         rawCache = {};
       }
+
+      // Derive lastFetchedAt immediately after cache read
+      const lastFetchedAtVal = (rawCache._lastFetchedAt as string | undefined) ?? null;
 
       // Week-transition flush: if cache has data from the PREVIOUS week, save it to
       // weekly_history_v2 before pruning it away. Fires once when week boundary is crossed.
@@ -183,14 +182,21 @@ export function useAIData(): UseAIDataResult {
       }
 
       // Prune to current week
-      const lastFetchedAtVal = (rawCache._lastFetchedAt as string | undefined) ?? null;
       const weekCache: Record<string, TagData> = pruneToCurrentWeek(rawCache, today);
 
-      // Set instant data from cache
+      // Set instant data from cache — always fires, even if credentials later throw
       const instantData = aggregateAICache(weekCache, today);
       setData(instantData);
       setLastFetchedAt(lastFetchedAtVal);
       setIsLoading(false); // already have cache data
+
+      // Load credentials — may throw on locked device (SecureStore WHEN_UNLOCKED).
+      // If it throws, the outer catch fires but data is already set from cache above.
+      const credentials = await loadCredentials();
+      if (!credentials) {
+        isFetchingRef.current = false;
+        return;
+      }
 
       // Determine which days need fetching
       const monday = getMondayOfWeek(today);
@@ -337,6 +343,12 @@ export function useAIData(): UseAIDataResult {
     }
   }, [config]);
 
+  // Keep ref in sync so the AppState callback always calls the latest fetchData
+  // without adding fetchData to the AppState effect deps (avoids re-registering
+  // the listener on every render, which causes orphaned component tree accumulation
+  // in tests and potentially double-listener issues in production).
+  fetchDataRef.current = fetchData;
+
   useEffect(() => {
     if (config) {
       void fetchData();
@@ -347,6 +359,21 @@ export function useAIData(): UseAIDataResult {
     // and the widget sync guard (aiIsLoading && aiData===null) blocks premature null writes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config?.assignmentId, configLoading]);
+
+  // Re-fetch when app comes to foreground — recovers from bad background state
+  // (e.g. device was locked during background fetch, leaving data=null).
+  // isFetchingRef guard inside fetchData() prevents concurrent runs.
+  // Uses fetchDataRef (not fetchData directly) so this effect only re-registers
+  // when config identity changes, not on every render.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active' && config) {
+        void fetchDataRef.current();
+      }
+    });
+    return () => subscription?.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config]);
 
   const refetch = useCallback(() => {
     void fetchData(true);

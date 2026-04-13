@@ -891,7 +891,7 @@ export async function updateWidgetData(
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const widget = createWidget('HourglassWidget', WIDGET_LAYOUT_JS as any);
-      const entries = buildTimelineEntries(data, 60, 15);
+      const entries = buildTimelineEntries(data, 96, 15);
       widget.updateTimeline(entries);
       console.log('[bridge] widget timeline updated,', entries.length, 'entries, urgency:', data.urgency);
     } catch (err) {
