@@ -1,8 +1,9 @@
 // FR3: useApprovalItems hook
+// FR1 (01-manager-history): three-week parallel fetch tests appended at bottom
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useApprovalItems } from '../src/hooks/useApprovalItems';
+import { useApprovalItems, fetchAllApprovalItems } from '../src/hooks/useApprovalItems';
 import type { CrossoverConfig } from '../src/types/config';
 import type { ManualApprovalItem, OvertimeApprovalItem } from '../src/lib/approvals';
 
@@ -341,5 +342,216 @@ describe('FR3: approveAll', () => {
 
     // OT item was still attempted
     expect(mockApproveOvertime).toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// FR1 (01-manager-history): three-week parallel fetch
+// Tests call fetchAllApprovalItems() directly (no React hook overhead / no
+// TanStack Query caching) to avoid cross-test async contamination.
+// =============================================================================
+
+// Helpers to compute expected week start dates the same way the implementation does.
+function getWeekStartDateFromDate(date: Date): string {
+  const day = date.getDay();
+  const daysFromMonday = day === 0 ? 6 : day - 1;
+  const monday = new Date(date);
+  monday.setDate(date.getDate() - daysFromMonday);
+  const y = monday.getFullYear();
+  const m = String(monday.getMonth() + 1).padStart(2, '0');
+  const d = String(monday.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function computeThreeWeeks(): { currentMonday: string; prevMonday1: string; prevMonday2: string } {
+  const currentMonday = getWeekStartDateFromDate(new Date());
+  const d1 = new Date(currentMonday + 'T12:00:00');
+  d1.setDate(d1.getDate() - 7);
+  const prevMonday1 = getWeekStartDateFromDate(d1);
+  const d2 = new Date(currentMonday + 'T12:00:00');
+  d2.setDate(d2.getDate() - 14);
+  const prevMonday2 = getWeekStartDateFromDate(d2);
+  return { currentMonday, prevMonday1, prevMonday2 };
+}
+
+const RAW_MANUAL_PREV1 = {
+  userId: 200,
+  fullName: 'Bob Prev1',
+  manualTimes: [{
+    status: 'PENDING',
+    timecardIds: [10, 11],
+    durationMinutes: 60,
+    description: 'Prev1 work',
+    startDateTime: '2026-03-03T09:00:00Z',
+    type: 'WEB' as const,
+  }],
+};
+const RAW_MANUAL_PREV2 = {
+  userId: 300,
+  fullName: 'Carol Prev2',
+  manualTimes: [{
+    status: 'PENDING',
+    timecardIds: [20, 21],
+    durationMinutes: 30,
+    description: 'Prev2 work',
+    startDateTime: '2026-02-24T09:00:00Z',
+    type: 'WEB' as const,
+  }],
+};
+
+describe('FR1: fetchAllApprovalItems — fetchPendingManual called 3 times', () => {
+  beforeEach(() => {
+    mockFetchManual.mockReset();
+    mockFetchOvertime.mockReset();
+    mockLoadConfig.mockResolvedValue(MANAGER_CONFIG);
+    mockLoadCreds.mockResolvedValue({ username: 'user@test.com', password: 'pass' });
+    (getAuthToken as jest.Mock).mockResolvedValue('mock-token');
+  });
+
+  it('FR1_fetchPendingManual_called_3_times_with_distinct_weekStartDate_args', async () => {
+    const { currentMonday, prevMonday1, prevMonday2 } = computeThreeWeeks();
+
+    mockFetchManual.mockImplementation((_token: string, _useQA: boolean, weekStartDate: string) => {
+      if (weekStartDate === currentMonday) return Promise.resolve([RAW_MANUAL]);
+      return Promise.resolve([]);
+    });
+    mockFetchOvertime.mockResolvedValue([]);
+
+    await fetchAllApprovalItems();
+
+    const manualCalls = mockFetchManual.mock.calls.map((c: any[]) => c[2]);
+    expect(manualCalls).toContain(currentMonday);
+    expect(manualCalls).toContain(prevMonday1);
+    expect(manualCalls).toContain(prevMonday2);
+    expect(mockFetchManual).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('FR1: fetchAllApprovalItems — fetchPendingOvertime called 3 times', () => {
+  beforeEach(() => {
+    mockFetchManual.mockReset();
+    mockFetchOvertime.mockReset();
+    mockLoadConfig.mockResolvedValue(MANAGER_CONFIG);
+    mockLoadCreds.mockResolvedValue({ username: 'user@test.com', password: 'pass' });
+    (getAuthToken as jest.Mock).mockResolvedValue('mock-token');
+  });
+
+  it('FR1_fetchPendingOvertime_called_3_times_with_distinct_weekStartDate_args', async () => {
+    const { currentMonday, prevMonday1, prevMonday2 } = computeThreeWeeks();
+
+    mockFetchManual.mockResolvedValue([]);
+    mockFetchOvertime.mockImplementation((_token: string, _useQA: boolean, weekStartDate: string) => {
+      if (weekStartDate === currentMonday) return Promise.resolve([RAW_OVERTIME]);
+      return Promise.resolve([]);
+    });
+
+    await fetchAllApprovalItems();
+
+    const overtimeCalls = mockFetchOvertime.mock.calls.map((c: any[]) => c[2]);
+    expect(overtimeCalls).toContain(currentMonday);
+    expect(overtimeCalls).toContain(prevMonday1);
+    expect(overtimeCalls).toContain(prevMonday2);
+    expect(mockFetchOvertime).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('FR1: fetchAllApprovalItems — items merged from all 3 weeks', () => {
+  beforeEach(() => {
+    mockFetchManual.mockReset();
+    mockFetchOvertime.mockReset();
+    mockLoadConfig.mockResolvedValue(MANAGER_CONFIG);
+    mockLoadCreds.mockResolvedValue({ username: 'user@test.com', password: 'pass' });
+    (getAuthToken as jest.Mock).mockResolvedValue('mock-token');
+  });
+
+  it('FR1_items_from_all_3_weeks_are_merged_and_returned', async () => {
+    const { currentMonday, prevMonday1, prevMonday2 } = computeThreeWeeks();
+
+    mockFetchManual.mockImplementation((_token: string, _useQA: boolean, weekStartDate: string) => {
+      if (weekStartDate === currentMonday) return Promise.resolve([RAW_MANUAL]);
+      if (weekStartDate === prevMonday1) return Promise.resolve([RAW_MANUAL_PREV1]);
+      if (weekStartDate === prevMonday2) return Promise.resolve([RAW_MANUAL_PREV2]);
+      return Promise.resolve([]);
+    });
+    mockFetchOvertime.mockResolvedValue([]);
+
+    const items = await fetchAllApprovalItems();
+    expect(items.length).toBe(3);
+
+    const fullNames = items.map((i) => i.fullName);
+    expect(fullNames).toContain('Alice Smith'); // RAW_MANUAL (current week)
+    expect(fullNames).toContain('Bob Prev1');   // prevMonday1
+    expect(fullNames).toContain('Carol Prev2'); // prevMonday2
+  });
+
+  it('FR1_items_from_prevMonday2_have_correct_weekStartDate', async () => {
+    const { prevMonday2 } = computeThreeWeeks();
+
+    mockFetchManual.mockImplementation((_token: string, _useQA: boolean, weekStartDate: string) => {
+      if (weekStartDate === prevMonday2) return Promise.resolve([RAW_MANUAL_PREV2]);
+      return Promise.resolve([]);
+    });
+    mockFetchOvertime.mockResolvedValue([]);
+
+    const items = await fetchAllApprovalItems();
+    expect(items.length).toBe(1);
+    expect(items[0].weekStartDate).toBe(prevMonday2);
+  });
+
+  it('FR1_items_sorted_descending_when_from_multiple_weeks', async () => {
+    const { currentMonday, prevMonday1, prevMonday2 } = computeThreeWeeks();
+
+    mockFetchManual.mockImplementation((_token: string, _useQA: boolean, weekStartDate: string) => {
+      if (weekStartDate === currentMonday) return Promise.resolve([RAW_MANUAL]);
+      if (weekStartDate === prevMonday1) return Promise.resolve([RAW_MANUAL_PREV1]);
+      if (weekStartDate === prevMonday2) return Promise.resolve([RAW_MANUAL_PREV2]);
+      return Promise.resolve([]);
+    });
+    mockFetchOvertime.mockResolvedValue([]);
+
+    const items = await fetchAllApprovalItems();
+    for (let i = 0; i < items.length - 1; i++) {
+      expect(items[i].startDateTime >= items[i + 1].startDateTime).toBe(true);
+    }
+  });
+});
+
+describe('FR1: fetchAllApprovalItems — edge cases', () => {
+  beforeEach(() => {
+    mockFetchManual.mockReset();
+    mockFetchOvertime.mockReset();
+    mockLoadConfig.mockResolvedValue(MANAGER_CONFIG);
+    mockLoadCreds.mockResolvedValue({ username: 'user@test.com', password: 'pass' });
+    (getAuthToken as jest.Mock).mockResolvedValue('mock-token');
+  });
+
+  it('FR1_prior_weeks_empty_returns_only_current_week_items', async () => {
+    const { currentMonday } = computeThreeWeeks();
+
+    mockFetchManual.mockImplementation((_token: string, _useQA: boolean, weekStartDate: string) => {
+      if (weekStartDate === currentMonday) return Promise.resolve([RAW_MANUAL]);
+      return Promise.resolve([]);
+    });
+    mockFetchOvertime.mockResolvedValue([]);
+
+    const items = await fetchAllApprovalItems();
+    expect(items.length).toBe(1);
+    expect(items[0].fullName).toBe('Alice Smith');
+  });
+
+  it('FR1_all_weeks_empty_returns_empty_array_without_crash', async () => {
+    mockFetchManual.mockResolvedValue([]);
+    mockFetchOvertime.mockResolvedValue([]);
+
+    const items = await fetchAllApprovalItems();
+    expect(items).toEqual([]);
+  });
+
+  it('FR1_non_manager_still_returns_empty_even_with_3_week_fetch', async () => {
+    mockLoadConfig.mockResolvedValue(CONTRIBUTOR_CONFIG);
+
+    const items = await fetchAllApprovalItems();
+    expect(items).toEqual([]);
+    expect(mockFetchManual).not.toHaveBeenCalled();
   });
 });

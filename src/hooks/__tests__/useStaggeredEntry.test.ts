@@ -355,11 +355,11 @@ describe('FR4: Approvals screen — useStaggeredEntry integration', () => {
 
   it('FlatList renderItem function does NOT reference getEntryStyle', () => {
     const source = fs.readFileSync(APPROVALS_FILE, 'utf8');
-    // The FlatList in the approvals screen renders individual ApprovalCard items.
+    // The FlatList in the approvals screen renders individual TeamQueueRow items.
     // These must NOT be wrapped with getEntryStyle — only section containers are animated.
-    // Verify the renderApprovalItem function exists and does not call getEntryStyle.
-    expect(source).toMatch(/function\s+renderApprovalItem/);
-    const renderItemMatch = source.match(/function\s+renderApprovalItem[\s\S]*?\n\s*\}/);
+    // Verify the renderTeamQueueRow function exists and does not call getEntryStyle.
+    expect(source).toMatch(/function\s+renderTeamQueueRow/);
+    const renderItemMatch = source.match(/function\s+renderTeamQueueRow[\s\S]*?\n\s*\}/);
     expect(renderItemMatch).not.toBeNull();
     if (renderItemMatch) {
       expect(renderItemMatch[0]).not.toMatch(/getEntryStyle/);

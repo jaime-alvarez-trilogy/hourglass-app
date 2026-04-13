@@ -110,6 +110,20 @@ const MOCK_ENTRY_PENDING = {
   rejectionReason: null,
 };
 
+// Compute current week's Monday dynamically so buildTeamQueueRows places this
+// item in the "This Week" group regardless of when the test runs.
+function getCurrentMondayString(): string {
+  const today = new Date();
+  const day = today.getDay();
+  const daysFromMonday = day === 0 ? 6 : day - 1;
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - daysFromMonday);
+  const y = monday.getFullYear();
+  const m = String(monday.getMonth() + 1).padStart(2, '0');
+  const d = String(monday.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 const MOCK_APPROVAL_ITEM = {
   id: 'item-1',
   fullName: 'Alice Smith',
@@ -118,6 +132,7 @@ const MOCK_APPROVAL_ITEM = {
   category: 'MANUAL' as const,
   startDateTime: '2026-03-17T08:00:00',
   timecardIds: ['tc-1'],
+  weekStartDate: getCurrentMondayString(),
 };
 
 const MOCK_CONFIG_CONTRIBUTOR = {
