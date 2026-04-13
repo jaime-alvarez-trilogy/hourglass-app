@@ -7,7 +7,7 @@
 // No API calls — uses only locally cached AsyncStorage data.
 // Permissions checked via getPermissionsAsync (not request — handled in spec 09).
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -20,6 +20,7 @@ import type { CrossoverConfig } from '../types/config';
 const WIDGET_DATA_KEY = 'widget_data';
 const THURSDAY_NOTIF_ID_KEY = 'notif_thursday_id';
 const MONDAY_NOTIF_ID_KEY = 'notif_monday_id';
+const EXPIRY_NOTIF_ID_KEY = 'notif_expiry_id';
 
 // ── FR2: scheduleThursdayReminder ─────────────────────────────────────────────
 
@@ -131,6 +132,69 @@ async function scheduleMondaySummary(): Promise<void> {
   }
 }
 
+// ── FR4: scheduleMondayExpiryReminder ────────────────────────────────────────
+
+/**
+ * Schedules a 9am Monday notification warning managers that pending approvals
+ * expire at 15:00 UTC. Only fires on Mondays before the 15:00 UTC cutoff.
+ * Manager-only — contributors cannot approve items.
+ *
+ * Reads pendingCount from widget_data; skips if zero or data unavailable.
+ * Cancels any existing expiry notification before rescheduling.
+ */
+async function scheduleMondayExpiryReminder(isManager: boolean): Promise<void> {
+  try {
+    // Manager-only
+    if (!isManager) return;
+
+    // Only schedule on Monday before 15:00 UTC
+    const now = new Date();
+    const localDay = now.getDay();   // 0=Sun, 1=Mon, ..., 6=Sat
+    const utcHour = now.getUTCHours();
+    if (localDay !== 1) return;
+    if (utcHour >= 15) return;
+
+    // Read pendingCount from widget_data
+    const raw = await AsyncStorage.getItem(WIDGET_DATA_KEY);
+    if (!raw) return;
+    let pendingCount = 0;
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const count = typeof parsed?.pendingCount === 'number' ? parsed.pendingCount : 0;
+      pendingCount = count;
+    } catch {
+      return;
+    }
+    if (pendingCount <= 0) return;
+
+    // Cancel existing
+    const existingId = await AsyncStorage.getItem(EXPIRY_NOTIF_ID_KEY);
+    if (existingId) {
+      await Notifications.cancelScheduledNotificationAsync(existingId);
+    }
+
+    // Schedule
+    const body = `${pendingCount} pending approval${pendingCount === 1 ? '' : 's'} — must be reviewed by 3pm UTC`;
+    const id = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: 'Approvals Expiring Today',
+        body,
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.CALENDAR,
+        weekday: 2,    // Monday
+        hour: 9,
+        minute: 0,
+        repeats: false,
+      } as any,
+    });
+
+    await AsyncStorage.setItem(EXPIRY_NOTIF_ID_KEY, id);
+  } catch {
+    // Silently swallow — notifications are best-effort
+  }
+}
+
 // ── FR1: useScheduledNotifications ───────────────────────────────────────────
 
 /**
@@ -145,11 +209,16 @@ async function scheduleMondaySummary(): Promise<void> {
 export function useScheduledNotifications(
   config: CrossoverConfig | null,
 ): void {
+  const inFlightRef = useRef(false);
+
   useEffect(() => {
     if (!config?.setupComplete) return;
 
-    // scheduleAll: orchestrates both notifications; swallows all errors
+    // scheduleAll: orchestrates both notifications; swallows all errors.
+    // inFlightRef guards against concurrent calls (e.g. rapid AppState 'active' events).
     const scheduleAll = async () => {
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
       try {
         // Check permissions — spec 09 handles request; we only check here
         const { granted } = await Notifications.getPermissionsAsync();
@@ -177,8 +246,11 @@ export function useScheduledNotifications(
           await scheduleThursdayReminder(hoursRemaining, config.weeklyLimit);
         }
         await scheduleMondaySummary();
+        await scheduleMondayExpiryReminder(config.isManager ?? false);
       } catch {
         // Silently swallow — notifications are best-effort
+      } finally {
+        inFlightRef.current = false;
       }
     };
 
@@ -203,4 +275,5 @@ export function useScheduledNotifications(
 export const __testOnly = {
   scheduleThursdayReminder,
   scheduleMondaySummary,
+  scheduleMondayExpiryReminder,
 };

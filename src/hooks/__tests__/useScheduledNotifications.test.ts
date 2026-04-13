@@ -736,9 +736,13 @@ describe('06-notification-bootstrap: FR1 — no early-return bail on missing wid
     source = fs.readFileSync(HOOK_FILE, 'utf8');
   });
 
-  it('FR1-SC1 — source does NOT contain early-return bail on missing raw data', () => {
-    // The bug pattern: `if (!raw) return;` must be absent
-    expect(source).not.toMatch(/if\s*\(\s*!raw\s*\)\s*return/);
+  it('FR1-SC1 — scheduleAll does NOT contain early-return bail on missing raw data', () => {
+    // The bug pattern: `if (!raw) return;` must be absent from scheduleAll.
+    // (Other functions in the file may legitimately use this pattern.)
+    const scheduleAllStart = source.indexOf('const scheduleAll = async');
+    const scheduleAllEnd = source.indexOf('\n    };', scheduleAllStart);
+    const scheduleAllBody = source.slice(scheduleAllStart, scheduleAllEnd);
+    expect(scheduleAllBody).not.toMatch(/if\s*\(\s*!raw\s*\)\s*return/);
   });
 
   it('FR1-SC2 — source initializes hoursRemaining to 1 (positive sentinel)', () => {
@@ -810,6 +814,59 @@ describe('06-notification-bootstrap: FR2 — hoursRemaining parsing in scheduleA
   });
 });
 
+// ── 01-flood-guard: concurrent scheduleAll protection ────────────────────────
+//
+// Regression: rapid AppState 'active' events must not cause multiple notifications
+// to be queued. The inFlightRef guard coalesces concurrent calls to one.
+//
+// Note: jest-expo/node preset has null React dispatcher outside a render tree,
+// so the hook cannot be called directly in tests. Behavioral coverage is provided
+// via static analysis of the guard pattern (identical to useRoleRefresh.ts).
+
+describe('01-flood-guard: concurrent scheduleAll protection (static)', () => {
+  let source: string;
+
+  beforeAll(() => {
+    source = fs.readFileSync(HOOK_FILE, 'utf8');
+  });
+
+  it('FG-SC1 — source imports useRef from react', () => {
+    expect(source).toMatch(/import\s*\{[^}]*useRef[^}]*\}\s*from\s*['"]react['"]/);
+  });
+
+  it('FG-SC2 — inFlightRef is declared at hook scope with useRef(false)', () => {
+    expect(source).toContain('const inFlightRef = useRef(false)');
+  });
+
+  it('FG-SC3 — scheduleAll guards entry with inFlightRef.current check', () => {
+    expect(source).toMatch(/if\s*\(\s*inFlightRef\.current\s*\)\s*return/);
+  });
+
+  it('FG-SC4 — scheduleAll sets inFlightRef.current = true on entry', () => {
+    expect(source).toMatch(/inFlightRef\.current\s*=\s*true/);
+  });
+
+  it('FG-SC5 — inFlightRef.current reset to false is inside a finally block', () => {
+    // Ensures the ref is always reset, even if an error is thrown
+    expect(source).toMatch(/finally\s*\{[^}]*inFlightRef\.current\s*=\s*false/s);
+  });
+
+  it('FG-SC6 — inFlightRef declaration precedes useEffect (hook scope, not effect scope)', () => {
+    const refDeclIdx = source.indexOf('const inFlightRef = useRef(false)');
+    const useEffectIdx = source.indexOf('useEffect(');
+    expect(refDeclIdx).toBeGreaterThan(-1);
+    expect(useEffectIdx).toBeGreaterThan(-1);
+    expect(refDeclIdx).toBeLessThan(useEffectIdx);
+  });
+
+  it('FG-SC7 — try/catch/finally structure is present in scheduleAll', () => {
+    // Full try { ... } catch { ... } finally { ... } pattern
+    expect(source).toMatch(/try\s*\{/);
+    expect(source).toMatch(/catch\s*\{/);
+    expect(source).toMatch(/finally\s*\{/);
+  });
+});
+
 describe('06-notification-bootstrap: FR3 — Monday summary always fires when permissions granted', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -841,13 +898,17 @@ describe('06-notification-bootstrap: FR3 — Monday summary always fires when pe
     }
   });
 
-  it('FR3-SC2 — scheduleMondaySummary is NOT gated by widget_data in source', () => {
+  it('FR3-SC2 — scheduleMondaySummary is NOT gated by widget_data in scheduleAll', () => {
     // Static: the call to scheduleMondaySummary must not be inside an if(raw) block
+    // within scheduleAll. (Other functions may legitimately use if(!raw) return.)
     const source = fs.readFileSync(HOOK_FILE, 'utf8');
     // The function call must exist
     expect(source).toContain('scheduleMondaySummary()');
-    // The early return on missing widget_data must not exist
-    expect(source).not.toMatch(/if\s*\(\s*!raw\s*\)\s*return/);
+    // Scope check to scheduleAll body only
+    const scheduleAllStart = source.indexOf('const scheduleAll = async');
+    const scheduleAllEnd = source.indexOf('\n    };', scheduleAllStart);
+    const scheduleAllBody = source.slice(scheduleAllStart, scheduleAllEnd);
+    expect(scheduleAllBody).not.toMatch(/if\s*\(\s*!raw\s*\)\s*return/);
   });
 
   it('FR3-SC3 — permissions denied prevents scheduleMondaySummary call (static)', () => {
