@@ -27,7 +27,7 @@ const APPROVALS_KEY = ['approvals'] as const
 // Fetcher — loads config + credentials, fires parallel requests, merges
 // ---------------------------------------------------------------------------
 
-async function fetchAllApprovalItems(): Promise<ApprovalItem[]> {
+export async function fetchAllApprovalItems(): Promise<ApprovalItem[]> {
   const [config, credentials] = await Promise.all([loadConfig(), loadCredentials()])
 
   // Dev: manager preview — return fake team items without API calls
@@ -37,17 +37,36 @@ async function fetchAllApprovalItems(): Promise<ApprovalItem[]> {
   if (!config || !config.isManager || !credentials) return []
 
   const token = await getAuthToken(credentials.username, credentials.password, config.useQA)
-  const weekStartDate = getWeekStartDate()
 
-  const [rawManual, rawOvertime] = await Promise.all([
-    fetchPendingManual(token, config.useQA, weekStartDate),
-    fetchPendingOvertime(token, config.useQA, weekStartDate),
+  const currentMonday = getWeekStartDate()
+  const d1 = new Date(currentMonday + 'T12:00:00')
+  d1.setDate(d1.getDate() - 7)
+  const prevMonday1 = getWeekStartDate(d1)
+  const d2 = new Date(currentMonday + 'T12:00:00')
+  d2.setDate(d2.getDate() - 14)
+  const prevMonday2 = getWeekStartDate(d2)
+
+  const [
+    rawManualCur, rawOvertimeCur,
+    rawManualPrev1, rawOvertimePrev1,
+    rawManualPrev2, rawOvertimePrev2,
+  ] = await Promise.all([
+    fetchPendingManual(token, config.useQA, currentMonday),
+    fetchPendingOvertime(token, config.useQA, currentMonday),
+    fetchPendingManual(token, config.useQA, prevMonday1),
+    fetchPendingOvertime(token, config.useQA, prevMonday1),
+    fetchPendingManual(token, config.useQA, prevMonday2),
+    fetchPendingOvertime(token, config.useQA, prevMonday2),
   ])
 
-  const manualItems = parseManualItems(rawManual, weekStartDate)
-  const overtimeItems = parseOvertimeItems(rawOvertime)
-
-  const allItems: ApprovalItem[] = [...manualItems, ...overtimeItems]
+  const allItems: ApprovalItem[] = [
+    ...parseManualItems(rawManualCur, currentMonday),
+    ...parseOvertimeItems(rawOvertimeCur),
+    ...parseManualItems(rawManualPrev1, prevMonday1),
+    ...parseOvertimeItems(rawOvertimePrev1),
+    ...parseManualItems(rawManualPrev2, prevMonday2),
+    ...parseOvertimeItems(rawOvertimePrev2),
+  ]
 
   // Sort by startDateTime descending (most recent first)
   allItems.sort((a, b) => (a.startDateTime < b.startDateTime ? 1 : -1))
