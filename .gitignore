@@ -46,8 +46,8 @@ simulator_screenshot*.png
 announcement_*.png
 build-*.ipa
 
-# Claude Code session state
-.claude/
+# Claude Code session state (track skills/agents/memory, not local settings)
+.claude/settings.local.json
 
 # App Store Connect API keys (private key — never commit)
 .appstore/
