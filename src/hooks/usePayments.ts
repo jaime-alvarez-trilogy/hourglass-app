@@ -11,6 +11,11 @@ import type { CrossoverConfig } from '../types/config';
 import type { PaymentsResponse } from '../lib/hours';
 import { getAuthToken } from '../api/client';
 
+/**
+ * React Query wrapper around fetchPayments for the current week's payment record.
+ * queryKey includes the week's Monday so the cache auto-invalidates each Monday.
+ * 15-minute staleTime; composed by useHoursData together with useTimesheet.
+ */
 export function usePayments(config: CrossoverConfig | null) {
   const weekStart = getWeekStartDate(true);
 

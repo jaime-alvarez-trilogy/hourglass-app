@@ -198,13 +198,12 @@ async function scheduleMondayExpiryReminder(isManager: boolean): Promise<void> {
 // ── FR1: useScheduledNotifications ───────────────────────────────────────────
 
 /**
- * Hook: schedules local notifications on mount and every app foreground event.
- *
- * - Thursday 6pm: deadline reminder with live hoursRemaining
- * - Monday 9am: last week's earnings/hours/AI% summary
- *
- * Does nothing if config is null or setupComplete is false.
- * Silently skips if notification permissions are not granted.
+ * Schedules local notifications (Thursday 6pm deadline, Monday 9am weekly summary,
+ * Monday 9am approval-expiry warning for managers) on mount and on every AppState
+ * 'active' transition. Reads from AsyncStorage 'widget_data' and weekly history;
+ * no API calls. inFlightRef guards against concurrent reschedules. No-op when
+ * config is null, setupComplete is false, or permissions are not granted.
+ * See ARCHITECTURE.md §1 and §8.1.
  */
 export function useScheduledNotifications(
   config: CrossoverConfig | null,

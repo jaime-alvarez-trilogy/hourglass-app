@@ -125,8 +125,10 @@ export function buildMyRequestsQueryFn(
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 /**
- * Fetches manual time requests for the current contributor for Mon–today.
- * Works for all users (contributors and managers alike).
+ * React Query hook returning the user's own manual time request entries
+ * (pending/approved/rejected) across the last 2 prior weeks plus the current week.
+ * Iterates work diary day-by-day in parallel, tolerates per-day failures, and
+ * only surfaces an error string when all days fail. Works for contributors and managers alike.
  */
 export function useMyRequests(): UseMyRequestsResult {
   const { config } = useConfig();

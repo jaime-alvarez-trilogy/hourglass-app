@@ -101,6 +101,13 @@ export interface UseAIDataResult {
   previousWeekPercent?: number;
 }
 
+/**
+ * Returns the current week's AI% and BrainLift metrics, plus the previous-week
+ * AI% for delta display. Reads/writes AsyncStorage 'ai_cache' (per-day TagData)
+ * and 'previousWeekAIPercent'; fetches stale days from the work diary API and
+ * flushes the prior week to 'weekly_history_v2' on Mondays. Re-fetches on app
+ * foreground transitions.
+ */
 export function useAIData(): UseAIDataResult {
   const { config, isLoading: configLoading } = useConfig();
   const [data, setData] = useState<AIWeekData | null>(null);

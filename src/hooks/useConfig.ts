@@ -4,6 +4,11 @@ import { useQuery } from '@tanstack/react-query';
 import { loadConfig } from '../store/config';
 import type { CrossoverConfig } from '../types/config';
 
+/**
+ * Returns the persisted CrossoverConfig from AsyncStorage via loadConfig().
+ * Uses queryKey ['config'] with staleTime Infinity — callers must invalidate
+ * manually after mutating config (e.g. saveConfig followed by refetch).
+ */
 export function useConfig(): {
   config: CrossoverConfig | null;
   isLoading: boolean;

@@ -111,9 +111,7 @@ jest.mock('@tanstack/react-query', () => ({
     const mockReact = require('react');
     return mockReact.createElement('QueryClientProvider', null, children);
   },
-  focusManager: {
-    setEventListener: jest.fn(),
-  },
+  focusManager: { setEventListener: jest.fn() },
 }));
 
 jest.mock('@tanstack/react-query-persist-client', () => ({

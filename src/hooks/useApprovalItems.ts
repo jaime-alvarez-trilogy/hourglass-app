@@ -27,6 +27,12 @@ const APPROVALS_KEY = ['approvals'] as const
 // Fetcher — loads config + credentials, fires parallel requests, merges
 // ---------------------------------------------------------------------------
 
+/**
+ * Loads config + credentials, then fires 6 parallel calls (pending manual + overtime
+ * for the current Monday and the two prior Mondays) and merges into a sorted list.
+ * Returns [] for contributors or when not configured; returns MOCK_TEAM_ITEMS when
+ * devManagerView is set on a non-manager config. See ARCHITECTURE.md §4.1.
+ */
 export async function fetchAllApprovalItems(): Promise<ApprovalItem[]> {
   const [config, credentials] = await Promise.all([loadConfig(), loadCredentials()])
 
@@ -78,6 +84,12 @@ export async function fetchAllApprovalItems(): Promise<ApprovalItem[]> {
 // Hook
 // ---------------------------------------------------------------------------
 
+/**
+ * React Query hook for the manager approval queue, wrapping fetchAllApprovalItems.
+ * Returns items plus approve/reject/approveAll mutations with optimistic removal
+ * and rollback on failure. Mutations always invalidate APPROVALS_KEY on settle
+ * (success or failure) so the queue reflects server truth. See ARCHITECTURE.md §4.1.
+ */
 export function useApprovalItems(): {
   items: ApprovalItem[]
   isLoading: boolean

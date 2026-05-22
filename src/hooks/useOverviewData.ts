@@ -39,9 +39,10 @@ export interface UseOverviewDataResult {
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 /**
- * Compose Overview tab data arrays for the given time window.
- *
- * @param window - Number of weeks to display: 4 or 12
+ * Composes earnings, hours, AI%, BrainLift, overtime, and weekLabels arrays for
+ * the Overview tab by merging useWeeklyHistory snapshots (past weeks) with live
+ * useHoursData + useAIData values (current week appended as last entry). Arrays
+ * are sliced to the requested window (4/12/24) without padding.
  */
 export function useOverviewData(
   window: 4 | 12 | 24,

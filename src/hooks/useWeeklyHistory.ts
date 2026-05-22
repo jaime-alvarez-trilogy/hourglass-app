@@ -14,6 +14,12 @@ export interface UseWeeklyHistoryResult {
   isLoading: boolean;
 }
 
+/**
+ * Returns persisted WeeklySnapshot[] loaded from AsyncStorage 'weekly_history_v2'.
+ * Re-reads on every history update event (driven by useEarningsHistory and
+ * useHistoryBackfill writes) so consumers see progressive backfill updates without
+ * remounting. Does not include the current in-progress week.
+ */
 export function useWeeklyHistory(): UseWeeklyHistoryResult {
   const [snapshots, setSnapshots] = useState<WeeklySnapshot[]>([]);
   const [isLoading, setIsLoading] = useState(true);

@@ -36,6 +36,11 @@ function getUTCWeekBoundaries(): { from: string; to: string } {
   return { from, to };
 }
 
+/**
+ * Fetches the current Mon-Sun UTC week's payment record (earnings ledger row).
+ * Returns null if the API yields no row or fails non-fatally; rethrows AuthError so the
+ * caller can re-onboard. Week boundaries are UTC-aligned — see header comment for why.
+ */
 export async function fetchPayments(
   config: CrossoverConfig,
   token: string
