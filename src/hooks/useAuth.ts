@@ -20,6 +20,13 @@ export interface UseSetupResult {
   error: string | null;
 }
 
+/**
+ * Onboarding state machine: probes QA/prod for valid credentials, builds a
+ * pending CrossoverConfig via fetchAndBuildConfig, and walks the user through
+ * env-select / rate-entry / success steps. Consumed via OnboardingContext;
+ * does not persist anything itself — the consumer commits pendingConfig + credentials.
+ * See ARCHITECTURE.md §5.5.
+ */
 export function useSetup(): UseSetupResult {
   const [step, setStep] = useState<OnboardingStep>('welcome');
   const [isLoading, setIsLoading] = useState(false);

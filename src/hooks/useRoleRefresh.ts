@@ -65,7 +65,13 @@ export async function runRoleRefresh(
   }
 }
 
-/** Hook: called from root layout on every app foreground event. */
+/**
+ * Listens for AppState 'active' transitions and, on Mondays where the last
+ * role check is over a week old, re-fetches the profile detail and updates
+ * config.isManager / hourlyRate / weeklyLimit / teams in AsyncStorage.
+ * inFlightRef guards against concurrent runs. Failures are silent (no config write).
+ * Called from app/_layout.tsx; can change config.isManager mid-session.
+ */
 export function useRoleRefresh(): void {
   const queryClient = useQueryClient();
   const inFlightRef = useRef(false);

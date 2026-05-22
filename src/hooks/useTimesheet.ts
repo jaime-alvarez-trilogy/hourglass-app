@@ -11,6 +11,12 @@ import type { CrossoverConfig } from '../types/config';
 import type { TimesheetResponse } from '../lib/hours';
 import { getAuthToken } from '../api/client';
 
+/**
+ * React Query wrapper around fetchTimesheet for the current week's data.
+ * queryKey includes the week's Monday so the cache auto-invalidates each Monday.
+ * 15-minute staleTime matches the widget refresh cycle; no AsyncStorage failover here
+ * (useHoursData composes this with usePayments and handles caching to 'hours_cache').
+ */
 export function useTimesheet(config: CrossoverConfig | null) {
   const weekStart = getWeekStartDate(true);
 

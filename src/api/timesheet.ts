@@ -16,6 +16,11 @@ function rethrowIfAuth(err: unknown): void {
   if (err instanceof AuthError) throw err;
 }
 
+/**
+ * Fetches the current week's timesheet, trying 3 endpoint parameter shapes in order and
+ * returning the first non-empty response. Returns null if all strategies yield empty.
+ * Rethrows AuthError immediately so the caller can re-onboard.
+ */
 export async function fetchTimesheet(
   config: CrossoverConfig,
   token: string

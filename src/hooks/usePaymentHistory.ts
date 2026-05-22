@@ -46,10 +46,10 @@ function getCurrentUTCSunday(): string {
 }
 
 /**
- * Hook: fetches payment records for the last `numWeeks` weeks.
- *
- * @param numWeeks  Number of weeks of history to fetch (default: 4)
- * @returns         { data: Payment[] | null; isLoading: boolean }
+ * Returns raw Payment[] records spanning the last numWeeks weeks via a single
+ * payments-API call with a wide date range. Unlike usePayments (current week,
+ * aggregated), callers receive individual records for trend aggregation.
+ * 1-hour staleTime; no AsyncStorage cache — falls back to null on error.
  */
 export function usePaymentHistory(numWeeks: number = 4): {
   data: Payment[] | null;

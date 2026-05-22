@@ -4,6 +4,10 @@
 import type { ManualApprovalItem } from './approvals';
 import type { ManualRequestEntry } from '../types/requests';
 
+/**
+ * Hard-coded pending team approvals for the Manager Preview toggle
+ * (`config.devManagerView === true`). Renders without hitting the API.
+ */
 export const MOCK_TEAM_ITEMS: ManualApprovalItem[] = [
   {
     id: 'mt-mock-1001',
@@ -33,6 +37,10 @@ export const MOCK_TEAM_ITEMS: ManualApprovalItem[] = [
   },
 ];
 
+/**
+ * Hard-coded "My Requests" entries (one per status: PENDING, APPROVED,
+ * REJECTED) used by the Manager Preview toggle to exercise the contributor UI.
+ */
 export const MOCK_MY_REQUESTS: ManualRequestEntry[] = [
   {
     id: '2026-03-14|Deploy hotfix to staging',
