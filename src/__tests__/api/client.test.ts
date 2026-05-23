@@ -27,6 +27,7 @@ function makeOkResponse(body: unknown) {
     ok: true,
     status: 200,
     json: async () => body,
+    text: async () => JSON.stringify(body),
   };
 }
 
