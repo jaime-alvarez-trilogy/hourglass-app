@@ -1,0 +1,22 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "/api/v2/teams/assignments",
+    "params": {
+      "avatarType": "CANDIDATE",
+      "status": "ACTIVE",
+      "page": 0
+    }
+  },
+  "responseStatus": 200,
+  "responseSchema": {
+    "content": [],
+    "last": true,
+    "totalElements": 0,
+    "totalPages": 1,
+    "first": true,
+    "numberOfElements": 0,
+    "size": 0,
+    "number": 0
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "/api/v3/token",
+    "headers": {
+      "Authorization": "Basic <base64>"
+    }
+  },
+  "response": {
+    "status": 200,
+    "contentType": "application/json;charset=UTF-8",
+    "bodyShape": "json",
+    "latencyMs": 1373,
+    "parsedTokenFormat": "userId:secret"
+  }
+}

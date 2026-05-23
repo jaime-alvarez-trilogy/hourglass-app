@@ -1,0 +1,13 @@
+{
+  "request": {
+    "from": "2026-05-18",
+    "to": "2026-05-24"
+  },
+  "responseStatus": 403,
+  "responseSchema": {
+    "errorCode": "CROS-0002",
+    "type": "ERROR",
+    "httpStatus": 403,
+    "text": "Hmm... looks like you are trying to do something you're not allowed to do. If you think you got this error message in error, please reach out to our support team. They'll be glad to help!"
+  }
+}
