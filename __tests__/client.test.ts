@@ -127,32 +127,44 @@ describe('FR4: apiGet', () => {
 // --- FR5: apiPut ---
 describe('FR5: apiPut', () => {
   it('request method is PUT', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) });
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, text: async () => '{}' });
     await apiPut('/test', {}, 'tok', false);
     const [, options] = mockFetch.mock.calls[0];
     expect(options.method).toBe('PUT');
   });
 
   it('attaches x-auth-token header', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) });
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, text: async () => '{}' });
     await apiPut('/test', {}, 'mytoken', false);
     const [, options] = mockFetch.mock.calls[0];
     expect(options.headers['x-auth-token']).toBe('mytoken');
   });
 
   it('attaches Content-Type: application/json header', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) });
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, text: async () => '{}' });
     await apiPut('/test', {}, 'tok', false);
     const [, options] = mockFetch.mock.calls[0];
     expect(options.headers['Content-Type']).toBe('application/json');
   });
 
   it('serializes body as JSON string', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) });
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, text: async () => '{}' });
     const body = { approverId: '123', timecardIds: [1, 2] };
     await apiPut('/test', body, 'tok', false);
     const [, options] = mockFetch.mock.calls[0];
     expect(options.body).toBe(JSON.stringify(body));
+  });
+
+  it('returns undefined when response body is empty (approve/reject endpoints)', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, text: async () => '' });
+    const result = await apiPut('/test', {}, 'tok', false);
+    expect(result).toBeUndefined();
+  });
+
+  it('returns parsed JSON when response body is non-empty', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, text: async () => '{"ok":true}' });
+    const result = await apiPut<{ ok: boolean }>('/test', {}, 'tok', false);
+    expect(result).toEqual({ ok: true });
   });
 
   it('throws AuthError(403) on 403', async () => {

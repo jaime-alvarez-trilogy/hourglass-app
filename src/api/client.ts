@@ -95,5 +95,8 @@ export async function apiPut<T>(
     throw new NetworkError(err instanceof Error ? err.message : 'Connection failed');
   }
   if (!response.ok) handleStatus(response.status);
-  return response.json() as Promise<T>;
+  // Crossover approve/reject endpoints return an empty body on success.
+  // Reading as text first avoids "Unexpected end of input" from response.json().
+  const text = await response.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
