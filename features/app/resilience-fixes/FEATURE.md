@@ -78,3 +78,5 @@ Where a spec changes behavior that can be observed entirely in unit tests (e.g.,
 | Date | Spec | Description |
 |---|---|---|
 | 2026-05-23 | — | Feature created. Research phase complete. |
+| 2026-05-23 | 01-test-mock-text | Complete. `successEmpty()` mock now exposes `.text()` matching `apiPut` contract. Commit `d120e35`. 27/27 approvals-api tests green; full suite 3870/3870. |
+| 2026-05-23 | [02-ci-pipeline](specs/02-ci-pipeline/spec.md) | Spec ready for implement. Adds `hourglassws/.github/workflows/test.yml` with parallel `app-tests` + `server-tests` jobs on Node 20. `tsc --noEmit` deferred to a future tsc-enforcement spec (~419 baseline errors). |
