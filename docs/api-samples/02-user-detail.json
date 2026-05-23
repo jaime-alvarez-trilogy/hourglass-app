@@ -1,0 +1,407 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "/api/identity/users/current/detail"
+  },
+  "responseStatus": 200,
+  "responseSchema": {
+    "applications": {
+      "MANAGER": [
+        {
+          "name": "Activities",
+          "identifier": "ACTIVITIES",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Check-in Chats",
+          "identifier": "CHECKIN_CHATS",
+          "enabled": true,
+          "appUserType": "BOTH",
+          "links": []
+        },
+        {
+          "name": "Community",
+          "identifier": "COMMUNITY",
+          "enabled": true,
+          "appUserType": "BOTH",
+          "links": []
+        },
+        {
+          "name": "Gemba Walk",
+          "identifier": "GEMBA_WALK",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Goals",
+          "identifier": "GOALS",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Hire",
+          "identifier": "HIRE",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Learn",
+          "identifier": "LEARN",
+          "enabled": true,
+          "appUserType": "BOTH",
+          "links": []
+        },
+        {
+          "name": "Metrics",
+          "identifier": "METRICS",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "My Dashboard",
+          "identifier": "MY_DASHBOARD",
+          "enabled": true,
+          "appUserType": "BOTH",
+          "links": []
+        },
+        {
+          "name": "Organization",
+          "identifier": "ORGANIZATION",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Rank & Review",
+          "identifier": "RANK_AND_REVIEW",
+          "enabled": true,
+          "appUserType": "BOTH",
+          "links": []
+        },
+        {
+          "name": "Team Summary",
+          "identifier": "TEAM_SUMMARY",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Team Settings",
+          "identifier": "TEAM_SETTINGS",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Team History",
+          "identifier": "TEAM_HISTORY",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Polls",
+          "identifier": "TEAM_POLLS",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Timesheet",
+          "identifier": "TIMESHEET",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Timezones",
+          "identifier": "TIMEZONES",
+          "enabled": true,
+          "appUserType": "BOTH",
+          "links": []
+        },
+        {
+          "name": "Workflows",
+          "identifier": "WORKFLOWS",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "World",
+          "identifier": "WORLD",
+          "enabled": true,
+          "appUserType": "BOTH",
+          "links": []
+        },
+        {
+          "name": "Manual Time Approval",
+          "identifier": "MANUAL_TIME_APPROVAL",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        }
+      ],
+      "ADMIN": [
+        {
+          "name": "Team Scoring",
+          "identifier": "TEAM_SCORING",
+          "enabled": false,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Activities",
+          "identifier": "ACTIVITIES",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "App Store",
+          "identifier": "APP_STORE",
+          "enabled": false,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Check-in Chats",
+          "identifier": "CHECKIN_CHATS",
+          "enabled": true,
+          "appUserType": "BOTH",
+          "links": []
+        },
+        {
+          "name": "Community",
+          "identifier": "COMMUNITY",
+          "enabled": true,
+          "appUserType": "BOTH",
+          "links": []
+        },
+        {
+          "name": "Gemba Walk",
+          "identifier": "GEMBA_WALK",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Goals",
+          "identifier": "GOALS",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Hire",
+          "identifier": "HIRE",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Learn",
+          "identifier": "LEARN",
+          "enabled": true,
+          "appUserType": "BOTH",
+          "links": []
+        },
+        {
+          "name": "Metrics",
+          "identifier": "METRICS",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "My Dashboard",
+          "identifier": "MY_DASHBOARD",
+          "enabled": true,
+          "appUserType": "BOTH",
+          "links": []
+        },
+        {
+          "name": "Organization",
+          "identifier": "ORGANIZATION",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Rank & Review",
+          "identifier": "RANK_AND_REVIEW",
+          "enabled": true,
+          "appUserType": "BOTH",
+          "links": []
+        },
+        {
+          "name": "Reports",
+          "identifier": "REPORTS",
+          "enabled": false,
+          "appUserType": "BOTH",
+          "links": []
+        },
+        {
+          "name": "Team Summary",
+          "identifier": "TEAM_SUMMARY",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Team Settings",
+          "identifier": "TEAM_SETTINGS",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Team History",
+          "identifier": "TEAM_HISTORY",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Polls",
+          "identifier": "TEAM_POLLS",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Timesheet",
+          "identifier": "TIMESHEET",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Timezones",
+          "identifier": "TIMEZONES",
+          "enabled": true,
+          "appUserType": "BOTH",
+          "links": []
+        },
+        {
+          "name": "Workflows",
+          "identifier": "WORKFLOWS",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "World",
+          "identifier": "WORLD",
+          "enabled": true,
+          "appUserType": "BOTH",
+          "links": []
+        },
+        {
+          "name": "Accounts App",
+          "identifier": "ACCOUNTS",
+          "enabled": false,
+          "appUserType": "TEAM",
+          "links": []
+        },
+        {
+          "name": "Work Smart",
+          "identifier": "WORK_SMART",
+          "enabled": false,
+          "appUserType": "INDIVIDUAL",
+          "links": []
+        },
+        {
+          "name": "Manual Time Approval",
+          "identifier": "MANUAL_TIME_APPROVAL",
+          "enabled": true,
+          "appUserType": "TEAM",
+          "links": []
+        }
+      ]
+    },
+    "managerAvatar": {
+      "id": 1421271,
+      "userId": 765054,
+      "email": "<REDACTED>",
+      "firstName": "<REDACTED>",
+      "lastName": "<REDACTED>",
+      "printableName": "<REDACTED>",
+      "location": {
+        "country": "Gibraltar",
+        "timeZone": {
+          "id": 93,
+          "name": "Europe/Gibraltar",
+          "offset": 7200000,
+          "hourlyOffset": "+02:00"
+        }
+      },
+      "avatarTypes": [
+        "MANAGER",
+        "COMPANY_ADMIN"
+      ],
+      "userAvatars": [
+        {
+          "id": 1421271,
+          "type": "COMPANY_ADMIN"
+        },
+        {
+          "id": 1421271,
+          "type": "MANAGER"
+        }
+      ],
+      "company": {
+        "id": 163,
+        "name": "168  Fund",
+        "internal": false
+      },
+      "feedbackRequired": true
+    },
+    "id": 765054,
+    "email": "<REDACTED>",
+    "firstName": "<REDACTED>",
+    "lastName": "<REDACTED>",
+    "fullName": "<REDACTED>",
+    "appFeatures": [],
+    "userAvatars": [
+      {
+        "id": 1421271,
+        "type": "COMPANY_ADMIN"
+      },
+      {
+        "id": 1421271,
+        "type": "MANAGER"
+      }
+    ],
+    "avatarTypes": [
+      "MANAGER",
+      "COMPANY_ADMIN"
+    ],
+    "location": {
+      "country": "Gibraltar",
+      "timeZone": {
+        "id": 93,
+        "name": "Europe/Gibraltar",
+        "offset": 7200000,
+        "hourlyOffset": "+02:00"
+      }
+    },
+    "infoShared": true,
+    "communicationStatus": "NOT_SET",
+    "userSecurity": {
+      "securityQuestion": "Your first pet's name",
+      "linkedInLogin": false,
+      "enabled": true,
+      "signupMethod": "STANDARD",
+      "accountNonExpired": true,
+      "credentialsNonExpired": true,
+      "accountNonLocked": true
+    }
+  }
+}

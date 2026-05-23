@@ -1,0 +1,18 @@
+{
+  "tokenReusable": true,
+  "observedCalls": [
+    {
+      "status": 200,
+      "label": "immediate"
+    },
+    {
+      "status": 200,
+      "label": "+2s"
+    },
+    {
+      "status": 200,
+      "label": "+12s"
+    }
+  ],
+  "note": "Token cached in memory across 3 calls. If all 200, token TTL > 12s (current per-request fetch is likely wasteful)."
+}

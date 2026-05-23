@@ -1,0 +1,29 @@
+{
+  "strategy1_full": {
+    "status": 400,
+    "response": {
+      "errorCode": "CROS-0400",
+      "type": "ERROR",
+      "httpStatus": 400,
+      "text": "Oops! Something went wrong :( We weren't able to process your request due to an internal error. If you need assistance, please reach out to our support team. They'll be glad to help! Error code \"DDF88BDA\"."
+    }
+  },
+  "strategy2_noTeam": {
+    "status": 400,
+    "response": {
+      "errorCode": "CROS-0005",
+      "type": "ERROR",
+      "httpStatus": 400,
+      "text": "Sorry, \"teamId\" is not a valid value. Retry the operation with a valid value."
+    }
+  },
+  "strategy3_minimal": {
+    "status": 400,
+    "response": {
+      "errorCode": "CROS-0005",
+      "type": "ERROR",
+      "httpStatus": 400,
+      "text": "Sorry, \"teamId\" is not a valid value. Retry the operation with a valid value."
+    }
+  }
+}
