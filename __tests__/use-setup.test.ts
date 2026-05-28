@@ -1,8 +1,9 @@
 // FR8: useSetup hook (src/hooks/useAuth.ts)
+// 05-onboarding-defense FR5/FR6: not-contributor step + log call
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { useSetup } from '../src/hooks/useAuth';
-import { ApiError, AuthError, NetworkError } from '../src/api/errors';
+import { ApiError, AuthError, NetworkError, NotContributorError } from '../src/api/errors';
 import type { CrossoverConfig } from '../src/types/config';
 import * as SecureStoreMock from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -14,6 +15,17 @@ jest.mock('../src/api/auth', () => ({
   probeEnvironments: jest.fn(),
   getProfileDetail: jest.fn(),
 }));
+
+// 05-onboarding-defense FR6: log.error is wired into the not-contributor branch.
+jest.mock('../src/lib/log', () => ({
+  log: {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    flush: jest.fn(),
+  },
+}));
+const { log: mockLog } = require('../src/lib/log');
 
 const { fetchAndBuildConfig, probeEnvironments } = require('../src/api/auth');
 const mockFetch = fetchAndBuildConfig as jest.MockedFunction<typeof fetchAndBuildConfig>;
@@ -250,5 +262,128 @@ describe('FR8: useSetup — submitRate', () => {
     await act(async () => { await get().submitRate(75); });
     expect(get().step).toBe('welcome'); // step should not change
     expect(get().pendingConfig).toBeNull();
+  });
+});
+
+// ============================================================================
+// 05-onboarding-defense FR5: NotContributorError routes to 'not-contributor'
+// step and exposes nonContributorRoles on the hook result.
+// ============================================================================
+
+describe('05-onboarding-defense FR5: not-contributor step', () => {
+  it('exposes nonContributorRoles on the hook result (default null)', () => {
+    const { get } = mountHook();
+    expect(get().nonContributorRoles).toBeNull();
+  });
+
+  it('sets step to "not-contributor" when fetchAndBuildConfig throws NotContributorError', async () => {
+    mockFetch.mockRejectedValueOnce(new NotContributorError(['MANAGER', 'COMPANY_ADMIN']));
+    const { get } = mountHook();
+    await act(async () => { await get().submitCredentials('u@e.com', 'p'); });
+    expect(get().step).toBe('not-contributor');
+  });
+
+  it('populates nonContributorRoles from the error', async () => {
+    mockFetch.mockRejectedValueOnce(new NotContributorError(['MANAGER', 'COMPANY_ADMIN']));
+    const { get } = mountHook();
+    await act(async () => { await get().submitCredentials('u@e.com', 'p'); });
+    expect(get().nonContributorRoles).toEqual(['MANAGER', 'COMPANY_ADMIN']);
+  });
+
+  it('leaves pendingConfig null on NotContributorError (no stub config)', async () => {
+    mockFetch.mockRejectedValueOnce(new NotContributorError(['MANAGER']));
+    const { get } = mountHook();
+    await act(async () => { await get().submitCredentials('u', 'p'); });
+    expect(get().pendingConfig).toBeNull();
+  });
+
+  it('leaves error null on NotContributorError (the screen renders the roles, not an error banner)', async () => {
+    mockFetch.mockRejectedValueOnce(new NotContributorError(['MANAGER']));
+    const { get } = mountHook();
+    await act(async () => { await get().submitCredentials('u', 'p'); });
+    expect(get().error).toBeNull();
+  });
+
+  it('isLoading is false after handling NotContributorError', async () => {
+    mockFetch.mockRejectedValueOnce(new NotContributorError(['MANAGER']));
+    const { get } = mountHook();
+    await act(async () => { await get().submitCredentials('u', 'p'); });
+    expect(get().isLoading).toBe(false);
+  });
+
+  it('AuthError(401) does NOT set nonContributorRoles (regression — other branches untouched)', async () => {
+    mockFetch.mockRejectedValueOnce(new AuthError(401));
+    const { get } = mountHook();
+    await act(async () => { await get().submitCredentials('u', 'p'); });
+    expect(get().nonContributorRoles).toBeNull();
+    expect(get().step).toBe('credentials');
+  });
+
+  it('ApiError(403) (existing setup-stub branch) does NOT set nonContributorRoles', async () => {
+    mockFetch.mockRejectedValueOnce(new ApiError(403));
+    const { get } = mountHook();
+    await act(async () => { await get().submitCredentials('u@e.com', 'p'); });
+    expect(get().nonContributorRoles).toBeNull();
+    expect(get().step).toBe('setup'); // unchanged behavior
+  });
+
+  it('NotContributorError with empty avatarTypes still routes to not-contributor with []', async () => {
+    mockFetch.mockRejectedValueOnce(new NotContributorError([]));
+    const { get } = mountHook();
+    await act(async () => { await get().submitCredentials('u', 'p'); });
+    expect(get().step).toBe('not-contributor');
+    expect(get().nonContributorRoles).toEqual([]);
+  });
+});
+
+// ============================================================================
+// 05-onboarding-defense FR6: log.error('onboarding.not-contributor', err, meta)
+// fires for the NotContributorError branch and only for it.
+// ============================================================================
+
+describe('05-onboarding-defense FR6: error log entry on NotContributorError', () => {
+  beforeEach(() => {
+    (mockLog.error as jest.Mock).mockClear();
+  });
+
+  it('calls log.error exactly once with the correct category, error, and avatarTypes meta', async () => {
+    const err = new NotContributorError(['MANAGER', 'COMPANY_ADMIN']);
+    mockFetch.mockRejectedValueOnce(err);
+    const { get } = mountHook();
+    await act(async () => { await get().submitCredentials('u@e.com', 'p'); });
+
+    expect(mockLog.error).toHaveBeenCalledTimes(1);
+    const [category, errArg, meta] = (mockLog.error as jest.Mock).mock.calls[0];
+    expect(category).toBe('onboarding.not-contributor');
+    expect(errArg).toBe(err);
+    expect(meta).toEqual({ avatarTypes: ['MANAGER', 'COMPANY_ADMIN'] });
+  });
+
+  it('does NOT call log.error when fetchAndBuildConfig throws AuthError (no spam on typos)', async () => {
+    mockFetch.mockRejectedValueOnce(new AuthError(401));
+    const { get } = mountHook();
+    await act(async () => { await get().submitCredentials('u', 'bad'); });
+    expect(mockLog.error).not.toHaveBeenCalled();
+  });
+
+  it('does NOT call log.error when fetchAndBuildConfig throws generic Error', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('oops'));
+    const { get } = mountHook();
+    await act(async () => { await get().submitCredentials('u', 'p'); });
+    expect(mockLog.error).not.toHaveBeenCalled();
+  });
+
+  it('log.error meta payload does not contain username, password, or email strings', async () => {
+    const SECRET_USER = 'secret-user@example.com';
+    const SECRET_PASS = 'super-secret-pass-string';
+    mockFetch.mockRejectedValueOnce(new NotContributorError(['MANAGER']));
+    const { get } = mountHook();
+    await act(async () => { await get().submitCredentials(SECRET_USER, SECRET_PASS); });
+
+    const calls = (mockLog.error as jest.Mock).mock.calls;
+    expect(calls.length).toBe(1);
+    const serialized = JSON.stringify(calls[0]);
+    expect(serialized).not.toContain(SECRET_PASS);
+    expect(serialized).not.toContain(SECRET_USER);
   });
 });

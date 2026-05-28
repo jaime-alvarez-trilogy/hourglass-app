@@ -38,6 +38,12 @@ jest.mock('../src/hooks/useRoleRefresh', () => ({
 jest.mock('../src/store/config', () => ({
   saveConfig: jest.fn(),
   saveCredentials: jest.fn(),
+  clearAll: jest.fn(),
+}));
+
+// 05-onboarding-defense FR7: not-contributor screen calls invalidateAuthToken on sign-out
+jest.mock('../src/api/client', () => ({
+  invalidateAuthToken: jest.fn(),
 }));
 
 jest.mock('@tanstack/react-query', () => ({
@@ -50,11 +56,14 @@ import CredentialsScreen from '../app/(auth)/credentials';
 import VerifyingScreen from '../app/(auth)/verifying';
 import SetupScreen from '../app/(auth)/setup';
 import SuccessScreen from '../app/(auth)/success';
+// 05-onboarding-defense FR7: new screen
+import NotContributorScreen from '../app/(auth)/not-contributor';
 
 import { useRouter } from 'expo-router';
 import { useOnboarding } from '../src/contexts/OnboardingContext';
 import { useConfig } from '../src/hooks/useConfig';
-import { saveConfig, saveCredentials } from '../src/store/config';
+import { saveConfig, saveCredentials, clearAll } from '../src/store/config';
+import { invalidateAuthToken } from '../src/api/client';
 
 const mockUseRouter = useRouter as jest.MockedFunction<typeof useRouter>;
 const mockUseOnboarding = useOnboarding as jest.MockedFunction<typeof useOnboarding>;
@@ -76,9 +85,12 @@ const makeSetupResult = (overrides: Partial<ReturnType<typeof useOnboarding>> = 
   step: 'welcome',
   setEnvironment: jest.fn(),
   submitCredentials: jest.fn(),
+  selectEnvironment: jest.fn(),
   submitRate: jest.fn(),
   pendingConfig: makeConfig({ setupComplete: false }),
   pendingCredentials: { username: 'user@test.com', password: 'pass' },
+  hasBothEnvs: false,
+  nonContributorRoles: null,
   isLoading: false,
   error: null,
   ...overrides,
@@ -272,6 +284,16 @@ describe('FR4: Verifying Screen', () => {
     render(<VerifyingScreen />);
     expect(replace).toHaveBeenCalledWith('/(auth)/credentials');
   });
+
+  // 05-onboarding-defense FR8
+  it('navigates to /(auth)/not-contributor when step is "not-contributor"', () => {
+    const { replace } = makeRouter();
+    mockUseOnboarding.mockReturnValue(
+      makeSetupResult({ step: 'not-contributor', nonContributorRoles: ['MANAGER', 'COMPANY_ADMIN'] }),
+    );
+    render(<VerifyingScreen />);
+    expect(replace).toHaveBeenCalledWith('/(auth)/not-contributor');
+  });
 });
 
 // ============================================================
@@ -421,5 +443,102 @@ describe('FR7: Success Screen', () => {
     const allText = UNSAFE_getAllByType(Text).map((t) => String(t.props.children)).join(' ');
     // Must show the actual error message from the failed SecureStore write
     expect(allText).toContain('SecureStore failed');
+  });
+});
+
+// ============================================================
+// 05-onboarding-defense FR7: Not-Contributor Screen
+// ============================================================
+
+const mockClearAll = clearAll as jest.MockedFunction<typeof clearAll>;
+const mockInvalidateAuthToken = invalidateAuthToken as jest.MockedFunction<typeof invalidateAuthToken>;
+
+describe('05-onboarding-defense FR7: Not-Contributor Screen', () => {
+  beforeEach(() => {
+    mockClearAll.mockReset();
+    mockClearAll.mockResolvedValue(undefined);
+    mockInvalidateAuthToken.mockReset();
+  });
+
+  it('renders the detected roles when nonContributorRoles is populated', () => {
+    mockUseOnboarding.mockReturnValue(
+      makeSetupResult({
+        step: 'not-contributor',
+        nonContributorRoles: ['MANAGER', 'COMPANY_ADMIN'],
+      }),
+    );
+    const { UNSAFE_getAllByType } = render(<NotContributorScreen />);
+    const allText = UNSAFE_getAllByType(Text).map((t) => collectText(t.props.children)).join(' ');
+    expect(allText).toContain('MANAGER');
+    expect(allText).toContain('COMPANY_ADMIN');
+  });
+
+  it('renders "unknown" placeholder when nonContributorRoles is null', () => {
+    mockUseOnboarding.mockReturnValue(
+      makeSetupResult({ step: 'not-contributor', nonContributorRoles: null }),
+    );
+    const { UNSAFE_getAllByType } = render(<NotContributorScreen />);
+    const allText = UNSAFE_getAllByType(Text).map((t) => collectText(t.props.children)).join(' ');
+    expect(allText).toContain('unknown');
+  });
+
+  it('renders "unknown" placeholder when nonContributorRoles is []', () => {
+    mockUseOnboarding.mockReturnValue(
+      makeSetupResult({ step: 'not-contributor', nonContributorRoles: [] }),
+    );
+    const { UNSAFE_getAllByType } = render(<NotContributorScreen />);
+    const allText = UNSAFE_getAllByType(Text).map((t) => collectText(t.props.children)).join(' ');
+    expect(allText).toContain('unknown');
+  });
+
+  it('renders a Sign Out button', () => {
+    mockUseOnboarding.mockReturnValue(
+      makeSetupResult({ step: 'not-contributor', nonContributorRoles: ['MANAGER'] }),
+    );
+    const { UNSAFE_getAllByType } = render(<NotContributorScreen />);
+    const button = UNSAFE_getAllByType(TouchableOpacity).find((t) =>
+      collectText(t.props.children).toLowerCase().includes('sign out'),
+    );
+    expect(button).toBeDefined();
+  });
+
+  it('pressing Sign Out calls clearAll()', async () => {
+    mockUseOnboarding.mockReturnValue(
+      makeSetupResult({ step: 'not-contributor', nonContributorRoles: ['MANAGER'] }),
+    );
+    const { UNSAFE_getAllByType } = render(<NotContributorScreen />);
+    const button = UNSAFE_getAllByType(TouchableOpacity).find((t) =>
+      collectText(t.props.children).toLowerCase().includes('sign out'),
+    );
+    fireEvent.press(button!);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(mockClearAll).toHaveBeenCalled();
+  });
+
+  it('pressing Sign Out calls invalidateAuthToken()', async () => {
+    mockUseOnboarding.mockReturnValue(
+      makeSetupResult({ step: 'not-contributor', nonContributorRoles: ['MANAGER'] }),
+    );
+    const { UNSAFE_getAllByType } = render(<NotContributorScreen />);
+    const button = UNSAFE_getAllByType(TouchableOpacity).find((t) =>
+      collectText(t.props.children).toLowerCase().includes('sign out'),
+    );
+    fireEvent.press(button!);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(mockInvalidateAuthToken).toHaveBeenCalled();
+  });
+
+  it('pressing Sign Out navigates to /(auth)/welcome', async () => {
+    const { replace } = makeRouter();
+    mockUseOnboarding.mockReturnValue(
+      makeSetupResult({ step: 'not-contributor', nonContributorRoles: ['MANAGER'] }),
+    );
+    const { UNSAFE_getAllByType } = render(<NotContributorScreen />);
+    const button = UNSAFE_getAllByType(TouchableOpacity).find((t) =>
+      collectText(t.props.children).toLowerCase().includes('sign out'),
+    );
+    fireEvent.press(button!);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(replace).toHaveBeenCalledWith('/(auth)/welcome');
   });
 });
