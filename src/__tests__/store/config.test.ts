@@ -41,6 +41,7 @@ const ALL_14_KEYS = [
   'notif_thursday_id',
   'notif_monday_id',
   'prev_approval_count',
+  'prev_approval_ids',
   'HOURGLASS_QUERY_CACHE',
 ];
 
@@ -52,13 +53,13 @@ beforeEach(() => {
 
 // ─── FR1: clearAll removes all 14 AsyncStorage keys ─────────────────────────
 
-describe('FR1: clearAll — removes all 14 AsyncStorage keys', () => {
-  it('calls AsyncStorage.multiRemove with all 15 keys', async () => {
+describe('FR1: clearAll — removes all AsyncStorage keys', () => {
+  it('calls AsyncStorage.multiRemove with all 16 keys', async () => {
     await clearAll();
 
     expect(AsyncStorage.multiRemove).toHaveBeenCalledTimes(1);
     const [keys] = (AsyncStorage.multiRemove as jest.Mock).mock.calls[0];
-    expect(keys).toHaveLength(15);
+    expect(keys).toHaveLength(16);
     expect(keys).toEqual(expect.arrayContaining(ALL_14_KEYS));
   });
 
