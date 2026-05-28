@@ -7,7 +7,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node index.ts",
-    "test": "jest --testPathPattern='server/__tests__' --config ../jest.config.js"
+    "test": "jest --config jest.config.js"
   },
   "dependencies": {
     "better-sqlite3": "^9.6.0",
