@@ -36,6 +36,10 @@ function makeErrorResponse(status: number) {
     ok: false,
     status,
     json: async () => ({ error: 'error' }),
+    // Spec 03/04 — handleStatus reads text() for envelope and headers.get('content-type')
+    // for HTML 5xx detection. Default to JSON content-type so the new code path is dormant.
+    text: async () => '',
+    headers: { get: () => 'application/json' },
   };
 }
 

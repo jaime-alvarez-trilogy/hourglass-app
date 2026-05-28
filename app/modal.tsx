@@ -9,11 +9,14 @@ import { useRouter } from 'expo-router';
 import { useEffect, useState, startTransition } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { clearAll, loadCredentials, saveConfig } from '@/src/store/config';
+import { invalidateAuthToken } from '@/src/api/client';
 import { unregisterPushToken } from '@/src/lib/pushToken';
 import { fetchAndBuildConfig } from '@/src/api/auth';
 import { MOCK_TEAM_ITEMS } from '@/src/lib/devMock';
 import { useConfig } from '@/src/hooks/useConfig';
 import { colors } from '@/src/lib/colors';
+import { log } from '@/src/lib/log';
+import * as Sharing from 'expo-sharing';
 
 export default function ModalScreen() {
   const router = useRouter();
@@ -49,7 +52,12 @@ export default function ModalScreen() {
         style: 'destructive',
         onPress: async () => {
           await unregisterPushToken().catch(() => {});
-          await clearAll();
+          try {
+            await clearAll();
+          } finally {
+            // Spec 04 FR7: wipe the in-memory auth-token cache even if clearAll throws.
+            invalidateAuthToken();
+          }
           // 05-cache-hygiene FR2: clear TanStack in-memory cache and cancel notifications
           try { queryClient.clear(); } catch { /* non-blocking */ }
           try { await Notifications.cancelAllScheduledNotificationsAsync(); } catch { /* non-blocking */ }
@@ -79,6 +87,10 @@ export default function ModalScreen() {
             try {
               const creds = await loadCredentials();
               if (!creds) return;
+              // Spec 04 FR7: drop any cached token from the old env BEFORE minting
+              // a new one against the target env, otherwise getAuthToken would
+              // serve the stale token from the old environment.
+              invalidateAuthToken();
               const newConfig = await fetchAndBuildConfig(creds.username, creds.password, targetIsQA);
               await saveConfig(newConfig);
               startTransition(() => {
@@ -131,6 +143,34 @@ export default function ModalScreen() {
     } catch (e) {
       console.error('[settings] toggleDevOvertimePreview failed:', e);
     }
+  }
+
+  // Spec 08-observability-log FR9: user-driven export of the local debug log.
+  // The logger redacts payloads at write time, so the file is safe to share.
+  async function handleShareLog() {
+    try {
+      const uri = await log.getLogFileUri();
+      await Sharing.shareAsync(uri, {
+        dialogTitle: 'Share debug log',
+        mimeType: 'text/plain',
+      });
+    } catch {
+      Alert.alert('Could not share', 'Try again later.');
+    }
+  }
+
+  // Spec 08-observability-log FR9: wipe all on-device log events.
+  function handleClearLog() {
+    Alert.alert('Clear log?', 'This removes all logged events from this device.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Clear',
+        style: 'destructive',
+        onPress: async () => {
+          await log.clear();
+        },
+      },
+    ]);
   }
 
   return (
@@ -187,6 +227,31 @@ export default function ModalScreen() {
               )}
             </TouchableOpacity>
           )}
+
+          {/* Spec 08-observability-log FR9: privacy-preserving debug log,
+              visible to all users (not gated behind isMe). */}
+          <View style={styles.debugLogBox}>
+            <Text style={styles.debugLogTitle}>Debug Log</Text>
+            <Text style={styles.debugLogHint}>
+              Export a privacy-redacted error log when reporting a bug.
+            </Text>
+            <View style={styles.debugLogRow}>
+              <TouchableOpacity
+                style={styles.debugLogButton}
+                onPress={handleShareLog}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.debugLogButtonText}>Share log</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.debugLogButton}
+                onPress={handleClearLog}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.debugLogButtonText}>Clear log</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
 
           {config && isMe && (
             <View style={styles.devBox}>
@@ -307,6 +372,43 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.5,
+  },
+  debugLogBox: {
+    backgroundColor: '#161B22',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+  },
+  debugLogTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#8B949E',
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  debugLogHint: {
+    fontSize: 12,
+    color: '#8B949E',
+    marginBottom: 12,
+  },
+  debugLogRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  debugLogButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+  },
+  debugLogButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#FFFFFF',
   },
   devBox: {
     backgroundColor: '#161B22',

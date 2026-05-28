@@ -124,11 +124,11 @@ describe('FR9: clearAll', () => {
     expect(result).toBeNull();
   });
 
-  it('clearAll calls AsyncStorage.multiRemove with all 15 keys', async () => {
+  it('clearAll calls AsyncStorage.multiRemove with all 18 keys', async () => {
     await clearAll();
     expect(mockAsyncStorage.multiRemove).toHaveBeenCalledTimes(1);
     const [keys] = (mockAsyncStorage.multiRemove as jest.Mock).mock.calls[0];
-    expect(keys).toHaveLength(15);
+    expect(keys).toHaveLength(18);
     expect(keys).toContain('crossover_config');
     expect(keys).toContain('crossover_username');
     expect(keys).toContain('crossover_password');
@@ -137,7 +137,7 @@ describe('FR9: clearAll', () => {
   it('clearAll includes all data keys beyond the original 3', async () => {
     await clearAll();
     const [keys] = (mockAsyncStorage.multiRemove as jest.Mock).mock.calls[0];
-    // Verify the additional 11 keys that were missing in the original clearAll
+    // Verify the additional keys that were missing in the original clearAll
     expect(keys).toContain('hours_cache');
     expect(keys).toContain('ai_cache');
     expect(keys).toContain('previousWeekAIPercent');
@@ -148,7 +148,10 @@ describe('FR9: clearAll', () => {
     expect(keys).toContain('widget_data');
     expect(keys).toContain('notif_thursday_id');
     expect(keys).toContain('notif_monday_id');
+    expect(keys).toContain('notif_expiry_id');         // 07-notification-lifecycle FR7
+    expect(keys).toContain('notif_schedule_lock');     // 07-notification-lifecycle FR7
     expect(keys).toContain('prev_approval_count');
+    expect(keys).toContain('prev_approval_ids');
     expect(keys).toContain('HOURGLASS_QUERY_CACHE');
   });
 
