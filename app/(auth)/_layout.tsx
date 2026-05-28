@@ -12,6 +12,8 @@ export default function AuthLayout() {
         <Stack.Screen name="env-select" options={{ gestureEnabled: false }} />
         <Stack.Screen name="setup" />
         <Stack.Screen name="success" />
+        {/* 05-onboarding-defense FR7: terminal state for no-contributor accounts. */}
+        <Stack.Screen name="not-contributor" options={{ gestureEnabled: false }} />
       </Stack>
     </OnboardingProvider>
   );

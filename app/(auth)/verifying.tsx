@@ -10,6 +10,7 @@ export default function VerifyingScreen() {
   const { step } = useOnboarding();
 
   // SC4.3–4.5: Navigate automatically when step leaves 'verifying'
+  // 05-onboarding-defense FR8: add 'not-contributor' branch
   useEffect(() => {
     if (step === 'success') {
       router.replace('/(auth)/success');
@@ -19,6 +20,8 @@ export default function VerifyingScreen() {
       router.replace('/(auth)/env-select');
     } else if (step === 'credentials') {
       router.replace('/(auth)/credentials');
+    } else if (step === 'not-contributor') {
+      router.replace('/(auth)/not-contributor');
     }
   }, [step, router]);
 
