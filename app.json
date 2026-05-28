@@ -101,7 +101,8 @@
       ],
       "expo-font",
       "expo-image",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-sharing"
     ],
     "updates": {
       "url": "https://u.expo.dev/4ad8a6bd-aec2-45a5-935f-5598d47b605d"
