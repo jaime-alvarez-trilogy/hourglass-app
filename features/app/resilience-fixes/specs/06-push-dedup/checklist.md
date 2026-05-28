@@ -11,73 +11,73 @@ Before any production code change, write tests that fail against the current cou
 
 ### Test file: `src/__tests__/notifications/handler.test.ts`
 
-- [ ] **T1 — Switch to repo-wide AsyncStorage mock.** Replace the inline `jest.mock('@react-native-async-storage/async-storage', …)` (lines 22-26 of the current test file) with the manual mock at `__mocks__/@react-native-async-storage/async-storage.ts` (which already supports `removeItem`/`multiRemove`/`_reset`). Call `AsyncStorage._reset()` in `beforeEach`. Remove the now-unused inline `jest.mock` for AsyncStorage. *Rationale: tests need `removeItem` for legacy-key cleanup verification (FR5) and the manual mock keeps test surface consistent across the codebase.*
-- [ ] **T2 — Update existing tests for `prev_approval_count` flow.** Replace test setups that pre-seed `prev_approval_count` via `getItem.mockResolvedValueOnce('N')` with seeds of `prev_approval_ids` via `AsyncStorage.setItem('prev_approval_ids', JSON.stringify([…]))`. The two existing tests that need this: "schedules local notification when manager has new approvals" and "does not schedule notification when approval count is unchanged".
+- [x] **T1 — Extend inline AsyncStorage mock with `removeItem`.** *Implementation note: kept the inline `jest.mock` pattern (consistent with `useScheduledNotifications.test.ts`) instead of switching to the repo-wide manual mock. Added `removeItem: jest.fn()` to the factory. Functionally equivalent for the FRs and lower-risk than wholesale mock swap.*
+- [x] **T2 — Existing count-based tests subsumed.** The old "schedules local notification when manager has new approvals" and "does not schedule notification when approval count is unchanged" were replaced wholesale by the new FR2/FR3 test blocks (T8, T9, T14, T15, T16) which assert the same behavior under the new dedup contract.
 
 ### FR1 — Read previously-seen IDs from storage
 
-- [ ] **T3** — Returns parsed Set when storage holds valid JSON array of strings.
-- [ ] **T4** — Returns null when key is absent (no prior write).
-- [ ] **T5** — Returns null when stored value is not valid JSON (e.g. `'not-json'`); does not throw.
-- [ ] **T6** — Returns null when stored value is valid JSON but not an array (e.g. `'{"foo":"bar"}'`); does not throw.
-- [ ] **T7** — Returns null when `AsyncStorage.getItem` rejects; handler does not throw.
+- [x] **T3** — Returns parsed Set when storage holds valid JSON array of strings.
+- [x] **T4** — Returns null when key is absent (no prior write).
+- [x] **T5** — Returns null when stored value is not valid JSON (e.g. `'not-json'`); does not throw.
+- [x] **T6** — Returns null when stored value is valid JSON but not an array (e.g. `'{"foo":"bar"}'`); does not throw.
+- [x] **T7** — Returns null when `AsyncStorage.getItem` rejects; handler does not throw.
 
 ### FR2 — Set-difference computation
 
-- [ ] **T8** — current `[mt-1,mt-2]`, prev `[mt-1]` → fires notification once with count 1.
-- [ ] **T9** — current `[mt-1,mt-2]`, prev `[mt-1,mt-2]` (no change) → no notification.
-- [ ] **T10** — current `[mt-1]`, prev `[mt-1,mt-2]` (item disappeared) → no notification; storage now holds `[mt-1]`.
-- [ ] **T11** — current `[mt-1,mt-3]`, prev `[mt-1,mt-2]` (approve-then-arrive inversion) → fires count 1, not count 0 and not count 2. *This is the Thursday-flood regression case.*
-- [ ] **T12** — current `[mt-1,mt-2,ot-9,ot-10]`, prev `[mt-1,mt-2]` (two overtime items arrived) → fires count 2.
-- [ ] **T13 — Cross-week regression case** — prev `[mt-1]`, current `[mt-prev-week-A, mt-prev-week-B, mt-1]` (window widened to include 2 prior weeks) → fires count 2. *Asserts the documented "regression by design" — research §"Test plan, Cross-week window expansion".*
+- [x] **T8** — current `[mt-1,mt-2]`, prev `[mt-1]` → fires notification once with count 1.
+- [x] **T9** — current `[mt-1,mt-2]`, prev `[mt-1,mt-2]` (no change) → no notification.
+- [x] **T10** — current `[mt-1]`, prev `[mt-1,mt-2]` (item disappeared) → no notification; storage now holds `[mt-1]`.
+- [x] **T11** — current `[mt-1,mt-3]`, prev `[mt-1,mt-2]` (approve-then-arrive inversion) → fires count 1, not count 0 and not count 2. *This is the Thursday-flood regression case.*
+- [x] **T12** — current `[mt-1,mt-2,ot-9,ot-10]`, prev `[mt-1,mt-2]` (two overtime items arrived) → fires count 2.
+- [x] **T13 — Cross-week regression case** — prev `[mt-1]`, current `[mt-prev-week-A, mt-prev-week-B, mt-1]` (window widened to include 2 prior weeks) → fires count 2. *Asserts the documented "regression by design" — research §"Test plan, Cross-week window expansion".*
 
 ### FR3 — Notification scheduling
 
-- [ ] **T14** — Notification body contains the *new-items* count (not total `pendingCount`). With current `[mt-1,mt-2,mt-3]`, prev `[mt-1]`, body must contain "2", must not contain "3".
-- [ ] **T15** — Notification title is unchanged: `'New Approvals'`.
-- [ ] **T16** — `scheduleNotificationAsync` is called exactly once when new items are present.
+- [x] **T14** — Notification body contains the *new-items* count (not total `pendingCount`). With current `[mt-1,mt-2,mt-3]`, prev `[mt-1]`, body must contain "2", must not contain "3".
+- [x] **T15** — Notification title is unchanged: `'New Approvals'`.
+- [x] **T16** — `scheduleNotificationAsync` is called exactly once when new items are present.
 
 ### FR4 — First-run seed
 
-- [ ] **T17** — `prev_approval_ids` absent, current `[mt-1,mt-2]`, isManager true → no notification scheduled; storage afterwards holds `'["mt-1","mt-2"]'`.
-- [ ] **T18** — `prev_approval_ids` corrupt (`'not-json'`), current `[mt-1]` → no notification; storage afterwards holds `'["mt-1"]'`.
-- [ ] **T19** — `getItem` throws, current `[mt-1]` → no notification; `setItem` called with `'["mt-1"]'`.
+- [x] **T17** — `prev_approval_ids` absent, current `[mt-1,mt-2]`, isManager true → no notification scheduled; storage afterwards holds `'["mt-1","mt-2"]'`.
+- [x] **T18** — `prev_approval_ids` corrupt (`'not-json'`), current `[mt-1]` → no notification; storage afterwards holds `'["mt-1"]'`.
+- [x] **T19** — `getItem` throws, current `[mt-1]` → no notification; `setItem` called with `'["mt-1"]'`.
 
 ### FR5 — Legacy key cleanup
 
-- [ ] **T20** — On seed write, `AsyncStorage.removeItem('prev_approval_count')` is called.
-- [ ] **T21** — On post-notification write, `AsyncStorage.removeItem('prev_approval_count')` is called.
-- [ ] **T22** — `removeItem` rejection does not propagate. Configure the mock to make `removeItem` reject once, run a normal flow, assert handler resolves and notification still scheduled.
+- [x] **T20** — On seed write, `AsyncStorage.removeItem('prev_approval_count')` is called.
+- [x] **T21** — On post-notification write, `AsyncStorage.removeItem('prev_approval_count')` is called.
+- [x] **T22** — `removeItem` rejection does not propagate. Configure the mock to make `removeItem` reject once, run a normal flow, assert handler resolves and notification still scheduled.
 
 ### FR6 — Non-manager gate
 
-- [ ] **T23** — isManager false → `getItem('prev_approval_ids')` is NOT called. Assert via `AsyncStorage.getItem.mock.calls` not containing that key.
-- [ ] **T24** — isManager false → `setItem('prev_approval_ids', …)` is NOT called.
-- [ ] **T25** — isManager false → `scheduleNotificationAsync` is NOT called.
-- [ ] **T26** — isManager false → `updateWidgetData` IS called with the fresh snapshot (widget refresh still happens).
+- [x] **T23** — isManager false → `getItem('prev_approval_ids')` is NOT called. Assert via `AsyncStorage.getItem.mock.calls` not containing that key.
+- [x] **T24** — isManager false → `setItem('prev_approval_ids', …)` is NOT called.
+- [x] **T25** — isManager false → `scheduleNotificationAsync` is NOT called.
+- [x] **T26** — isManager false → `updateWidgetData` IS called with the fresh snapshot (widget refresh still happens).
 
 ### FR7 — Write failure resilience
 
-- [ ] **T27** — `setItem` rejects after a notification was scheduled → notification stays scheduled, `console.error` called once, handler resolves to undefined.
-- [ ] **T28** — `setItem` rejects on seed-only write → no notification scheduled, `console.error` called once, handler resolves.
+- [x] **T27** — `setItem` rejects after a notification was scheduled → notification stays scheduled, `console.error` called once, handler resolves to undefined.
+- [x] **T28** — `setItem` rejects on seed-only write → no notification scheduled, `console.error` called once, handler resolves.
 
 ### Companion test file: `src/__tests__/store/config.test.ts`
 
-- [ ] **T29** — Add `'prev_approval_ids'` to the `EXPECTED_KEYS` array (line ~30) so the existing wipe-list assertion validates both legacy and new keys. Confirm test still passes (it should fail before the implementation change because `clearAll` does not yet remove the new key).
+- [x] **T29** — Add `'prev_approval_ids'` to the `EXPECTED_KEYS` array (line ~30) so the existing wipe-list assertion validates both legacy and new keys. Confirm test still passes (it should fail before the implementation change because `clearAll` does not yet remove the new key).
 
 ### Run tests — confirm RED
 
-- [ ] **T30** — Run `npm test -- handler.test.ts` and confirm new tests fail with the expected count-based-handler errors. Existing tests that we updated (T2) should also fail.
-- [ ] **T31** — Run `npm test -- config.test.ts` and confirm the wipe-list test fails on the missing `prev_approval_ids` key.
-- [ ] **T32** — Run full `npm test` to baseline the rest of the suite (everything else should remain green).
+- [x] **T30** — Run `npm test -- handler.test.ts` and confirm new tests fail with the expected count-based-handler errors. Existing tests that we updated (T2) should also fail.
+- [x] **T31** — Run `npm test -- config.test.ts` and confirm the wipe-list test fails on the missing `prev_approval_ids` key.
+- [x] **T32** — Run full `npm test` to baseline the rest of the suite (everything else should remain green).
 
 ### Validate test design
 
-- [ ] **T33** — Self-review: each new test asserts behavior, not implementation. No test inspects the contents of a private helper directly; all assertions flow through `handleBackgroundPush`'s observable side effects (`AsyncStorage` calls, `scheduleNotificationAsync` calls, `updateWidgetData` calls, `console.error`).
+- [x] **T33** — Self-review: each new test asserts behavior, not implementation. No test inspects the contents of a private helper directly; all assertions flow through `handleBackgroundPush`'s observable side effects (`AsyncStorage` calls, `scheduleNotificationAsync` calls, `updateWidgetData` calls, `console.error`).
 
 ### Commit Phase 6.0
 
-- [ ] **T34** — Commit tests-only diff. Stage `src/__tests__/notifications/handler.test.ts` and `src/__tests__/store/config.test.ts` only. Message: `test(06-push-dedup): add failing tests for ID-set dedup, first-run seed, and sign-out wipe`. HEREDOC body with the FR coverage summary. Co-Author-By: `Claude Opus 4.7 (1M context) <noreply@anthropic.com>`.
+- [x] **T34** — Commit tests-only diff. Stage `src/__tests__/notifications/handler.test.ts` and `src/__tests__/store/config.test.ts` only. Message: `test(06-push-dedup): add failing tests for ID-set dedup, first-run seed, and sign-out wipe`. HEREDOC body with the FR coverage summary. Co-Author-By: `Claude Opus 4.7 (1M context) <noreply@anthropic.com>`.
 
 ---
 
@@ -87,31 +87,31 @@ Minimum changes to turn the new tests green without breaking existing tests.
 
 ### `src/notifications/handler.ts`
 
-- [ ] **I1 — Replace key constants.** Remove `PREV_APPROVAL_COUNT_KEY` constant. Add `PREV_APPROVAL_IDS_KEY = 'prev_approval_ids'` and `PREV_APPROVAL_COUNT_KEY_LEGACY = 'prev_approval_count'`.
-- [ ] **I2 — Add `getPrevIds()` helper.** Async, returns `Promise<Set<string> | null>`. Wraps `AsyncStorage.getItem` in try/catch; returns `null` on any failure path (rejection, non-string, JSON parse error, non-array result). On a valid array, returns `new Set(arr.filter(x => typeof x === 'string'))` — defensive against mixed-type arrays.
-- [ ] **I3 — Add `savePrevIds(ids: Set<string>)` helper.** Async, returns `Promise<void>`. Calls `AsyncStorage.setItem(PREV_APPROVAL_IDS_KEY, JSON.stringify([...ids]))`. Then calls `AsyncStorage.removeItem(PREV_APPROVAL_COUNT_KEY_LEGACY).catch(() => {})`. The `setItem` rejection IS allowed to propagate so the caller's try/catch logs it (FR7).
-- [ ] **I4 — Rewrite `handleBackgroundPush` dedup block.** Inside the existing `if (freshData.config.isManager)` branch, replace the count-based logic with:
+- [x] **I1 — Replace key constants.** Remove `PREV_APPROVAL_COUNT_KEY` constant. Add `PREV_APPROVAL_IDS_KEY = 'prev_approval_ids'` and `PREV_APPROVAL_COUNT_KEY_LEGACY = 'prev_approval_count'`.
+- [x] **I2 — Add `getPrevIds()` helper.** Async, returns `Promise<Set<string> | null>`. Wraps `AsyncStorage.getItem` in try/catch; returns `null` on any failure path (rejection, non-string, JSON parse error, non-array result). On a valid array, returns `new Set(arr.filter(x => typeof x === 'string'))` — defensive against mixed-type arrays.
+- [x] **I3 — Add `savePrevIds(ids: Set<string>)` helper.** Async, returns `Promise<void>`. Calls `AsyncStorage.setItem(PREV_APPROVAL_IDS_KEY, JSON.stringify([...ids]))`. Then calls `AsyncStorage.removeItem(PREV_APPROVAL_COUNT_KEY_LEGACY).catch(() => {})`. The `setItem` rejection IS allowed to propagate so the caller's try/catch logs it (FR7).
+- [x] **I4 — Rewrite `handleBackgroundPush` dedup block.** Inside the existing `if (freshData.config.isManager)` branch, replace the count-based logic with:
   - `currentIds = new Set((freshData.approvalItems ?? []).map(it => it.id))`
   - `prevIds = await getPrevIds()`
   - if `prevIds === null` → `await savePrevIds(currentIds)` and `return` (skips notification — but the surrounding try/catch must still complete; use a structured branch instead of an early function-level return so updateWidgetData remains called above).
   - Actually: `updateWidgetData` is already called before this block, so an early `return` inside the manager-branch is safe. Use early return.
   - else: compute `newIds = [...currentIds].filter(id => !prevIds.has(id))`; if `newIds.length > 0` call `await scheduleLocalNotification(newIds.length)`; then `await savePrevIds(currentIds)`.
-- [ ] **I5 — Preserve the outer try/catch contract.** Any rejection from `savePrevIds` inside the manager branch must be caught by the existing `try { … } catch (err) { console.error(…) }` wrapping the whole handler body. Verify the new code is inside that try.
-- [ ] **I6 — Update the JSDoc on `handleBackgroundPush`.** Replace the line about "schedules local notification if needed" with a one-liner: "schedules local notification when the manager has newly-arrived approval items (set-difference dedup vs `prev_approval_ids`)."
+- [x] **I5 — Preserve the outer try/catch contract.** Any rejection from `savePrevIds` inside the manager branch must be caught by the existing `try { … } catch (err) { console.error(…) }` wrapping the whole handler body. Verify the new code is inside that try.
+- [x] **I6 — Update the JSDoc on `handleBackgroundPush`.** Replace the line about "schedules local notification if needed" with a one-liner: "schedules local notification when the manager has newly-arrived approval items (set-difference dedup vs `prev_approval_ids`)."
 
 ### `src/store/config.ts`
 
-- [ ] **I7 — Add `'prev_approval_ids'` to `clearAll` wipe list.** Insert immediately after the existing `'prev_approval_count'` entry (line 89) so legacy and new keys cluster together. Order matters for test stability — the companion test asserts an exact-content list.
+- [x] **I7 — Add `'prev_approval_ids'` to `clearAll` wipe list.** Insert immediately after the existing `'prev_approval_count'` entry (line 89) so legacy and new keys cluster together. Order matters for test stability — the companion test asserts an exact-content list.
 
 ### Run tests — confirm GREEN
 
-- [ ] **I8** — `npm test -- handler.test.ts` passes (all old + new tests).
-- [ ] **I9** — `npm test -- config.test.ts` passes.
-- [ ] **I10** — `npm test` (full suite) passes with no regressions. *Establish a delta count vs the pre-spec baseline — record both numbers in the commit message.*
+- [x] **I8** — `npm test -- handler.test.ts` passes (all old + new tests).
+- [x] **I9** — `npm test -- config.test.ts` passes.
+- [x] **I10** — `npm test` (full suite) passes with no regressions. *Establish a delta count vs the pre-spec baseline — record both numbers in the commit message.*
 
 ### Commit Phase 6.1
 
-- [ ] **I11** — Commit implementation. Stage `src/notifications/handler.ts` and `src/store/config.ts` only. Message: `feat(06-push-dedup): replace count-based dedup with ID-set diff`. HEREDOC body describing the structural fix and citing §8.1. Co-Author-By: `Claude Opus 4.7 (1M context) <noreply@anthropic.com>`.
+- [x] **I11** — Commit implementation. Stage `src/notifications/handler.ts` and `src/store/config.ts` only. Message: `feat(06-push-dedup): replace count-based dedup with ID-set diff`. HEREDOC body describing the structural fix and citing §8.1. Co-Author-By: `Claude Opus 4.7 (1M context) <noreply@anthropic.com>`.
 
 ---
 
@@ -161,11 +161,11 @@ These are recorded for the release-day smoke test; they do not block this spec's
 
 ### Feature changelog
 
-- [ ] **R11 — Update `features/app/resilience-fixes/FEATURE.md` Changelog.** Add a row for 06-push-dedup with the implementation date and commit hashes (Phase 6.0, 6.1, 6.2 docs).
+- [x] **R11 — Update `features/app/resilience-fixes/FEATURE.md` Changelog.** Add a row for 06-push-dedup with the implementation date and commit hashes (Phase 6.0, 6.1, 6.2 docs).
 
 ### Final commit (changelog)
 
-- [ ] **R12** — Stage `features/app/resilience-fixes/FEATURE.md` only. Message: `docs(resilience-fixes): record 06-push-dedup completion in changelog`. HEREDOC. Co-Author-By.
+- [x] **R12** — Stage `features/app/resilience-fixes/FEATURE.md` only. Message: `docs(resilience-fixes): record 06-push-dedup completion in changelog`. HEREDOC. Co-Author-By.
 
 ---
 
@@ -182,3 +182,19 @@ These are recorded for the release-day smoke test; they do not block this spec's
   2. `feat(06-push-dedup): …`
   3. `docs(06-push-dedup): …`
   4. `docs(resilience-fixes): …`
+
+---
+
+## Session Notes
+
+**2026-05-28**: Implementation complete.
+
+- **Phase 6.0** — 1 commit (`6dd7e1a`): added 20 new failing tests across FR1–FR8, plus updated 2 existing wipe-list assertions. Suite went 3889 → 3889 pass / 20 fail (3909 total) — confirmed RED.
+- **Phase 6.1** — 1 commit (`ee5cf05`): rewrote `handleBackgroundPush` manager branch around `getPrevIds()`/`savePrevIds()` helpers, added `prev_approval_ids` to `clearAll` wipe list. Caught a hidden duplicate of the FR8 assertion in `__tests__/config-store.test.ts` (outer-directory) during full-suite run; synced it inside the same commit as a mechanical contract fix. Suite went to 3909/3909 green.
+- **Phase 6.2** — 1 commit (`e2a5aec`): updated `src/notifications/README.md` invariants list, `docs/ARCHITECTURE.md` §1.3 / §2 step 5 / §3.2 / §8.1 (marked resolved with residual procedural risk noted). No code touched; suite remained 3909/3909.
+
+**Deviations from the original checklist:**
+- T1 was relaxed from "switch to repo-wide manual mock" to "extend the inline mock with `removeItem`" — same observable behavior, lower-risk change, consistent with `useScheduledNotifications.test.ts`.
+- T29's scope quietly expanded to include a sibling assertion in `__tests__/config-store.test.ts`; this was caught at I10 (full suite) and folded into the impl commit.
+
+**Manual TestFlight scenarios (R7–R10)** remain unchecked — they require a real device and live API and are deferred to the release-day smoke test, not blocking merge.
