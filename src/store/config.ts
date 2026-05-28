@@ -86,6 +86,8 @@ export async function clearAll(): Promise<void> {
       'widget_data',
       'notif_thursday_id',
       'notif_monday_id',
+      'notif_expiry_id',         // 07-notification-lifecycle FR7
+      'notif_schedule_lock',     // 07-notification-lifecycle FR7
       'prev_approval_count',
       'prev_approval_ids',
       'HOURGLASS_QUERY_CACHE',  // TanStack Query persisted cache

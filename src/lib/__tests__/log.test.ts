@@ -2,21 +2,29 @@
 
 jest.mock('expo-file-system/legacy');
 
-import * as FileSystem from 'expo-file-system/legacy';
 import { AuthError } from '@/src/api/errors';
 
-// Helper: pull the in-memory file contents out of the mock.
-const _fs = FileSystem as unknown as {
+const LOG_URI = '/mock-docs/hourglass-debug.log';
+
+type FsMock = typeof import('expo-file-system/legacy') & {
   _reset: () => void;
   _getFile: (uri: string) => string | undefined;
   _setFile: (uri: string, content: string) => void;
 };
 
-const LOG_URI = '/mock-docs/hourglass-debug.log';
+// Resolve the mock through the same module-id the production code uses so
+// jest.resetModules() does not desynchronise the file-system mock between
+// the logger module and the test's read helpers.
+function getFs(): FsMock {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require('expo-file-system/legacy') as FsMock;
+}
 
 beforeEach(() => {
-  _fs._reset();
   jest.resetModules();
+  // After resetModules, requiring the mock returns a fresh module with a
+  // fresh files map; call _reset to defensively clear any state.
+  getFs()._reset();
 });
 
 afterEach(() => {
@@ -31,13 +39,18 @@ function freshLogger() {
   return mod;
 }
 
+// Convenience wrapper around getFs()._getFile so tests don't repeat the cast.
+function _fsGet(uri: string): string | undefined {
+  return getFs()._getFile(uri);
+}
+
 describe('logger — FR1: line format', () => {
   // T18
   it('writes a single JSON line per call', async () => {
     const { log } = freshLogger();
     log.info('x.y', { a: 1 });
     await log.flush();
-    const content = _fs._getFile(LOG_URI);
+    const content = _fsGet(LOG_URI);
     expect(content).toBeDefined();
     const lines = content!.split('\n').filter((s) => s.length > 0);
     expect(lines).toHaveLength(1);
@@ -52,7 +65,7 @@ describe('logger — FR1: line format', () => {
     log.info('first', {});
     log.info('second', {});
     await log.flush();
-    const content = _fs._getFile(LOG_URI)!;
+    const content = _fsGet(LOG_URI)!;
     const lines = content.split('\n').filter((s) => s.length > 0);
     expect(lines).toHaveLength(2);
     expect(JSON.parse(lines[0]).category).toBe('first');
@@ -65,7 +78,7 @@ describe('logger — FR1: line format', () => {
     log.info('a', {});
     log.info('b', {});
     await log.flush();
-    const content = _fs._getFile(LOG_URI)!;
+    const content = _fsGet(LOG_URI)!;
     expect(content.endsWith('\n')).toBe(true);
     expect((content.match(/\n/g) ?? []).length).toBe(2);
   });
@@ -75,7 +88,7 @@ describe('logger — FR1: line format', () => {
     const { log } = freshLogger();
     log.info('x', {});
     await log.flush();
-    const content = _fs._getFile(LOG_URI)!;
+    const content = _fsGet(LOG_URI)!;
     const parsed = JSON.parse(content.split('\n')[0]);
     expect(Number.isFinite(Date.parse(parsed.ts))).toBe(true);
   });
@@ -87,7 +100,7 @@ describe('logger — FR3: error class without message', () => {
     const { log } = freshLogger();
     log.error('cat', new Error('SECRET_MARKER'));
     await log.flush();
-    const content = _fs._getFile(LOG_URI)!;
+    const content = _fsGet(LOG_URI)!;
     expect(content).not.toContain('SECRET_MARKER');
     const parsed = JSON.parse(content.split('\n')[0]);
     expect(parsed.errorClass).toBe('Error');
@@ -99,7 +112,7 @@ describe('logger — FR3: error class without message', () => {
     const { log } = freshLogger();
     log.error('auth.failure', new AuthError(401, 'should not appear'));
     await log.flush();
-    const content = _fs._getFile(LOG_URI)!;
+    const content = _fsGet(LOG_URI)!;
     expect(content).not.toContain('should not appear');
     const parsed = JSON.parse(content.split('\n')[0]);
     expect(parsed.errorClass).toBe('AuthError');
@@ -110,7 +123,7 @@ describe('logger — FR3: error class without message', () => {
     const { log } = freshLogger();
     log.error('cat', 'CustomClass', { statusCode: 500 });
     await log.flush();
-    const content = _fs._getFile(LOG_URI)!;
+    const content = _fsGet(LOG_URI)!;
     const parsed = JSON.parse(content.split('\n')[0]);
     expect(parsed.errorClass).toBe('CustomClass');
     expect(parsed.meta).toEqual({ statusCode: 500 });
@@ -121,7 +134,7 @@ describe('logger — FR3: error class without message', () => {
     const { log } = freshLogger();
     log.error('cat', new Error(''));
     await log.flush();
-    const content = _fs._getFile(LOG_URI)!;
+    const content = _fsGet(LOG_URI)!;
     const parsed = JSON.parse(content.split('\n')[0]);
     expect(parsed.errorClass).toBe('Error');
     expect(parsed.message).toBeUndefined();
@@ -134,9 +147,9 @@ describe('logger — FR4: buffered flush', () => {
     jest.useFakeTimers();
     const { log } = freshLogger();
     log.info('delayed', {});
-    expect(_fs._getFile(LOG_URI)).toBeUndefined();
+    expect(_fsGet(LOG_URI)).toBeUndefined();
     await jest.advanceTimersByTimeAsync(3001);
-    const content = _fs._getFile(LOG_URI);
+    const content = _fsGet(LOG_URI);
     expect(content).toBeDefined();
     expect(content!).toContain('delayed');
   });
@@ -145,7 +158,7 @@ describe('logger — FR4: buffered flush', () => {
   it('flush() with empty buffer does not call writeAsStringAsync', async () => {
     const { log } = freshLogger();
     await log.flush();
-    expect((FileSystem.writeAsStringAsync as jest.Mock).mock.calls.length).toBe(0);
+    expect((getFs().writeAsStringAsync as jest.Mock).mock.calls.length).toBe(0);
   });
 
   // T28
@@ -155,7 +168,7 @@ describe('logger — FR4: buffered flush', () => {
     log.info('b', {});
     log.info('c', {});
     await log.flush();
-    expect((FileSystem.writeAsStringAsync as jest.Mock).mock.calls.length).toBe(1);
+    expect((getFs().writeAsStringAsync as jest.Mock).mock.calls.length).toBe(1);
   });
 
   // T29
@@ -164,9 +177,9 @@ describe('logger — FR4: buffered flush', () => {
     const { log } = freshLogger();
     log.info('x', {});
     await log.flush();
-    const writesAfterFlush = (FileSystem.writeAsStringAsync as jest.Mock).mock.calls.length;
+    const writesAfterFlush = (getFs().writeAsStringAsync as jest.Mock).mock.calls.length;
     await jest.advanceTimersByTimeAsync(5000);
-    expect((FileSystem.writeAsStringAsync as jest.Mock).mock.calls.length).toBe(writesAfterFlush);
+    expect((getFs().writeAsStringAsync as jest.Mock).mock.calls.length).toBe(writesAfterFlush);
   });
 });
 
@@ -183,7 +196,7 @@ describe('logger — FR5: rotation', () => {
     }
     await log.flush();
 
-    const content = _fs._getFile(LOG_URI)!;
+    const content = _fsGet(LOG_URI)!;
     const size = Buffer.byteLength(content, 'utf8');
     // T30: file should be ≤ 300 bytes (or close — rotation aims for target).
     expect(size).toBeLessThanOrEqual(500);
@@ -199,7 +212,7 @@ describe('logger — FR5: rotation', () => {
     // T33: subsequent writes append correctly.
     log.info('after', { ok: true });
     await log.flush();
-    const after = _fs._getFile(LOG_URI)!;
+    const after = _fsGet(LOG_URI)!;
     expect(after).toContain('after');
   });
 });
@@ -208,7 +221,7 @@ describe('logger — FR6: never throws', () => {
   // T34
   it('swallows writeAsStringAsync rejections', async () => {
     const { log } = freshLogger();
-    (FileSystem.writeAsStringAsync as jest.Mock).mockRejectedValueOnce(new Error('disk full'));
+    (getFs().writeAsStringAsync as jest.Mock).mockRejectedValueOnce(new Error('disk full'));
     log.info('x', {});
     await expect(log.flush()).resolves.toBeUndefined();
   });
@@ -216,7 +229,7 @@ describe('logger — FR6: never throws', () => {
   // T35
   it('swallows getInfoAsync rejections during rotation check', async () => {
     const { log } = freshLogger();
-    (FileSystem.getInfoAsync as jest.Mock).mockRejectedValueOnce(new Error('stat fail'));
+    (getFs().getInfoAsync as jest.Mock).mockRejectedValueOnce(new Error('stat fail'));
     log.info('x', {});
     await expect(log.flush()).resolves.toBeUndefined();
   });
@@ -224,12 +237,12 @@ describe('logger — FR6: never throws', () => {
   // T36
   it('clears buffer on failure (no unbounded retry)', async () => {
     const { log } = freshLogger();
-    (FileSystem.writeAsStringAsync as jest.Mock).mockRejectedValueOnce(new Error('boom'));
+    (getFs().writeAsStringAsync as jest.Mock).mockRejectedValueOnce(new Error('boom'));
     log.info('lost', {});
     await log.flush();
     // Next flush should not write the "lost" event again.
     await log.flush();
-    const content = _fs._getFile(LOG_URI);
+    const content = _fsGet(LOG_URI);
     if (content) {
       expect(content).not.toContain('lost');
     }
@@ -238,7 +251,7 @@ describe('logger — FR6: never throws', () => {
   // T37
   it('log.error during disk failure does not throw', async () => {
     const { log } = freshLogger();
-    (FileSystem.writeAsStringAsync as jest.Mock).mockRejectedValue(new Error('disk full'));
+    (getFs().writeAsStringAsync as jest.Mock).mockRejectedValue(new Error('disk full'));
     expect(() => log.error('cat', new Error('boom'))).not.toThrow();
     await expect(log.flush()).resolves.toBeUndefined();
   });
@@ -256,7 +269,7 @@ describe('logger — FR7: getLogFileUri', () => {
   it('creates the file empty if it does not exist', async () => {
     const { log } = freshLogger();
     const uri = await log.getLogFileUri();
-    const info = await FileSystem.getInfoAsync(uri);
+    const info = await getFs().getInfoAsync(uri);
     expect(info.exists).toBe(true);
   });
 
@@ -274,10 +287,10 @@ describe('logger — FR8: clear', () => {
     const { log } = freshLogger();
     log.info('x', {});
     await log.flush();
-    expect(_fs._getFile(LOG_URI)!.length).toBeGreaterThan(0);
+    expect(_fsGet(LOG_URI)!.length).toBeGreaterThan(0);
     await log.clear();
     await log.flush(); // nothing buffered; no-op
-    const after = _fs._getFile(LOG_URI);
+    const after = _fsGet(LOG_URI);
     expect(after).toBe('');
   });
 
@@ -287,9 +300,9 @@ describe('logger — FR8: clear', () => {
     log.info('x', {});
     await log.flush();
     await log.clear();
-    expect((FileSystem.deleteAsync as jest.Mock).mock.calls.length).toBe(0);
+    expect((getFs().deleteAsync as jest.Mock).mock.calls.length).toBe(0);
     const uri = await log.getLogFileUri();
-    const info = await FileSystem.getInfoAsync(uri);
+    const info = await getFs().getInfoAsync(uri);
     expect(info.exists).toBe(true);
   });
 
@@ -300,7 +313,7 @@ describe('logger — FR8: clear', () => {
     log.info('queued', {});
     await log.clear();
     await jest.advanceTimersByTimeAsync(5000);
-    const content = _fs._getFile(LOG_URI);
+    const content = _fsGet(LOG_URI);
     // After clear+timer advance, no write of "queued" should appear.
     expect(content === undefined || !content.includes('queued')).toBe(true);
   });
