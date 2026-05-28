@@ -15,6 +15,8 @@ import { fetchAndBuildConfig } from '@/src/api/auth';
 import { MOCK_TEAM_ITEMS } from '@/src/lib/devMock';
 import { useConfig } from '@/src/hooks/useConfig';
 import { colors } from '@/src/lib/colors';
+import { log } from '@/src/lib/log';
+import * as Sharing from 'expo-sharing';
 
 export default function ModalScreen() {
   const router = useRouter();
@@ -143,6 +145,34 @@ export default function ModalScreen() {
     }
   }
 
+  // Spec 08-observability-log FR9: user-driven export of the local debug log.
+  // The logger redacts payloads at write time, so the file is safe to share.
+  async function handleShareLog() {
+    try {
+      const uri = await log.getLogFileUri();
+      await Sharing.shareAsync(uri, {
+        dialogTitle: 'Share debug log',
+        mimeType: 'text/plain',
+      });
+    } catch {
+      Alert.alert('Could not share', 'Try again later.');
+    }
+  }
+
+  // Spec 08-observability-log FR9: wipe all on-device log events.
+  function handleClearLog() {
+    Alert.alert('Clear log?', 'This removes all logged events from this device.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Clear',
+        style: 'destructive',
+        onPress: async () => {
+          await log.clear();
+        },
+      },
+    ]);
+  }
+
   return (
     <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill}>
       <View style={styles.overlay}>
@@ -197,6 +227,31 @@ export default function ModalScreen() {
               )}
             </TouchableOpacity>
           )}
+
+          {/* Spec 08-observability-log FR9: privacy-preserving debug log,
+              visible to all users (not gated behind isMe). */}
+          <View style={styles.debugLogBox}>
+            <Text style={styles.debugLogTitle}>Debug Log</Text>
+            <Text style={styles.debugLogHint}>
+              Export a privacy-redacted error log when reporting a bug.
+            </Text>
+            <View style={styles.debugLogRow}>
+              <TouchableOpacity
+                style={styles.debugLogButton}
+                onPress={handleShareLog}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.debugLogButtonText}>Share log</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.debugLogButton}
+                onPress={handleClearLog}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.debugLogButtonText}>Clear log</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
 
           {config && isMe && (
             <View style={styles.devBox}>
@@ -317,6 +372,43 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.5,
+  },
+  debugLogBox: {
+    backgroundColor: '#161B22',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+  },
+  debugLogTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#8B949E',
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  debugLogHint: {
+    fontSize: 12,
+    color: '#8B949E',
+    marginBottom: 12,
+  },
+  debugLogRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  debugLogButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+  },
+  debugLogButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#FFFFFF',
   },
   devBox: {
     backgroundColor: '#161B22',

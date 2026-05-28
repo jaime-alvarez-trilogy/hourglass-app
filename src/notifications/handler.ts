@@ -13,6 +13,7 @@ import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchFreshData } from '../lib/crossoverData';
 import { updateWidgetData } from '../lib/widgetBridge';
+import { withScheduleLock } from '../lib/scheduleLock';
 
 const PREV_APPROVAL_IDS_KEY = 'prev_approval_ids';
 const PREV_APPROVAL_COUNT_KEY_LEGACY = 'prev_approval_count';
@@ -49,6 +50,12 @@ async function savePrevIds(ids: Set<string>): Promise<void> {
  * Handle an incoming push notification.
  * Only acts on notifications where data.type === 'bg_refresh'.
  * All errors are caught and logged — handler never throws.
+ *
+ * 07-notification-lifecycle FR6: when spec-06 dedup decides to fire, the
+ * scheduleLocalNotification call is wrapped in withScheduleLock to coordinate
+ * with useScheduledNotifications.scheduleAll. If the lock is contended, the
+ * notification is skipped — but savePrevIds still advances the dedup state so
+ * the next push doesn't re-evaluate the same items as new.
  */
 export async function handleBackgroundPush(
   notification: Notifications.Notification
@@ -77,7 +84,10 @@ export async function handleBackgroundPush(
 
       const newIds = [...currentIds].filter((id) => !prevIds.has(id));
       if (newIds.length > 0) {
-        await scheduleLocalNotification(newIds.length);
+        // 07-notification-lifecycle FR6: cross-handler mutex. Lock may be
+        // contended by useScheduledNotifications.scheduleAll; if so, skip
+        // the notification but still advance dedup state below.
+        await withScheduleLock(() => scheduleLocalNotification(newIds.length));
       }
       await savePrevIds(currentIds);
     }
