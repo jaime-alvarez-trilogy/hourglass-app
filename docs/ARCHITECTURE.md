@@ -43,26 +43,29 @@ Note the timezone mix: Thursday + Monday summary are local-time triggers; Monday
 
 **Execution flow:**
 
-1. **Re-entry guard** (`:212`, `:220-221`, `:252-253`). `inFlightRef: useRef(false)`. Set true on entry, reset in `finally`. Added in commit `34e2e95`.
-   - **Protects against**: rapid back-to-back AppState 'active' events spawning concurrent runs.
-   - **Does NOT protect against**: a push handler running `scheduleLocalNotification` while `scheduleAll` runs (separate code path); orphan IDs left in AsyncStorage if a previous run crashed between `cancelScheduledNotificationAsync` and `setItem`.
-2. **Permission check** (`:224-225`). `getPermissionsAsync()`. Returns silently if not granted — all three scheduled notifications are skipped.
-3. **hoursRemaining read** (`:227-243`). Defaults to `1` (positive sentinel — ensures Thursday reminder fires on fresh install before any data has been fetched). Attempts to parse `widget_data` from AsyncStorage and override; parse failure preserves the sentinel.
-4. **Thursday** (`:245-247`). Skipped if `hoursRemaining <= 0` (target hit).
-5. **Monday summary** (`:248`). Unconditional — has its own internal guards (`<2` snapshots, `0` hours last week).
-6. **Monday expiry** (`:249`). Passed `isManager` flag; internally gates on Monday before 15:00 UTC and `pendingCount > 0`.
-7. **Error handling** (`:250-254`). All errors swallowed silently.
+1. **Re-entry guard** (intra-hook). `inFlightRef: useRef(false)`. Set true on entry, reset in outer `finally`. Added in commit `bebfb0f` (spec 01-flood-guard).
+   - **Protects against**: rapid back-to-back AppState 'active' events spawning concurrent runs from the same hook instance.
+   - **Does NOT protect against**: a push handler running `scheduleLocalNotification` concurrently — that's `withScheduleLock`'s job (step 4).
+2. **Permission check**. `getPermissionsAsync()`. Returns silently if not granted — sweep, lock, and the three scheduled notifications are all skipped.
+3. **Orphan sweep** (`sweepOrphanNotifications`, `src/lib/scheduleLock.ts`). Spec 07. Iterates `getAllScheduledNotificationsAsync()`, cancels any `hourglass:*` identifier not in `EXPECTED_IDENTIFIERS`, then `multiRemove`s the legacy `notif_*_id` AsyncStorage keys. Runs outside the lock so contention doesn't block cleanup.
+4. **Schedule lock** (`withScheduleLock`, AsyncStorage key `notif_schedule_lock`, stale-after-30s). Spec 07. Wraps the three scheduler calls below — coordinates against `handleBackgroundPush.scheduleLocalNotification` running concurrently. If contended, the wrapped block is skipped (best-effort; no throw).
+5. **hoursRemaining read** (inside the lock). Defaults to `1` (positive sentinel — ensures Thursday reminder fires on fresh install before any data has been fetched). Attempts to parse `widget_data` from AsyncStorage and override; parse failure preserves the sentinel.
+6. **Thursday** (inside the lock). Skipped if `hoursRemaining <= 0` (target hit). Calls `scheduleNotificationAsync({ identifier: 'hourglass:thursday', … })` — iOS replaces any prior same-id schedule.
+7. **Monday summary** (inside the lock). Unconditional — has its own internal guards (`<2` snapshots, `0` hours last week). Identifier `hourglass:monday-summary`.
+8. **Monday expiry** (inside the lock). Passed `isManager` flag; internally gates on Monday before 15:00 UTC and `pendingCount > 0`. Identifier `hourglass:monday-expiry`.
+9. **Error handling**. All errors swallowed silently inside `scheduleAll`. `inFlightRef` cleared in outer `finally`.
 
 ### 1.3 Dedup state
 
-| Notification | Storage | Key | Mechanism |
-|---|---|---|---|
-| Thursday | AsyncStorage | `notif_thursday_id` (`:21`) | Cancel old ID, schedule new, persist new ID |
-| Monday summary | AsyncStorage | `notif_monday_id` (`:22`) | Same cancel/reschedule pattern |
-| Monday expiry | AsyncStorage | `notif_expiry_id` (`:23`) | Same cancel/reschedule pattern |
-| New Approvals push | AsyncStorage | `prev_approval_ids` (`src/notifications/handler.ts:18`) | Set difference: fire `scheduleLocalNotification(newIds.length)` when `currentIds \ prevIds` is non-empty. First-ever read seeds without firing. Resolved in spec `06-push-dedup`. |
+| Notification | Storage | Mechanism |
+|---|---|---|
+| Thursday | iOS-managed (identifier `hourglass:thursday`) | Same-id replace. Spec 07. Orphan sweep cancels any non-expected `hourglass:*` at every `scheduleAll`. |
+| Monday summary | iOS-managed (identifier `hourglass:monday-summary`) | Same-id replace. Spec 07. |
+| Monday expiry | iOS-managed (identifier `hourglass:monday-expiry`) | Same-id replace. Spec 07. |
+| Cross-handler coordination | AsyncStorage (`notif_schedule_lock`) | `withScheduleLock` (`src/lib/scheduleLock.ts`). Spec 07. Best-effort mutex; stale-after-30s. Wraps `scheduleAll` and `handleBackgroundPush.scheduleLocalNotification`. |
+| New Approvals push | AsyncStorage (`prev_approval_ids`, `src/notifications/handler.ts:18`) | Set difference: fire `scheduleLocalNotification(newIds.length)` when `currentIds \ prevIds` is non-empty. First-ever read seeds without firing. Resolved in spec `06-push-dedup`. |
 
-Each calendar-triggered notification (Thursday / Monday) uses cancel-then-persist; the push-triggered approval notification uses ID-set diff (no cancel/reschedule needed since it's a transient `trigger: null` local).
+Calendar-triggered notifications rely on iOS same-id replace (no AsyncStorage ID tracking — eliminated in spec 07). The push-triggered approval notification uses ID-set diff (no cancel/reschedule needed since it's a transient `trigger: null` local). The legacy AsyncStorage keys `notif_thursday_id` / `notif_monday_id` / `notif_expiry_id` are no longer read or written; `sweepOrphanNotifications` `multiRemove`s them as one-shot migration cleanup.
 
 ### 1.4 Permission flow
 
@@ -78,14 +81,17 @@ None. No custom `setNotificationCategoryAsync` registrations, no actionable appr
 ### 1.6 Test coverage
 
 - `src/hooks/__tests__/useScheduledNotifications.test.ts`
-  - FR2 Thursday: weekday/time guards, content shape, ID rotation
-  - FR3 Monday summary: snapshot length, last-week data, content, ID rotation
-  - FR4 Monday expiry: manager gate, UTC time gate, `pendingCount` gate, singular/plural, JSON parse edge cases
-  - 06-notification-bootstrap (`:732-815`): sentinel guard
-  - 01-flood-guard (`:826-868`): `inFlightRef` entry/finally pattern
+  - FR2 Thursday / FR3 Monday summary / FR4 Monday expiry: weekday/time guards, content shape, deterministic identifier (`hourglass:*`) on every `scheduleNotificationAsync` call — spec 07.
+  - 06-notification-bootstrap: sentinel guard
+  - 01-flood-guard: `inFlightRef` entry/finally pattern (still asserted; spec 07 preserves the guard)
+  - 07-notification-lifecycle: sweep + lock wiring (sweep before lock, lock wraps scheduler calls, permission gate before both, `inFlightRef` first)
 - `src/__tests__/notifications/handler.test.ts`
-  - `handleBackgroundPush`: bg_refresh filter, fetch + widget update, count-delta firing, manager gate, error swallow
+  - `handleBackgroundPush`: bg_refresh filter, fetch + widget update, ID-set dedup firing, manager gate, error swallow (spec 06)
+  - FR6 lock wrapping: `withScheduleLock` called only when newIds non-empty + isManager; contention skips notification but still calls `savePrevIds` (spec 07)
   - `scheduleLocalNotification`: title, body, immediate trigger
+- `src/lib/__tests__/scheduleLock.test.ts` (spec 07)
+  - `withScheduleLock`: claim, contention, stale-after-30s recovery, non-numeric values, get/set/remove failure paths
+  - `sweepOrphanNotifications`: mixed list, all-expected/empty, legacy-key cleanup, get/cancel/multiRemove failure paths
 - `app/__tests__/layout-notifications.test.tsx`
   - Foreground handler config, `registerPushToken` lifecycle, background listener cleanup
 
@@ -258,7 +264,7 @@ app/
 | Overview | `/(tabs)/overview` | `useOverviewData(4\|12\|24)`, `useEarningsHistory`, `useApprovalItems` | payments history, work-diary history | `ApprovalUrgencyCard` (`overview.tsx:365-371`) |
 | AI | `/(tabs)/ai` | `useAIData`, `useAppBreakdown`, `useWeeklyHistory` | work-diary (per-day background fetch), local app-usage cache | none |
 | Requests | `/(tabs)/approvals` | `useApprovalItems`, `useMyRequests`, `useConfig` | approvals/manual + overtime × 3 weeks | TEAM REQUESTS section (`approvals.tsx:304-339`); contributors see MY REQUESTS only |
-| Settings | `/modal` | `useConfig` | auth/token, auth/buildConfig | dev toggles `devManagerView`, `devOvertimePreview` |
+| Settings | `/modal` | `useConfig` | auth/token, auth/buildConfig | dev toggles `devManagerView`, `devOvertimePreview` (dev-only). "Debug Log" section (Share / Clear buttons) visible to **all users** — spec 08. |
 
 ### 5.5 Auth gating
 
@@ -356,6 +362,8 @@ Notable:
 - `pushToken.ts` — Expo push token registration with Railway server.
 - `approvalMeshSignal.ts`, `panelState.ts` — UI state machines.
 - `devMock.ts` — `MOCK_TEAM_ITEMS` for `devManagerView` toggle.
+- `log.ts` — local rolling error log (JSONL, 200 KB cap, 3s buffered flush). Spec 08. Imports only `expo-file-system/legacy` and `./redact`. Singleton `log` with `info/warn/error/flush/getLogFileUri/clear`. **Never throws** — I/O failures are swallowed; the logger cannot crash the app.
+- `redact.ts` — pure deny-by-default redactor invoked at write time by `log.ts`. Drops PII-shaped keys (`password`, `auth*`, `*Id`, `username`, `email`, `memo`, `description`, `text`, `message`, `body`, `headers`); scrubs credential-shaped string values (`Basic …`, `Bearer …`, long base64, 32+-char tokens). Only primitive `string | number | boolean` survivors are written.
 
 ### 6.6 Layering (inferred — not lint-enforced)
 
@@ -457,15 +465,17 @@ Not a TODO list — a catalog of things to remember when touching these subsyste
 
 ### 8.2 `inFlightRef` is intra-hook only
 
-`scheduleAll()`'s guard (`useScheduledNotifications.ts:212`) does not coordinate with `handleBackgroundPush` (`handler.ts`). Both can run concurrently — a foreground transition during background push processing is uncoordinated.
+- **Resolved** by spec `07-notification-lifecycle`. `withScheduleLock` (`src/lib/scheduleLock.ts`) is the cross-handler layer; AsyncStorage key `notif_schedule_lock` (stale-after-30s) coordinates `scheduleAll` and `handleBackgroundPush.scheduleLocalNotification`. `inFlightRef` is preserved as intra-hook defense-in-depth.
+- **Residual risk**: AsyncStorage operations are not atomic; two concurrent callers can both observe an absent lock and both run. Acceptable because the underlying scheduling is idempotent (deterministic identifiers, §8.3 resolution). True process-wide mutex would require native code.
 
 ### 8.3 Cancel + setItem is not atomic
 
-In each schedule function (e.g. `:40-42` then `:75`): `cancelScheduledNotificationAsync(oldId)` runs, then a new notification is scheduled, then `setItem(newId)`. A crash between schedule and setItem leaves an orphan that's uncancellable on next run.
+- **Resolved** by spec `07-notification-lifecycle`. Calendar schedulers no longer track AsyncStorage IDs — each call passes a deterministic `identifier` (`hourglass:thursday`, `hourglass:monday-summary`, `hourglass:monday-expiry`). iOS replaces same-id schedules, so there is no cancel/setItem window. The legacy `notif_thursday_id` / `notif_monday_id` / `notif_expiry_id` keys are no longer referenced in code; `sweepOrphanNotifications` removes them as one-shot migration.
 
 ### 8.4 Calendar triggers persist past the app
 
-iOS Calendar triggers (`weekday/hour/minute`, `repeats: false`) live in iOS-land. If the app deletes its `notif_*_id` keys but never cancels the scheduled iOS notification (e.g. app uninstalled and reinstalled, AsyncStorage cleared), the previously-scheduled notifications still fire.
+- **Mitigated** by spec `07-notification-lifecycle`. On every `scheduleAll` mount, `sweepOrphanNotifications` calls `getAllScheduledNotificationsAsync()` and cancels any `hourglass:*` identifier not in `EXPECTED_IDENTIFIERS`. A reinstall (or any AsyncStorage wipe that leaves iOS schedules intact) is now self-healing on the next foreground.
+- **Residual risk**: any new `hourglass:*` identifier introduced by a future spec must be added to `EXPECTED_IDENTIFIERS` in the same PR, or the sweep will quietly cancel it on next mount. Documented in `src/lib/scheduleLock.ts` JSDoc and `src/notifications/README.md` invariant 5.
 
 ### 8.5 ~~Auth token refetched every request~~ (resolved by spec 04)
 
@@ -482,3 +492,9 @@ Root-level `components/` and `hooks/` are Expo Starter scaffold leftovers. Produ
 ### 8.8 TanStack Query persisted cache + AsyncStorage caches overlap
 
 `hours_cache`, `ai_cache`, `widget_data`, `weekly_history`, and the `HOURGLASS_QUERY_CACHE` (full Query cache) all persist overlapping data. Manual AsyncStorage caches exist for instant-render on mount before queries resolve; Query persistence covers the rest. Clearing the Query cache does not clear the manual caches.
+
+### 8.9 Observability: local error log only (no automatic phone-home)
+
+Resolved 2026-05-28 by `08-observability-log` (resilience-fixes). The app's only post-ship debug surface is a local JSONL file at `documentDirectory + hourglass-debug.log` written by `src/lib/log.ts`. Every payload is redacted at write time by `src/lib/redact.ts` (deny-by-default key list; credential-shaped value scrubbers) and capped at 200 KB with mid-line-preserving rotation. Events leave the device **only** when the user invokes the "Share log" button in the Settings modal — there is no Sentry, no Crashlytics, no automatic upload, and the logger module imports zero network surface. Errors capture `err.constructor.name` only; `.message` text is never written.
+
+**Residual surface**: call sites for `log.*` are not yet wired into the auth / push / onboarding paths — that wiring is deferred per spec 08's "Out of Scope §1" and tracked for follow-up commits in the affected specs.
