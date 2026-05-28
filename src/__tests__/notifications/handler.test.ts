@@ -29,6 +29,12 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
   removeItem: jest.fn(),
 }));
 
+// 07-notification-lifecycle FR6: handler wraps scheduleLocalNotification in withScheduleLock.
+// Default mock runs `fn` (no contention), preserving spec-06 test behavior.
+jest.mock('../../lib/scheduleLock', () => ({
+  withScheduleLock: jest.fn(async (fn: () => Promise<any>) => fn()),
+}));
+
 import {
   handleBackgroundPush,
   scheduleLocalNotification,
@@ -36,6 +42,7 @@ import {
 import * as Notifications from 'expo-notifications';
 import { fetchFreshData } from '../../lib/crossoverData';
 import { updateWidgetData } from '../../lib/widgetBridge';
+import { withScheduleLock } from '../../lib/scheduleLock';
 import type { ApprovalItem } from '../../lib/approvals';
 
 // Cast to jest.Mock after import (factories used jest.fn() directly)
@@ -45,6 +52,7 @@ const mockUpdateWidgetData = updateWidgetData as jest.Mock;
 const mockGetItem = AsyncStorage.getItem as jest.Mock;
 const mockSetItem = AsyncStorage.setItem as jest.Mock;
 const mockRemoveItem = AsyncStorage.removeItem as jest.Mock;
+const mockWithScheduleLock = withScheduleLock as jest.Mock;
 
 const PREV_IDS_KEY = 'prev_approval_ids';
 const LEGACY_KEY = 'prev_approval_count';
@@ -156,6 +164,8 @@ beforeEach(() => {
   mockSetItem.mockResolvedValue(undefined);
   mockRemoveItem.mockResolvedValue(undefined);
   mockGetItem.mockResolvedValue(null);
+  // Default: lock not contended — run the wrapped fn.
+  mockWithScheduleLock.mockImplementation(async (fn: () => Promise<any>) => fn());
 });
 
 // ─── Existing behavior: data.type guard / fetch / widget update ──────────────
@@ -642,3 +652,100 @@ describe('FR5: scheduleLocalNotification', () => {
     expect(call.trigger).toBeNull();
   });
 });
+
+// ─── 07-notification-lifecycle FR6: lock-wrapping of scheduleLocalNotification ───
+
+describe('07-notification-lifecycle FR6: handleBackgroundPush wraps scheduleLocalNotification in withScheduleLock', () => {
+  it('NL-FR6-T30 — calls withScheduleLock when newIds.length > 0', async () => {
+    // Seed: prev has mt-1, current has mt-1 + mt-2 → newIds=[mt-2]
+    mockGetItem.mockImplementation(async (key: string) => {
+      if (key === PREV_IDS_KEY) return JSON.stringify(['mt-1']);
+      return null;
+    });
+    mockFetchFreshData.mockResolvedValueOnce(
+      makeFreshData([makeManualItem('mt-1'), makeManualItem('mt-2')], true),
+    );
+
+    await handleBackgroundPush(makePush('bg_refresh') as any);
+
+    expect(mockWithScheduleLock).toHaveBeenCalledTimes(1);
+    // The wrapped function, when invoked, schedules a notification.
+    expect(mockScheduleNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('NL-FR6-T31 — does NOT call withScheduleLock when newIds is empty', async () => {
+    // Seed: prev == current → newIds=[]
+    mockGetItem.mockImplementation(async (key: string) => {
+      if (key === PREV_IDS_KEY) return JSON.stringify(['mt-1', 'mt-2']);
+      return null;
+    });
+    mockFetchFreshData.mockResolvedValueOnce(
+      makeFreshData([makeManualItem('mt-1'), makeManualItem('mt-2')], true),
+    );
+
+    await handleBackgroundPush(makePush('bg_refresh') as any);
+
+    expect(mockWithScheduleLock).not.toHaveBeenCalled();
+    expect(mockScheduleNotification).not.toHaveBeenCalled();
+  });
+
+  it('NL-FR6-T32 — does NOT call withScheduleLock for non-manager', async () => {
+    mockFetchFreshData.mockResolvedValueOnce(
+      makeFreshData([makeManualItem('mt-1')], false /* isManager */),
+    );
+
+    await handleBackgroundPush(makePush('bg_refresh') as any);
+
+    expect(mockWithScheduleLock).not.toHaveBeenCalled();
+    expect(mockScheduleNotification).not.toHaveBeenCalled();
+  });
+
+  it('NL-FR6-T33 — lock contention: notification skipped but savePrevIds still runs', async () => {
+    // Lock contended: withScheduleLock resolves undefined without invoking fn
+    mockWithScheduleLock.mockImplementationOnce(async () => undefined);
+
+    mockGetItem.mockImplementation(async (key: string) => {
+      if (key === PREV_IDS_KEY) return JSON.stringify(['mt-1']);
+      return null;
+    });
+    mockFetchFreshData.mockResolvedValueOnce(
+      makeFreshData([makeManualItem('mt-1'), makeManualItem('mt-2')], true),
+    );
+
+    await handleBackgroundPush(makePush('bg_refresh') as any);
+
+    // withScheduleLock was attempted...
+    expect(mockWithScheduleLock).toHaveBeenCalledTimes(1);
+    // ...but the notification was NOT scheduled (lock returned undefined).
+    expect(mockScheduleNotification).not.toHaveBeenCalled();
+    // CRITICAL: savePrevIds still ran — prev_approval_ids advanced to current set.
+    expect(mockSetItem).toHaveBeenCalledWith(
+      PREV_IDS_KEY,
+      JSON.stringify(['mt-1', 'mt-2']),
+    );
+  });
+
+  it('NL-FR6-T34 — lock wraps the actual scheduleNotificationAsync call (not the dedup logic)', async () => {
+    // Arrange: capture the function passed into withScheduleLock and verify it
+    // is what triggers scheduleNotificationAsync.
+    let captured: (() => Promise<unknown>) | null = null;
+    mockWithScheduleLock.mockImplementationOnce(async (fn: () => Promise<unknown>) => {
+      captured = fn;
+      return fn();
+    });
+
+    mockGetItem.mockImplementation(async (key: string) => {
+      if (key === PREV_IDS_KEY) return JSON.stringify([]);
+      return null;
+    });
+    mockFetchFreshData.mockResolvedValueOnce(
+      makeFreshData([makeManualItem('mt-7')], true),
+    );
+
+    await handleBackgroundPush(makePush('bg_refresh') as any);
+
+    expect(captured).not.toBeNull();
+    expect(mockScheduleNotification).toHaveBeenCalledTimes(1);
+  });
+});
+

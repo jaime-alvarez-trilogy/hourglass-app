@@ -142,12 +142,27 @@ describe('FR1: useScheduledNotifications — source file contract (static analys
     expect(source).toContain("'widget_data'");
   });
 
-  it('SC1.8 — stores thursday notification id as notif_thursday_id', () => {
-    expect(source).toContain("'notif_thursday_id'");
+  // 07-notification-lifecycle FR1/FR8: deterministic identifiers replace ID-key tracking
+  it('SC1.8 — uses deterministic hourglass:* identifiers (FR1)', () => {
+    expect(source).toContain("'hourglass:thursday'");
+    expect(source).toContain("'hourglass:monday-summary'");
+    expect(source).toContain("'hourglass:monday-expiry'");
   });
 
-  it('SC1.9 — stores monday notification id as notif_monday_id', () => {
-    expect(source).toContain("'notif_monday_id'");
+  it('SC1.9 — no legacy notif_*_id literals remain (FR8)', () => {
+    expect(source).not.toContain("'notif_thursday_id'");
+    expect(source).not.toContain("'notif_monday_id'");
+    expect(source).not.toContain("'notif_expiry_id'");
+    expect(source).not.toContain('THURSDAY_NOTIF_ID_KEY');
+    expect(source).not.toContain('MONDAY_NOTIF_ID_KEY');
+    expect(source).not.toContain('EXPIRY_NOTIF_ID_KEY');
+  });
+
+  // 07-notification-lifecycle FR3/FR5: sweep + lock wired into scheduleAll
+  it('SC1.13 — imports withScheduleLock and sweepOrphanNotifications from scheduleLock', () => {
+    expect(source).toMatch(/withScheduleLock/);
+    expect(source).toMatch(/sweepOrphanNotifications/);
+    expect(source).toMatch(/from\s+['"]\.\.\/lib\/scheduleLock['"]/);
   });
 
   it('SC1.10 — cleanup calls sub.remove() or subscription.remove()', () => {
@@ -195,66 +210,42 @@ describe('FR2: scheduleThursdayReminder — via scheduleAll orchestration', () =
     ]);
   });
 
-  it('SC2.1 — reads notif_thursday_id from AsyncStorage before scheduling', async () => {
-    // Set up to be on a weekday (Tuesday = 2, 10am)
-    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(2);
+  // 07-notification-lifecycle FR1: deterministic identifier, no ID-key reads/writes
+  it('SC2.1 — passes identifier hourglass:thursday to scheduleNotificationAsync', async () => {
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(2); // Tuesday
     jest.spyOn(Date.prototype, 'getHours').mockReturnValue(10);
 
-    mockAsyncGetItem.mockImplementation((key: string) => {
-      if (key === 'notif_thursday_id') return Promise.resolve('old-thursday-id');
-      return Promise.resolve(null);
-    });
-
-    // Require the module and call the exported scheduleAll helper if exposed
     const mod = require('../useScheduledNotifications');
-    if (mod.__testOnly?.scheduleThursdayReminder) {
-      await mod.__testOnly.scheduleThursdayReminder(5.5, 40);
-      expect(mockAsyncGetItem).toHaveBeenCalledWith('notif_thursday_id');
-    } else {
-      // Verify via source analysis
-      const source = fs.readFileSync(HOOK_FILE, 'utf8');
-      expect(source).toContain("'notif_thursday_id'");
-    }
+    await mod.__testOnly.scheduleThursdayReminder(5.5, 40);
+
+    expect(mockScheduleNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ identifier: 'hourglass:thursday' }),
+    );
 
     jest.restoreAllMocks();
   });
 
-  it('SC2.2 — cancels existing notification when ID found in AsyncStorage', async () => {
+  it('SC2.2 — does NOT call cancelScheduledNotificationAsync (sweep-only cancellation)', async () => {
     jest.spyOn(Date.prototype, 'getDay').mockReturnValue(2); // Tuesday
     jest.spyOn(Date.prototype, 'getHours').mockReturnValue(10);
 
-    mockAsyncGetItem.mockImplementation((key: string) => {
-      if (key === 'notif_thursday_id') return Promise.resolve('existing-id-123');
-      return Promise.resolve(null);
-    });
-
     const mod = require('../useScheduledNotifications');
-    if (mod.__testOnly?.scheduleThursdayReminder) {
-      await mod.__testOnly.scheduleThursdayReminder(5.5, 40);
-      expect(mockCancelNotification).toHaveBeenCalledWith('existing-id-123');
-    } else {
-      const source = fs.readFileSync(HOOK_FILE, 'utf8');
-      expect(source).toContain('cancelScheduledNotificationAsync');
-    }
+    await mod.__testOnly.scheduleThursdayReminder(5.5, 40);
+
+    expect(mockCancelNotification).not.toHaveBeenCalled();
 
     jest.restoreAllMocks();
   });
 
-  it('SC2.3 — skips cancel when no existing ID in AsyncStorage', async () => {
+  it('SC2.3 — does NOT call AsyncStorage.getItem for notif_thursday_id', async () => {
     jest.spyOn(Date.prototype, 'getDay').mockReturnValue(2); // Tuesday
     jest.spyOn(Date.prototype, 'getHours').mockReturnValue(10);
 
-    mockAsyncGetItem.mockResolvedValue(null);
-
     const mod = require('../useScheduledNotifications');
-    if (mod.__testOnly?.scheduleThursdayReminder) {
-      await mod.__testOnly.scheduleThursdayReminder(5.5, 40);
-      expect(mockCancelNotification).not.toHaveBeenCalled();
-      expect(mockScheduleNotification).toHaveBeenCalledTimes(1);
-    } else {
-      const source = fs.readFileSync(HOOK_FILE, 'utf8');
-      expect(source).toContain('cancelScheduledNotificationAsync');
-    }
+    await mod.__testOnly.scheduleThursdayReminder(5.5, 40);
+
+    expect(mockAsyncGetItem).not.toHaveBeenCalledWith('notif_thursday_id');
+    expect(mockScheduleNotification).toHaveBeenCalledTimes(1);
 
     jest.restoreAllMocks();
   });
@@ -386,20 +377,17 @@ describe('FR2: scheduleThursdayReminder — via scheduleAll orchestration', () =
     jest.restoreAllMocks();
   });
 
-  it('SC2.9 — saves new notification ID to AsyncStorage notif_thursday_id', async () => {
+  // 07-notification-lifecycle FR1: setItem is no longer called for notif_thursday_id
+  it('SC2.9 — does NOT call AsyncStorage.setItem for notif_thursday_id', async () => {
     jest.spyOn(Date.prototype, 'getDay').mockReturnValue(2);
     jest.spyOn(Date.prototype, 'getHours').mockReturnValue(10);
     mockScheduleNotification.mockResolvedValue('new-id-abc');
 
     const mod = require('../useScheduledNotifications');
-    if (mod.__testOnly?.scheduleThursdayReminder) {
-      await mod.__testOnly.scheduleThursdayReminder(5.5, 40);
-      expect(mockAsyncSetItem).toHaveBeenCalledWith('notif_thursday_id', 'new-id-abc');
-    } else {
-      const source = fs.readFileSync(HOOK_FILE, 'utf8');
-      expect(source).toContain("'notif_thursday_id'");
-      expect(source).toContain('setItem');
-    }
+    await mod.__testOnly.scheduleThursdayReminder(5.5, 40);
+
+    const setItemKeys = mockAsyncSetItem.mock.calls.map((c) => c[0]);
+    expect(setItemKeys).not.toContain('notif_thursday_id');
 
     jest.restoreAllMocks();
   });
@@ -499,40 +487,32 @@ describe('FR3: scheduleMondaySummary — via __testOnly exports', () => {
     }
   });
 
-  it('SC3.5 — reads existing ID from AsyncStorage notif_monday_id', async () => {
+  // 07-notification-lifecycle FR1: deterministic identifier, no ID-key reads
+  it('SC3.5 — passes identifier hourglass:monday-summary to scheduleNotificationAsync', async () => {
     mockLoadWeeklyHistory.mockResolvedValue([
       makeSnapshot({ weekStart: '2026-03-23', hours: 38 }),
       makeSnapshot({ weekStart: '2026-03-30', hours: 10 }),
     ]);
 
     const mod = require('../useScheduledNotifications');
-    if (mod.__testOnly?.scheduleMondaySummary) {
-      await mod.__testOnly.scheduleMondaySummary();
-      expect(mockAsyncGetItem).toHaveBeenCalledWith('notif_monday_id');
-    } else {
-      const source = fs.readFileSync(HOOK_FILE, 'utf8');
-      expect(source).toContain("'notif_monday_id'");
-    }
+    await mod.__testOnly.scheduleMondaySummary();
+
+    expect(mockScheduleNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ identifier: 'hourglass:monday-summary' }),
+    );
+    expect(mockAsyncGetItem).not.toHaveBeenCalledWith('notif_monday_id');
   });
 
-  it('SC3.6 — cancels existing notification when ID found', async () => {
+  it('SC3.6 — does NOT call cancelScheduledNotificationAsync (sweep-only cancellation)', async () => {
     mockLoadWeeklyHistory.mockResolvedValue([
       makeSnapshot({ weekStart: '2026-03-23', hours: 38 }),
       makeSnapshot({ weekStart: '2026-03-30', hours: 10 }),
     ]);
-    mockAsyncGetItem.mockImplementation((key: string) => {
-      if (key === 'notif_monday_id') return Promise.resolve('old-monday-id');
-      return Promise.resolve(null);
-    });
 
     const mod = require('../useScheduledNotifications');
-    if (mod.__testOnly?.scheduleMondaySummary) {
-      await mod.__testOnly.scheduleMondaySummary();
-      expect(mockCancelNotification).toHaveBeenCalledWith('old-monday-id');
-    } else {
-      const source = fs.readFileSync(HOOK_FILE, 'utf8');
-      expect(source).toContain('cancelScheduledNotificationAsync');
-    }
+    await mod.__testOnly.scheduleMondaySummary();
+
+    expect(mockCancelNotification).not.toHaveBeenCalled();
   });
 
   it('SC3.7 — trigger has weekday: 2, hour: 9, minute: 0, repeats: false', async () => {
@@ -633,7 +613,8 @@ describe('FR3: scheduleMondaySummary — via __testOnly exports', () => {
     }
   });
 
-  it('SC3.11 — saves new notification ID to AsyncStorage notif_monday_id', async () => {
+  // 07-notification-lifecycle FR1: setItem is no longer called for notif_monday_id
+  it('SC3.11 — does NOT call AsyncStorage.setItem for notif_monday_id', async () => {
     mockLoadWeeklyHistory.mockResolvedValue([
       makeSnapshot({ weekStart: '2026-03-23', hours: 38 }),
       makeSnapshot({ weekStart: '2026-03-30', hours: 10 }),
@@ -641,14 +622,10 @@ describe('FR3: scheduleMondaySummary — via __testOnly exports', () => {
     mockScheduleNotification.mockResolvedValue('new-monday-xyz');
 
     const mod = require('../useScheduledNotifications');
-    if (mod.__testOnly?.scheduleMondaySummary) {
-      await mod.__testOnly.scheduleMondaySummary();
-      expect(mockAsyncSetItem).toHaveBeenCalledWith('notif_monday_id', 'new-monday-xyz');
-    } else {
-      const source = fs.readFileSync(HOOK_FILE, 'utf8');
-      expect(source).toContain("'notif_monday_id'");
-      expect(source).toContain('setItem');
-    }
+    await mod.__testOnly.scheduleMondaySummary();
+
+    const setItemKeys = mockAsyncSetItem.mock.calls.map((c) => c[0]);
+    expect(setItemKeys).not.toContain('notif_monday_id');
   });
 
   it('SC3.12 — swallows error from scheduleNotificationAsync throwing', async () => {
@@ -1045,28 +1022,29 @@ describe('FR4: scheduleMondayExpiryReminder — expiry notification for managers
 
   // ── Cancel + reschedule ───────────────────────────────────────────────────
 
-  it('SC4.7 — existing notif_expiry_id → cancelScheduledNotificationAsync called before new schedule', async () => {
+  // 07-notification-lifecycle FR1: deterministic identifier, no ID-key reads/writes
+  it('SC4.7 — passes identifier hourglass:monday-expiry to scheduleNotificationAsync', async () => {
     jest.spyOn(Date.prototype, 'getDay').mockReturnValue(1);
     jest.spyOn(Date.prototype, 'getUTCHours').mockReturnValue(14);
     mockAsyncGetItem.mockImplementation((key: string) => {
       if (key === 'widget_data') return Promise.resolve(makeWidgetData(2));
-      if (key === 'notif_expiry_id') return Promise.resolve('old-expiry-id');
       return Promise.resolve(null);
     });
 
     const mod = require('../useScheduledNotifications');
     await mod.__testOnly.scheduleMondayExpiryReminder(true);
 
-    expect(mockCancelNotification).toHaveBeenCalledWith('old-expiry-id');
-    expect(mockScheduleNotification).toHaveBeenCalledTimes(1);
+    expect(mockScheduleNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ identifier: 'hourglass:monday-expiry' }),
+    );
   });
 
-  it('SC4.8 — no existing notif_expiry_id → cancelScheduledNotificationAsync NOT called', async () => {
+  it('SC4.8 — does NOT call cancelScheduledNotificationAsync (sweep-only cancellation)', async () => {
     jest.spyOn(Date.prototype, 'getDay').mockReturnValue(1);
     jest.spyOn(Date.prototype, 'getUTCHours').mockReturnValue(14);
     mockAsyncGetItem.mockImplementation((key: string) => {
       if (key === 'widget_data') return Promise.resolve(makeWidgetData(2));
-      return Promise.resolve(null);  // no existing ID
+      return Promise.resolve(null);
     });
 
     const mod = require('../useScheduledNotifications');
@@ -1076,7 +1054,7 @@ describe('FR4: scheduleMondayExpiryReminder — expiry notification for managers
     expect(mockScheduleNotification).toHaveBeenCalledTimes(1);
   });
 
-  it('SC4.9 — saves new notification ID to AsyncStorage notif_expiry_id', async () => {
+  it('SC4.9 — does NOT call AsyncStorage.setItem for notif_expiry_id', async () => {
     jest.spyOn(Date.prototype, 'getDay').mockReturnValue(1);
     jest.spyOn(Date.prototype, 'getUTCHours').mockReturnValue(14);
     mockAsyncGetItem.mockImplementation((key: string) => {
@@ -1088,7 +1066,8 @@ describe('FR4: scheduleMondayExpiryReminder — expiry notification for managers
     const mod = require('../useScheduledNotifications');
     await mod.__testOnly.scheduleMondayExpiryReminder(true);
 
-    expect(mockAsyncSetItem).toHaveBeenCalledWith('notif_expiry_id', 'fresh-expiry-id');
+    const setItemKeys = mockAsyncSetItem.mock.calls.map((c) => c[0]);
+    expect(setItemKeys).not.toContain('notif_expiry_id');
   });
 
   // ── Widget data edge cases ────────────────────────────────────────────────
@@ -1165,9 +1144,11 @@ describe('FR4: scheduleMondayExpiryReminder — expiry notification for managers
     expect(source).toMatch(/__testOnly\s*=\s*\{[^}]*scheduleMondayExpiryReminder/s);
   });
 
-  it('SC4.15 — source stores expiry notification id as notif_expiry_id', () => {
+  // 07-notification-lifecycle FR8: legacy ID-key literal removed
+  it('SC4.15 — source does NOT contain legacy notif_expiry_id literal', () => {
     const source = fs.readFileSync(HOOK_FILE, 'utf8');
-    expect(source).toContain("'notif_expiry_id'");
+    expect(source).not.toContain("'notif_expiry_id'");
+    expect(source).toContain("'hourglass:monday-expiry'");
   });
 
   it('SC4.16 — source calls scheduleMondayExpiryReminder from scheduleAll', () => {
@@ -1175,3 +1156,87 @@ describe('FR4: scheduleMondayExpiryReminder — expiry notification for managers
     expect(source).toContain('await scheduleMondayExpiryReminder(');
   });
 });
+
+// ── 07-notification-lifecycle: scheduleAll wiring of sweep + lock ───────────
+//
+// FR3: scheduleAll wraps the three scheduler calls in withScheduleLock.
+// FR5: sweepOrphanNotifications runs on every scheduleAll, before the lock.
+// FR8: legacy ID-key constants and literals are fully removed.
+//
+// Note: jest-expo/node preset cannot run the hook directly (null React
+// dispatcher); we verify wiring via static analysis of the source.
+
+describe('07-notification-lifecycle: scheduleAll wires sweep + lock (static)', () => {
+  let source: string;
+  let scheduleAllBody: string;
+
+  beforeAll(() => {
+    source = fs.readFileSync(HOOK_FILE, 'utf8');
+    const start = source.indexOf('const scheduleAll = async');
+    const end = source.indexOf('\n    };', start);
+    scheduleAllBody = source.slice(start, end);
+  });
+
+  it('NL-SC1 — imports withScheduleLock from ../lib/scheduleLock', () => {
+    expect(source).toMatch(/import\s*\{[^}]*withScheduleLock[^}]*\}\s*from\s*['"]\.\.\/lib\/scheduleLock['"]/);
+  });
+
+  it('NL-SC2 — imports sweepOrphanNotifications from ../lib/scheduleLock', () => {
+    expect(source).toMatch(/import\s*\{[^}]*sweepOrphanNotifications[^}]*\}\s*from\s*['"]\.\.\/lib\/scheduleLock['"]/);
+  });
+
+  it('NL-SC3 — scheduleAll calls sweepOrphanNotifications', () => {
+    expect(scheduleAllBody).toContain('sweepOrphanNotifications(');
+  });
+
+  it('NL-SC4 — scheduleAll calls withScheduleLock', () => {
+    expect(scheduleAllBody).toContain('withScheduleLock(');
+  });
+
+  it('NL-SC5 — sweepOrphanNotifications is called before withScheduleLock', () => {
+    const sweepIdx = scheduleAllBody.indexOf('sweepOrphanNotifications(');
+    const lockIdx = scheduleAllBody.indexOf('withScheduleLock(');
+    expect(sweepIdx).toBeGreaterThan(-1);
+    expect(lockIdx).toBeGreaterThan(-1);
+    expect(sweepIdx).toBeLessThan(lockIdx);
+  });
+
+  it('NL-SC6 — permission check precedes sweep (FR3/FR5: permission gate)', () => {
+    const grantIdx = scheduleAllBody.indexOf('!granted');
+    const sweepIdx = scheduleAllBody.indexOf('sweepOrphanNotifications(');
+    expect(grantIdx).toBeGreaterThan(-1);
+    expect(sweepIdx).toBeGreaterThan(-1);
+    expect(grantIdx).toBeLessThan(sweepIdx);
+  });
+
+  it('NL-SC7 — withScheduleLock wraps the three scheduler calls', () => {
+    // Heuristic: each schedule* invocation appears AFTER withScheduleLock( in scheduleAll body
+    const lockIdx = scheduleAllBody.indexOf('withScheduleLock(');
+    const thursdayIdx = scheduleAllBody.indexOf('scheduleThursdayReminder(', lockIdx);
+    const summaryIdx = scheduleAllBody.indexOf('scheduleMondaySummary(', lockIdx);
+    const expiryIdx = scheduleAllBody.indexOf('scheduleMondayExpiryReminder(', lockIdx);
+    expect(thursdayIdx).toBeGreaterThan(lockIdx);
+    expect(summaryIdx).toBeGreaterThan(lockIdx);
+    expect(expiryIdx).toBeGreaterThan(lockIdx);
+  });
+
+  it('NL-SC8 — inFlightRef guard precedes sweep + lock (FR3 defense-in-depth)', () => {
+    const inFlightIdx = scheduleAllBody.indexOf('inFlightRef.current');
+    const sweepIdx = scheduleAllBody.indexOf('sweepOrphanNotifications(');
+    expect(inFlightIdx).toBeGreaterThan(-1);
+    expect(sweepIdx).toBeGreaterThan(-1);
+    expect(inFlightIdx).toBeLessThan(sweepIdx);
+  });
+
+  it('NL-SC9 — FR8: no legacy constant declarations remain in source', () => {
+    expect(source).not.toContain('THURSDAY_NOTIF_ID_KEY');
+    expect(source).not.toContain('MONDAY_NOTIF_ID_KEY');
+    expect(source).not.toContain('EXPIRY_NOTIF_ID_KEY');
+  });
+
+  it('NL-SC10 — FR8: no cancelScheduledNotificationAsync call sites in source', () => {
+    // Sweep is the only canceller now (lives in src/lib/scheduleLock.ts, not this file).
+    expect(source).not.toContain('cancelScheduledNotificationAsync');
+  });
+});
+
