@@ -323,7 +323,7 @@ Pure async functions. No React, no hooks.
 
 | File | Exports |
 |---|---|
-| `client.ts:1-93` | `getAuthToken`, `apiGet<T>`, `apiPut<T>` |
+| `client.ts` | `getAuthToken` (cached), `mintAuthToken` (cache-bypass), `invalidateAuthToken`, `apiGet<T>`, `apiPut<T>` |
 | `auth.ts` | `getProfileDetail`, `fetchAndBuildConfig`, `probeEnvironments` |
 | `timesheet.ts` | `fetchTimesheet` (3-strategy fallback) |
 | `approvals.ts` | `fetchPendingManual`, `fetchPendingOvertime`, `approveManual`, `rejectManual` |
@@ -331,7 +331,7 @@ Pure async functions. No React, no hooks.
 | `workDiary.ts` | `fetchWorkDiary` |
 | `errors.ts` | `AuthError`, `NetworkError`, `ApiError` |
 
-Auth token is **fetched fresh on each request** (`client.ts:6-39`) — base64-encoded credentials → POST `/api/v3/token` → `x-auth-token` header on subsequent calls. Empty response bodies (approve/reject PUTs) parsed as `undefined`. Base URL switched via `getApiBase(useQA)` from `src/store/config.ts`.
+Auth token is **cached in module-scope memory** (`client.ts`, spec 04). First call mints via `POST /api/v3/token`; subsequent calls reuse the cached `userId:secret` string. Concurrent first-callers share a single in-flight mint (request dedup). `invalidateAuthToken()` wipes the cache; called from `app/modal.tsx` on sign-out and env switch. `apiGet`/`apiPut` accept an optional fifth `creds` arg that opts into single-retry on auth failure (401 or Tomcat HTML 5xx). `mintAuthToken` (exported) bypasses the cache for `probeEnvironments`. Empty response bodies (approve/reject PUTs) parsed as `undefined`. Base URL switched via `getApiBase(useQA)` from `src/store/config.ts`.
 
 ### 6.4 `src/hooks/` (21 files)
 
@@ -467,9 +467,9 @@ In each schedule function (e.g. `:40-42` then `:75`): `cancelScheduledNotificati
 
 iOS Calendar triggers (`weekday/hour/minute`, `repeats: false`) live in iOS-land. If the app deletes its `notif_*_id` keys but never cancels the scheduled iOS notification (e.g. app uninstalled and reinstalled, AsyncStorage cleared), the previously-scheduled notifications still fire.
 
-### 8.5 Auth token refetched every request
+### 8.5 ~~Auth token refetched every request~~ (resolved by spec 04)
 
-`src/api/client.ts:6-39`. There's no in-memory token cache. Each `apiGet`/`apiPut` posts to `/api/v3/token` first. Acceptable for the current request volume but worth noting before scaling.
+Resolved 2026-05-28 by `04-auth-resilience` (resilience-fixes). `getAuthToken` (`src/api/client.ts:64`) now serves a module-scope `cachedToken`; concurrent first callers share a single in-flight mint via `mintInFlight`. `mintAuthToken` (exported) bypasses the cache for `probeEnvironments`. `invalidateAuthToken` is called from `app/modal.tsx` on sign-out (`handleSignOut` after `clearAll`) and env switch (`handleSwitchEnvironment` before `fetchAndBuildConfig`). `handleStatus` now recognizes Tomcat HTML 5xx (`content-type: text/html` on any `>= 500` response) as `AuthError(401, AUTH_HTML_500)` so the existing re-onboarding flow fires for expired tokens (the original CROSSOVER_API §15.F3 gap). Opt-in retry on `apiGet`/`apiPut` via optional fifth `creds` arg.
 
 ### 8.6 Two `components/` and two `hooks/` directories
 
