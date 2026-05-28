@@ -124,11 +124,11 @@ describe('FR9: clearAll', () => {
     expect(result).toBeNull();
   });
 
-  it('clearAll calls AsyncStorage.multiRemove with all 15 keys', async () => {
+  it('clearAll calls AsyncStorage.multiRemove with all 16 keys', async () => {
     await clearAll();
     expect(mockAsyncStorage.multiRemove).toHaveBeenCalledTimes(1);
     const [keys] = (mockAsyncStorage.multiRemove as jest.Mock).mock.calls[0];
-    expect(keys).toHaveLength(15);
+    expect(keys).toHaveLength(16);
     expect(keys).toContain('crossover_config');
     expect(keys).toContain('crossover_username');
     expect(keys).toContain('crossover_password');
@@ -149,6 +149,7 @@ describe('FR9: clearAll', () => {
     expect(keys).toContain('notif_thursday_id');
     expect(keys).toContain('notif_monday_id');
     expect(keys).toContain('prev_approval_count');
+    expect(keys).toContain('prev_approval_ids');
     expect(keys).toContain('HOURGLASS_QUERY_CACHE');
   });
 
