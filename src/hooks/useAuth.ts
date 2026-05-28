@@ -1,11 +1,20 @@
 // FR8: useSetup — onboarding state machine hook
+// 05-onboarding-defense FR5/FR6: 'not-contributor' terminal step + log.error wiring
 
 import { useState, useRef } from 'react';
 import { fetchAndBuildConfig, probeEnvironments } from '../api/auth';
-import { ApiError, AuthError, NetworkError } from '../api/errors';
+import { ApiError, AuthError, NetworkError, NotContributorError } from '../api/errors';
+import { log } from '../lib/log';
 import type { CrossoverConfig } from '../types/config';
 
-export type OnboardingStep = 'welcome' | 'credentials' | 'verifying' | 'env-select' | 'setup' | 'success';
+export type OnboardingStep =
+  | 'welcome'
+  | 'credentials'
+  | 'verifying'
+  | 'env-select'
+  | 'setup'
+  | 'success'
+  | 'not-contributor';
 
 export interface UseSetupResult {
   step: OnboardingStep;
@@ -16,6 +25,8 @@ export interface UseSetupResult {
   pendingConfig: CrossoverConfig | null;
   pendingCredentials: { username: string; password: string } | null;
   hasBothEnvs: boolean;
+  /** Roles detected on the account when NotContributorError fires (FR5). */
+  nonContributorRoles: string[] | null;
   isLoading: boolean;
   error: string | null;
 }
@@ -34,6 +45,8 @@ export function useSetup(): UseSetupResult {
   const [pendingConfig, setPendingConfig] = useState<CrossoverConfig | null>(null);
   const [pendingCredentials, setPendingCredentials] = useState<{ username: string; password: string } | null>(null);
   const [hasBothEnvs, setHasBothEnvs] = useState(false);
+  // 05-onboarding-defense FR5
+  const [nonContributorRoles, setNonContributorRoles] = useState<string[] | null>(null);
   const useQARef = useRef(false);
 
   function setEnvironment(useQA: boolean): void {
@@ -51,7 +64,12 @@ export function useSetup(): UseSetupResult {
         setStep('success');
       }
     } catch (err) {
-      if (err instanceof AuthError) {
+      if (err instanceof NotContributorError) {
+        // 05-onboarding-defense FR5/FR6: terminal state, no partial config.
+        log.error('onboarding.not-contributor', err, { avatarTypes: err.avatarTypes });
+        setNonContributorRoles(err.avatarTypes);
+        setStep('not-contributor');
+      } else if (err instanceof AuthError) {
         setStep('credentials');
         setError('Invalid email or password.');
       } else if (err instanceof NetworkError) {
@@ -149,6 +167,7 @@ export function useSetup(): UseSetupResult {
     pendingConfig,
     pendingCredentials,
     hasBothEnvs,
+    nonContributorRoles,
     isLoading,
     error,
   };
