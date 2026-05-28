@@ -3,7 +3,7 @@
 // schema (no top-level `assignment`) and the /assignments Spring page envelope.
 
 import { getAuthToken, apiGet, mintAuthToken } from './client';
-import { AuthError, NotContributorError } from './errors';
+import { AuthError, NetworkError, NotContributorError } from './errors';
 import type { CrossoverConfig } from '../types/config';
 
 // --- Internal types ---
@@ -203,13 +203,10 @@ export async function fetchAndBuildConfig(
     partial = extractConfigFromDetail(detail, useQA);
   } catch (err) {
     if (err instanceof AuthError) throw err;
-    // For non-Auth errors (NetworkError, ApiError), fall through to the
-    // /assignments fallback — /detail could be down for reasons unrelated
-    // to the account shape. NetworkError re-raises if it also fails the
-    // /assignments call (apiGet propagates it).
-    if (err instanceof Error && err.name === 'NetworkError') throw err;
-    // ApiError or unknown: try the fallback. avatarTypes stays [] since
-    // /detail never returned a body we could read.
+    if (err instanceof NetworkError) throw err;
+    // ApiError or unknown: fall through to the /assignments fallback —
+    // /detail could be down for reasons unrelated to the account shape.
+    // avatarTypes stays [] since /detail never returned a readable body.
   }
 
   if (!partial) {
@@ -217,7 +214,7 @@ export async function fetchAndBuildConfig(
       partial = await fetchConfigFromAssignments(token, useQA, username);
     } catch (err) {
       if (err instanceof AuthError) throw err;
-      if (err instanceof Error && err.name === 'NetworkError') throw err;
+      if (err instanceof NetworkError) throw err;
       // ApiError / unknown: leave partial null, fall through to terminal throw.
     }
   }
