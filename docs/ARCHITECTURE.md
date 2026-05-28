@@ -60,9 +60,9 @@ Note the timezone mix: Thursday + Monday summary are local-time triggers; Monday
 | Thursday | AsyncStorage | `notif_thursday_id` (`:21`) | Cancel old ID, schedule new, persist new ID |
 | Monday summary | AsyncStorage | `notif_monday_id` (`:22`) | Same cancel/reschedule pattern |
 | Monday expiry | AsyncStorage | `notif_expiry_id` (`:23`) | Same cancel/reschedule pattern |
-| New Approvals push | AsyncStorage | `prev_approval_count` (`src/notifications/handler.ts:12`) | Integer compare: fire only if `newCount > previousCount` |
+| New Approvals push | AsyncStorage | `prev_approval_ids` (`src/notifications/handler.ts:18`) | Set difference: fire `scheduleLocalNotification(newIds.length)` when `currentIds \ prevIds` is non-empty. First-ever read seeds without firing. Resolved in spec `06-push-dedup`. |
 
-**No per-item ID set** anywhere. The push-triggered approval notification is purely count-delta based — re-using the same set of items but with the count rising will refire.
+Each calendar-triggered notification (Thursday / Monday) uses cancel-then-persist; the push-triggered approval notification uses ID-set diff (no cancel/reschedule needed since it's a transient `trigger: null` local).
 
 ### 1.4 Permission flow
 
@@ -103,10 +103,10 @@ Silent push wakes the app, which fetches fresh data and updates the widget witho
 ### 2.2 On-device flow
 
 1. Silent push arrives. `expo-notifications` invokes the listener registered at `src/notifications/handler.ts:65-67`.
-2. `handleBackgroundPush(notification)` (`handler.ts:19-46`) filters on `data.type === 'bg_refresh'`.
+2. `handleBackgroundPush(notification)` (`handler.ts:51-84`) filters on `data.type === 'bg_refresh'`.
 3. `fetchFreshData()` — loads config + credentials from SecureStore, fetches timesheet + payments + work diary + approval items in parallel, returns a `CrossoverSnapshot`.
 4. `updateWidgetData(snapshot)` — writes `widget_data` to AsyncStorage and (on iOS) updates the widget App Group UserDefaults via `expo-widgets`.
-5. **Manager delta check** (`handler.ts:33-39`): if `config.isManager && newCount > prevCount`, fire `scheduleLocalNotification(newCount)`. Update `prev_approval_count`.
+5. **Manager ID-set diff** (`handler.ts:65-82`, spec `06-push-dedup`): if `config.isManager`, build `currentIds = new Set(approvalItems.map(it => it.id))`, read persisted `prev_approval_ids` via `getPrevIds()`. If absent/corrupt → seed and return (no notification). Otherwise compute `newIds = currentIds \ prevIds`; if non-empty, fire `scheduleLocalNotification(newIds.length)`. Then write back the full `currentIds` set, replacing prior state.
 
 **Note**: this is the only background code path. It bypasses React entirely. The widget refreshes from AsyncStorage; the app picks up changes only on next foreground (TanStack Query will rehydrate from its persisted cache on cold start).
 
@@ -138,7 +138,7 @@ Four persistence layers. The same logical data sometimes appears in multiple lay
 | `weekly_history` | JSON array `WeekSnapshot[]` | `src/lib/weeklyHistory.ts:74-120` | `useScheduledNotifications` (Monday summary), `useOverviewData` |
 | `notif_thursday_id` / `notif_monday_id` / `notif_expiry_id` | string | `useScheduledNotifications` | same; cancel-before-reschedule |
 | `push_token` | string | `src/lib/pushToken.ts:15` | sent to Railway server on register; cleared on logout |
-| `prev_approval_count` | string (numeric) | `src/notifications/handler.ts` | delta detection for instant approval notification |
+| `prev_approval_ids` | JSON `string[]` | `src/notifications/handler.ts` (`savePrevIds`) | set-difference dedup for instant approval notification. Legacy `prev_approval_count` is cleaned up on every write; both are in the `clearAll` wipe list. |
 | `HOURGLASS_QUERY_CACHE` | TanStack Query persist payload | `PersistQueryClientProvider` (`app/_layout.tsx:80-83`) | full query cache, 24h max age |
 
 ### 3.3 TanStack Query
@@ -452,7 +452,8 @@ Not a TODO list — a catalog of things to remember when touching these subsyste
 
 ### 8.1 Notification surfaces with no per-item dedup
 
-- **`prev_approval_count` is count-only** (`handler.ts:34-37`). A different set of items with the same count change will not refire, but the same items appearing after a count decrease + reincrease will. Cross-week extension (commits `3636a64`, `8cedb63`) widened the approval window; first refresh after that change pushed `prev_approval_count` up by including older items.
+- **Resolved** by spec `06-push-dedup`. `handler.ts` now persists `prev_approval_ids` (`Set<string>` serialized as JSON `string[]`) and fires `scheduleLocalNotification(newIds.length)` only when `currentIds \ prevIds` is non-empty. The legacy `prev_approval_count` key is removed on first write of the new key. First-ever read returns null and seeds without firing.
+- **Residual risk**: a future widening of the approval-fetch window (analogous to commits `3636a64`, `8cedb63`) will still cause a one-shot burst — prior-window items appear as "new" to the dedup. Mitigation is procedural: any PR that widens the window should also clear `prev_approval_ids` as part of the deploy.
 
 ### 8.2 `inFlightRef` is intra-hook only
 
