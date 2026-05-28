@@ -1,6 +1,7 @@
 // FR5: fetchAndBuildConfig + extractConfigFromDetail (src/api/auth.ts)
+// 05-onboarding-defense FR2/FR3/FR4: defensive parsing + NotContributorError
 import { fetchAndBuildConfig } from '../src/api/auth';
-import { AuthError, NetworkError } from '../src/api/errors';
+import { ApiError, AuthError, NetworkError, NotContributorError } from '../src/api/errors';
 import * as client from '../src/api/client';
 
 jest.mock('../src/api/client', () => ({
@@ -254,5 +255,244 @@ describe('FR5: fetchAndBuildConfig — error cases', () => {
     expect(config.userId).toBe('2362707');
     expect(config.fullName).toBe('Jane Doe');
     expect(config.assignmentId).toBe('79996');
+  });
+});
+
+// ============================================================================
+// 05-onboarding-defense FR2: Defensive /detail parsing (no crash on
+// pure-manager payload). The test surface is fetchAndBuildConfig — when
+// extractConfigFromDetail returns null, the function must reach the
+// /assignments fallback.
+// ============================================================================
+
+const PURE_MANAGER_DETAIL = {
+  // No top-level `assignment`. userAvatars has no CANDIDATE entry.
+  // Matches docs/api-samples/02-user-detail.json shape.
+  fullName: 'Manager Account',
+  avatarTypes: ['MANAGER', 'COMPANY_ADMIN'],
+  userAvatars: [
+    { id: 1421271, type: 'COMPANY_ADMIN' },
+    { id: 1421271, type: 'MANAGER' },
+  ],
+};
+
+// A valid AssignmentItem shape for /assignments page-content[0] fallback.
+const VALID_FALLBACK_ASSIGNMENT = {
+  id: 79996,
+  team: { id: 4584, name: 'Team Alpha' },
+  manager: { id: 2372227 },
+  candidate: { id: 2362707 },
+};
+
+const EMPTY_PAGE = { content: [], totalElements: 0, totalPages: 1, last: true, first: true };
+const POPULATED_PAGE = { content: [VALID_FALLBACK_ASSIGNMENT], totalElements: 1, totalPages: 1 };
+
+describe('05-onboarding-defense FR2: defensive /detail parsing', () => {
+  it('contributor-shaped /detail does NOT trigger the /assignments fallback', async () => {
+    // makeDetail() returns the contributor happy-path shape. Only /detail and
+    // (because salary=50) zero further apiGet calls should happen for assignment-derivation.
+    await fetchAndBuildConfig('user@test.com', 'pass', false);
+    const calledPaths = mockApiGet.mock.calls.map((args) => args[0] as string);
+    expect(calledPaths.filter((p) => p.includes('/assignments'))).toHaveLength(0);
+  });
+
+  it('pure-manager /detail (no assignment) reaches the /assignments fallback', async () => {
+    mockApiGet
+      .mockResolvedValueOnce(PURE_MANAGER_DETAIL)       // /detail
+      .mockResolvedValueOnce(POPULATED_PAGE);            // /assignments
+    const config = await fetchAndBuildConfig('user@test.com', 'pass', false);
+    // Successfully built a config from the fallback (no NotContributorError).
+    expect(config.userId).toBe('2362707');
+    expect(config.assignmentId).toBe('79996');
+    // Verify the /assignments call was made.
+    const calledPaths = mockApiGet.mock.calls.map((args) => args[0] as string);
+    expect(calledPaths.some((p) => p.includes('/api/v2/teams/assignments'))).toBe(true);
+  });
+
+  it('/detail with only userAvatars CANDIDATE but no assignment reaches the fallback', async () => {
+    const detailNoAssignment = {
+      fullName: 'Half User',
+      avatarTypes: ['CANDIDATE'],
+      userAvatars: [{ id: 99, type: 'CANDIDATE' }],
+      // no assignment field
+    };
+    mockApiGet
+      .mockResolvedValueOnce(detailNoAssignment)        // /detail
+      .mockResolvedValueOnce(POPULATED_PAGE);            // /assignments
+    const config = await fetchAndBuildConfig('user@test.com', 'pass', false);
+    expect(config.assignmentId).toBe('79996'); // from fallback
+  });
+
+  it('/detail with assignment present but assignment.team undefined reaches the fallback (no TypeError)', async () => {
+    const detailPartial = {
+      fullName: 'Partial User',
+      avatarTypes: ['CANDIDATE'],
+      assignment: {
+        id: 79996,
+        // team missing
+        manager: { id: 2372227 },
+      },
+      userAvatars: [{ id: 2362707, type: 'CANDIDATE' }],
+    };
+    mockApiGet
+      .mockResolvedValueOnce(detailPartial)              // /detail
+      .mockResolvedValueOnce(POPULATED_PAGE);             // /assignments
+    // Should not throw a TypeError — should land in the fallback.
+    await expect(fetchAndBuildConfig('user@test.com', 'pass', false)).resolves.toBeDefined();
+  });
+});
+
+// ============================================================================
+// 05-onboarding-defense FR3: /assignments Spring page envelope read
+// ============================================================================
+
+describe('05-onboarding-defense FR3: /assignments page envelope', () => {
+  it('reads response.content array from the page envelope (populated)', async () => {
+    mockApiGet
+      .mockResolvedValueOnce(PURE_MANAGER_DETAIL)        // /detail (triggers fallback)
+      .mockResolvedValueOnce(POPULATED_PAGE);             // /assignments
+    const config = await fetchAndBuildConfig('user@test.com', 'pass', false);
+    // Built from content[0]
+    expect(config.userId).toBe('2362707');
+    expect(config.assignmentId).toBe('79996');
+    expect(config.primaryTeamId).toBe('4584');
+    expect(config.managerId).toBe('2372227');
+  });
+
+  it('empty content array → NotContributorError (no exception from helper itself)', async () => {
+    mockApiGet
+      .mockResolvedValueOnce(PURE_MANAGER_DETAIL)        // /detail
+      .mockResolvedValueOnce(EMPTY_PAGE);                 // /assignments
+    await expect(fetchAndBuildConfig('u', 'p', false)).rejects.toBeInstanceOf(NotContributorError);
+  });
+
+  it('bare-array response (legacy shape) is still readable', async () => {
+    mockApiGet
+      .mockResolvedValueOnce(PURE_MANAGER_DETAIL)        // /detail
+      .mockResolvedValueOnce([VALID_FALLBACK_ASSIGNMENT]); // /assignments (bare array)
+    const config = await fetchAndBuildConfig('user@test.com', 'pass', false);
+    expect(config.userId).toBe('2362707');
+    expect(config.assignmentId).toBe('79996');
+  });
+
+  it('garbage response (null) → NotContributorError', async () => {
+    mockApiGet
+      .mockResolvedValueOnce(PURE_MANAGER_DETAIL)
+      .mockResolvedValueOnce(null);
+    await expect(fetchAndBuildConfig('u', 'p', false)).rejects.toBeInstanceOf(NotContributorError);
+  });
+
+  it('garbage response (undefined) → NotContributorError', async () => {
+    mockApiGet
+      .mockResolvedValueOnce(PURE_MANAGER_DETAIL)
+      .mockResolvedValueOnce(undefined as unknown as Record<string, unknown>);
+    await expect(fetchAndBuildConfig('u', 'p', false)).rejects.toBeInstanceOf(NotContributorError);
+  });
+
+  it('garbage response (empty object) → NotContributorError', async () => {
+    mockApiGet
+      .mockResolvedValueOnce(PURE_MANAGER_DETAIL)
+      .mockResolvedValueOnce({});
+    await expect(fetchAndBuildConfig('u', 'p', false)).rejects.toBeInstanceOf(NotContributorError);
+  });
+
+  it('garbage response (number) → NotContributorError', async () => {
+    mockApiGet
+      .mockResolvedValueOnce(PURE_MANAGER_DETAIL)
+      .mockResolvedValueOnce(42 as unknown as Record<string, unknown>);
+    await expect(fetchAndBuildConfig('u', 'p', false)).rejects.toBeInstanceOf(NotContributorError);
+  });
+
+  it('makes exactly one /assignments call per fetchAndBuildConfig invocation (no pagination loop)', async () => {
+    mockApiGet
+      .mockResolvedValueOnce(PURE_MANAGER_DETAIL)
+      .mockResolvedValueOnce(POPULATED_PAGE);
+    await fetchAndBuildConfig('user@test.com', 'pass', false);
+    const assignmentsCalls = mockApiGet.mock.calls.filter(
+      (args) => (args[0] as string).includes('/api/v2/teams/assignments'),
+    );
+    expect(assignmentsCalls).toHaveLength(1);
+  });
+});
+
+// ============================================================================
+// 05-onboarding-defense FR4: fetchAndBuildConfig throws NotContributorError
+// and the userId-only fallback branch is removed.
+// ============================================================================
+
+describe('05-onboarding-defense FR4: NotContributorError terminal state', () => {
+  it('pure-manager /detail + empty /assignments → NotContributorError with avatarTypes', async () => {
+    mockApiGet
+      .mockResolvedValueOnce(PURE_MANAGER_DETAIL)
+      .mockResolvedValueOnce(EMPTY_PAGE);
+    let caught: unknown;
+    try {
+      await fetchAndBuildConfig('u', 'p', false);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(NotContributorError);
+    expect((caught as NotContributorError).avatarTypes).toEqual(['MANAGER', 'COMPANY_ADMIN']);
+  });
+
+  it('pure-manager /detail + populated /assignments → returns valid CrossoverConfig', async () => {
+    mockApiGet
+      .mockResolvedValueOnce(PURE_MANAGER_DETAIL)
+      .mockResolvedValueOnce(POPULATED_PAGE);
+    const config = await fetchAndBuildConfig('user@test.com', 'pass', false);
+    expect(config).toBeDefined();
+    expect(config.userId).toBe('2362707');
+    expect(config.assignmentId).toBe('79996');
+  });
+
+  it('AuthError(401) from /detail propagates unchanged (no NotContributorError)', async () => {
+    mockApiGet.mockRejectedValueOnce(new AuthError(401));
+    await expect(fetchAndBuildConfig('u', 'p', false)).rejects.toBeInstanceOf(AuthError);
+    await expect(fetchAndBuildConfig('u', 'p', false)).rejects.not.toBeInstanceOf(NotContributorError);
+  });
+
+  it('AuthError(403) from /detail propagates unchanged', async () => {
+    mockApiGet.mockRejectedValueOnce(new AuthError(403));
+    await expect(fetchAndBuildConfig('u', 'p', false)).rejects.toBeInstanceOf(AuthError);
+  });
+
+  it('NetworkError from /detail propagates unchanged', async () => {
+    // NetworkError is thrown by getAuthToken in current code; the spec says
+    // /detail NetworkError should likewise propagate. Use mockGetAuthToken
+    // to model the network-failure-during-auth path.
+    mockGetAuthToken.mockRejectedValueOnce(new NetworkError('timeout'));
+    await expect(fetchAndBuildConfig('u', 'p', false)).rejects.toBeInstanceOf(NetworkError);
+  });
+
+  it('non-Auth ApiError from /detail + populated /assignments → returns config from fallback', async () => {
+    mockApiGet
+      .mockRejectedValueOnce(new ApiError(500))             // /detail
+      .mockResolvedValueOnce(POPULATED_PAGE);                // /assignments
+    const config = await fetchAndBuildConfig('user@test.com', 'pass', false);
+    expect(config.userId).toBe('2362707');
+  });
+
+  it('non-Auth ApiError from /detail + ApiError from /assignments → throws NotContributorError([])', async () => {
+    mockApiGet
+      .mockRejectedValueOnce(new ApiError(500))             // /detail
+      .mockRejectedValueOnce(new ApiError(500));             // /assignments
+    let caught: unknown;
+    try {
+      await fetchAndBuildConfig('u', 'p', false);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(NotContributorError);
+    expect((caught as NotContributorError).avatarTypes).toEqual([]);
+  });
+
+  it('userId-only last-resort branch is REMOVED — no stub config is returned when both paths fail', async () => {
+    // Previously: when both /detail and /assignments failed, the function
+    // returned a userId-only stub config. After spec 05, this throws
+    // NotContributorError instead. Verify we never resolve to a stub.
+    mockApiGet
+      .mockRejectedValueOnce(new ApiError(500))
+      .mockRejectedValueOnce(new ApiError(500));
+    await expect(fetchAndBuildConfig('u', 'p', false)).rejects.toThrow();
   });
 });
