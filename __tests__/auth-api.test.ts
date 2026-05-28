@@ -389,11 +389,21 @@ describe('05-onboarding-defense FR3: /assignments page envelope', () => {
     await expect(fetchAndBuildConfig('u', 'p', false)).rejects.toBeInstanceOf(NotContributorError);
   });
 
-  it('garbage response (empty object) → NotContributorError', async () => {
+  it('garbage response (empty object) → NotContributorError with the detected avatarTypes', async () => {
     mockApiGet
       .mockResolvedValueOnce(PURE_MANAGER_DETAIL)
       .mockResolvedValueOnce({});
-    await expect(fetchAndBuildConfig('u', 'p', false)).rejects.toBeInstanceOf(NotContributorError);
+    let caught: unknown;
+    try {
+      await fetchAndBuildConfig('u', 'p', false);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(NotContributorError);
+    // avatarTypes must be carried through from /detail even when /assignments
+    // returns garbage — proves the avatarTypes capture happens before the
+    // fallback attempt.
+    expect((caught as NotContributorError).avatarTypes).toEqual(['MANAGER', 'COMPANY_ADMIN']);
   });
 
   it('garbage response (number) → NotContributorError', async () => {
