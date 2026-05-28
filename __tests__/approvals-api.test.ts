@@ -30,11 +30,14 @@ function successJson(data: unknown) {
 }
 
 // Helper: empty 200 for PUT mutations
+// apiPut reads response.text() first (to handle Crossover's empty-body 200s),
+// so the mock must expose .text() — see src/api/client.ts:97-101.
 function successEmpty() {
   return {
     ok: true,
     status: 200,
     json: async () => ({}),
+    text: async () => '',
   };
 }
 
