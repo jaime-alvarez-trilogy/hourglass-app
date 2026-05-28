@@ -37,8 +37,9 @@
 - [ ] Add `beforeEach(() => invalidateAuthToken())` to the new test file so cache state does not leak between tests.
 - [ ] Extend `src/__tests__/api/client.test.ts` `makeErrorResponse` to optionally set `content-type` header (default `application/json`), so existing tests stay green. Add `headers: { get: () => 'application/json' }` shim so the new HTML-detect code path is dormant for them.
 - [ ] Add FR7 test for `app/modal.tsx`:
-  - [ ] In an existing or new `src/__tests__/app/modal.test.tsx`, assert that after `clearAll()` resolves, `invalidateAuthToken()` is called.
-  - [ ] Optionally assert call order via `mock.calls.length` or a single `jest.fn()` capturing both via spies on the actual module exports.
+  - [ ] In an existing or new `app/__tests__/modal-auth-cache.test.tsx`, assert that `handleSignOut`: after `clearAll()` resolves, `invalidateAuthToken()` is called.
+  - [ ] Assert that `handleSwitchEnvironment`: before `fetchAndBuildConfig(... newEnv)` is called, `invalidateAuthToken()` has run.
+  - [ ] Assert call order via `mock.invocationCallOrder` or sequential spies.
 - [ ] Run `npm test -- auth-resilience` and confirm RED phase (≥ 10 tests failing as expected — cache, retry, HTML 500 detection do not exist yet).
 - [ ] **Commit:** `test(04-auth-resilience): add failing tests for token cache, retry, and HTML 5xx detection` (HEREDOC; Co-Author: Claude Opus 4.7 (1M context))
 
@@ -61,7 +62,8 @@
   - [ ] Leave `fetchAndBuildConfig` using `getAuthToken` — the post-login flow benefits from caching.
 - [ ] Modify `app/modal.tsx`:
   - [ ] Import `invalidateAuthToken` from `@/src/api/client`.
-  - [ ] In the sign-out / reset code path, immediately after `clearAll()` resolves (success or otherwise — use a `try/finally` if needed to ensure the cache is wiped even if `clearAll` throws), call `invalidateAuthToken()`.
+  - [ ] `handleSignOut`: immediately after `clearAll()` resolves (use try/finally so cache is wiped even if `clearAll` throws), call `invalidateAuthToken()`.
+  - [ ] `handleSwitchEnvironment`: before the `fetchAndBuildConfig(creds.username, creds.password, targetIsQA)` call, call `invalidateAuthToken()` so the next mint targets the new environment with no cached token from the old one.
 - [ ] Run `npm test -- auth-resilience` → all new tests green.
 - [ ] Run `npm test` → full suite green (no regression). Expect green count to be `previous + new tests added in Phase 4.0`.
 - [ ] `npx tsc --noEmit src/api/client.ts src/api/auth.ts app/modal.tsx` → clean.
