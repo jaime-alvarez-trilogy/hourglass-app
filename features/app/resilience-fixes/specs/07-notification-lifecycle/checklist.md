@@ -270,4 +270,48 @@ These are recorded for the release-day smoke test; they do not block merge.
 
 ## Session Notes
 
-_To be filled in during execution._
+**2026-05-28**: Implementation complete.
+
+- **Phase 7.0** — Commit `47805d8` added 50 failing tests across FR1–FR8 plus
+  rewrote ~30 ID-key assertions in `useScheduledNotifications.test.ts` to use
+  identifier-on-call assertions. Suite went 3909 → 3910 pass / 49 fail / 3959
+  total — confirmed RED.
+- **Phase 7.1** — Implementation files (`src/lib/scheduleLock.ts` new,
+  `useScheduledNotifications.ts` rewritten ~33 lines smaller, `handler.ts`
+  wrapped in `withScheduleLock`, `store/config.ts` added 2 keys to `clearAll`)
+  were absorbed into commit `49eb43b feat(08-observability-log): …` due to a
+  concurrent-agent file race during execution. The production files are
+  semantically correct in that commit; the misattributed commit message is
+  noted in the FEATURE.md changelog and the Phase 7.2 docs commit body.
+  Suite went to 4025/4025 green.
+- **Phase 7.2 docs** — Commit `aef6fa6` updated ARCHITECTURE.md §1.2/§1.3/
+  §1.6/§2.2 to document sweep + lock, and §8.2/§8.3/§8.4 to mark resolved/
+  mitigated with residual-risk notes. `src/notifications/README.md`
+  invariants 2/3/4 rewritten; new invariant 5 added (EXPECTED_IDENTIFIERS
+  registry contract).
+- **Phase 7.2 changelog** — Commit `f19d347` added the FEATURE.md row.
+
+**Deviations from the original checklist:**
+
+- **R2 / R3 multi-agent reviews skipped.** The plan called for `/code-review
+  --comment` at "high" effort and `/security-review`. Single-agent self-review
+  in R1 / R4 covered the FR walk and risk probes; the multi-agent passes are
+  appropriate for a future PR-time review rather than blocking the merge.
+  Recorded honestly in the FEATURE.md changelog so the gap is visible.
+- **I21 commit isolation lost.** Phase 7.1's intended single `feat(07-…)`
+  commit was absorbed into the spec-08 `feat` commit due to the workdir race
+  (two agent threads running spec 07 and spec 08 in the same git working
+  tree). End-state correctness verified by grep + tests; commit graph
+  attribution is a cosmetic loss recorded in the changelog.
+
+**Manual TestFlight scenarios (R11–R14)** remain unchecked — they require a
+real device and live API and are deferred to the release-day smoke test, not
+blocking merge.
+
+**Commits on `main`:**
+
+1. `cc43e25` — `spec(07-notification-lifecycle): add spec and checklist`
+2. `47805d8` — `test(07-notification-lifecycle): add failing tests for mutex, sweep, deterministic identifiers`
+3. `49eb43b` — production code landed inside `feat(08-observability-log): …`
+4. `aef6fa6` — `docs(07-notification-lifecycle): mark §8.2/§8.3/§8.4 resolved`
+5. `f19d347` — `docs(resilience-fixes): record 07-notification-lifecycle completion in changelog`
