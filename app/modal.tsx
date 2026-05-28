@@ -9,6 +9,7 @@ import { useRouter } from 'expo-router';
 import { useEffect, useState, startTransition } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { clearAll, loadCredentials, saveConfig } from '@/src/store/config';
+import { invalidateAuthToken } from '@/src/api/client';
 import { unregisterPushToken } from '@/src/lib/pushToken';
 import { fetchAndBuildConfig } from '@/src/api/auth';
 import { MOCK_TEAM_ITEMS } from '@/src/lib/devMock';
@@ -49,7 +50,12 @@ export default function ModalScreen() {
         style: 'destructive',
         onPress: async () => {
           await unregisterPushToken().catch(() => {});
-          await clearAll();
+          try {
+            await clearAll();
+          } finally {
+            // Spec 04 FR7: wipe the in-memory auth-token cache even if clearAll throws.
+            invalidateAuthToken();
+          }
           // 05-cache-hygiene FR2: clear TanStack in-memory cache and cancel notifications
           try { queryClient.clear(); } catch { /* non-blocking */ }
           try { await Notifications.cancelAllScheduledNotificationsAsync(); } catch { /* non-blocking */ }
@@ -79,6 +85,10 @@ export default function ModalScreen() {
             try {
               const creds = await loadCredentials();
               if (!creds) return;
+              // Spec 04 FR7: drop any cached token from the old env BEFORE minting
+              // a new one against the target env, otherwise getAuthToken would
+              // serve the stale token from the old environment.
+              invalidateAuthToken();
               const newConfig = await fetchAndBuildConfig(creds.username, creds.password, targetIsQA);
               await saveConfig(newConfig);
               startTransition(() => {

@@ -1,6 +1,6 @@
 // FR5: Auth API — profile fetch, ID extraction, config assembly
 
-import { getAuthToken, apiGet } from './client';
+import { getAuthToken, apiGet, mintAuthToken } from './client';
 import { AuthError } from './errors';
 import type { CrossoverConfig } from '../types/config';
 
@@ -223,9 +223,12 @@ export async function probeEnvironments(
   username: string,
   password: string,
 ): Promise<EnvProbeResult> {
+  // Spec 04 FR8: probe must bypass the cache (we don't yet know which env the
+  // user will pick, and we want to verify both creds work, not return a stale
+  // cached answer).
   const [prodResult, qaResult] = await Promise.allSettled([
-    getAuthToken(username, password, false),
-    getAuthToken(username, password, true),
+    mintAuthToken(username, password, false),
+    mintAuthToken(username, password, true),
   ]);
 
   const hasProd = prodResult.status === 'fulfilled';
