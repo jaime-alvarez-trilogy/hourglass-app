@@ -447,8 +447,14 @@ describe('05-onboarding-defense FR4: NotContributorError terminal state', () => 
 
   it('AuthError(401) from /detail propagates unchanged (no NotContributorError)', async () => {
     mockApiGet.mockRejectedValueOnce(new AuthError(401));
-    await expect(fetchAndBuildConfig('u', 'p', false)).rejects.toBeInstanceOf(AuthError);
-    await expect(fetchAndBuildConfig('u', 'p', false)).rejects.not.toBeInstanceOf(NotContributorError);
+    let caught: unknown;
+    try {
+      await fetchAndBuildConfig('u', 'p', false);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(AuthError);
+    expect(caught).not.toBeInstanceOf(NotContributorError);
   });
 
   it('AuthError(403) from /detail propagates unchanged', async () => {
