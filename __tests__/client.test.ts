@@ -1,5 +1,5 @@
 // FR3, FR4, FR5: API Client
-import { getAuthToken, apiGet, apiPut } from '../src/api/client';
+import { getAuthToken, apiGet, apiPut, invalidateAuthToken } from '../src/api/client';
 import { AuthError, NetworkError, ApiError } from '../src/api/errors';
 
 // Mock global fetch
@@ -8,6 +8,8 @@ global.fetch = mockFetch;
 
 beforeEach(() => {
   mockFetch.mockReset();
+  // Spec 04: reset the module-level token cache so each test sees a clean slate.
+  invalidateAuthToken();
 });
 
 // --- FR3: getAuthToken ---
@@ -38,14 +40,14 @@ describe('FR3: getAuthToken', () => {
   });
 
   it('throws AuthError(401) on 401 response', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: false, status: 401, text: async () => '' });
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 401, text: async () => '', headers: { get: () => null } });
     const err = await getAuthToken('u', 'p', false).catch((e) => e);
     expect(err).toBeInstanceOf(AuthError);
     expect(err.statusCode).toBe(401);
   });
 
   it('throws AuthError(403) on 403 response', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: false, status: 403, text: async () => '' });
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 403, text: async () => '', headers: { get: () => null } });
     const err = await getAuthToken('u', 'p', false).catch((e) => e);
     expect(err).toBeInstanceOf(AuthError);
     expect(err.statusCode).toBe(403);
@@ -103,22 +105,22 @@ describe('FR4: apiGet', () => {
   });
 
   it('throws AuthError(401) on 401', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({}) });
-    mockFetch.mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({}) });
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({}), text: async () => '', headers: { get: () => 'application/json' } });
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({}), text: async () => '', headers: { get: () => 'application/json' } });
     await expect(apiGet('/test', {}, 'tok', false)).rejects.toThrow(AuthError);
     await expect(apiGet('/test', {}, 'tok', false)).rejects.toMatchObject({ statusCode: 401 });
   });
 
   it('throws AuthError(403) on 403', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({}) });
-    mockFetch.mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({}) });
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({}), text: async () => '', headers: { get: () => 'application/json' } });
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({}), text: async () => '', headers: { get: () => 'application/json' } });
     await expect(apiGet('/test', {}, 'tok', false)).rejects.toThrow(AuthError);
     await expect(apiGet('/test', {}, 'tok', false)).rejects.toMatchObject({ statusCode: 403 });
   });
 
   it('throws ApiError(500) on 500', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) });
-    mockFetch.mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) });
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}), text: async () => '', headers: { get: () => 'application/json' } });
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}), text: async () => '', headers: { get: () => 'application/json' } });
     await expect(apiGet('/test', {}, 'tok', false)).rejects.toThrow(ApiError);
     await expect(apiGet('/test', {}, 'tok', false)).rejects.toMatchObject({ statusCode: 500 });
   });
@@ -168,15 +170,15 @@ describe('FR5: apiPut', () => {
   });
 
   it('throws AuthError(403) on 403', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({}) });
-    mockFetch.mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({}) });
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({}), text: async () => '', headers: { get: () => 'application/json' } });
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({}), text: async () => '', headers: { get: () => 'application/json' } });
     await expect(apiPut('/test', {}, 'tok', false)).rejects.toThrow(AuthError);
     await expect(apiPut('/test', {}, 'tok', false)).rejects.toMatchObject({ statusCode: 403 });
   });
 
   it('throws ApiError(422) on 422', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: false, status: 422, json: async () => ({}) });
-    mockFetch.mockResolvedValueOnce({ ok: false, status: 422, json: async () => ({}) });
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 422, json: async () => ({}), text: async () => '', headers: { get: () => 'application/json' } });
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 422, json: async () => ({}), text: async () => '', headers: { get: () => 'application/json' } });
     await expect(apiPut('/test', {}, 'tok', false)).rejects.toThrow(ApiError);
     await expect(apiPut('/test', {}, 'tok', false)).rejects.toMatchObject({ statusCode: 422 });
   });

@@ -151,13 +151,16 @@ When the response has `status >= 500` AND `content-type` includes `text/html`, a
 - `apiPut(p, b, 'stale', false, creds)` with fetch returning 401 then 200 (empty body) → resolves with `undefined`. Exactly two `fetch` calls. The retry sends the original `body` argument (re-serialized) and the new token.
 - Same retry rules as FR5 for HTML 5xx.
 
-### FR7 — `app/modal.tsx` calls `invalidateAuthToken()` after `clearAll()`
+### FR7 — `app/modal.tsx` invalidates the cache on sign-out and env switch
 
-The sign-out / reset path in `app/modal.tsx` MUST call `invalidateAuthToken()` immediately after `clearAll()` so the in-memory cache does not survive sign-out. The token is in-memory only, but a stale token in the cache after a credential switch could leak a successful API call against the previous user's credentials.
+Two code paths in `app/modal.tsx` change "which credentials should the cache represent":
+
+- **`handleSignOut`** — clears all stored data. MUST call `invalidateAuthToken()` immediately after `clearAll()` so the in-memory token does not survive sign-out.
+- **`handleSwitchEnvironment`** — switches between prod and QA. MUST call `invalidateAuthToken()` *before* the `fetchAndBuildConfig` call so the next `getAuthToken` is a fresh mint against the new environment (otherwise the cache would serve a stale prod token in a QA call site, or vice-versa).
 
 **Success criteria:**
-- After `clearAll()` is called from `app/modal.tsx`, `invalidateAuthToken()` runs in the same code path.
-- A unit test on `app/modal.tsx` (or the helper it calls) verifies both functions are invoked in order. (If `clearAll` is wrapped in a try/catch, `invalidateAuthToken` still runs.)
+- `handleSignOut`: after `clearAll()` resolves, `invalidateAuthToken()` is called. Unit test asserts both functions are invoked.
+- `handleSwitchEnvironment`: before `fetchAndBuildConfig(creds.username, creds.password, targetIsQA)` is called, `invalidateAuthToken()` has run. Unit test asserts the invalidation precedes the config fetch.
 
 ### FR8 — `probeEnvironments` bypasses the cache
 
