@@ -47,3 +47,21 @@ export class ApiError extends Error {
     Object.setPrototypeOf(this, ApiError.prototype);
   }
 }
+
+/**
+ * Thrown by `fetchAndBuildConfig` when the authenticated account has no
+ * contributor (CANDIDATE) role and Hourglass cannot proceed with onboarding.
+ *
+ * Spec: features/app/resilience-fixes/specs/05-onboarding-defense (FR1).
+ * Surfaced as a terminal onboarding screen at `app/(auth)/not-contributor.tsx`.
+ */
+export class NotContributorError extends Error {
+  avatarTypes: string[];
+
+  constructor(avatarTypes: string[]) {
+    super(`Account has no contributor role (found: ${avatarTypes.join(', ')})`);
+    this.name = 'NotContributorError';
+    this.avatarTypes = avatarTypes;
+    Object.setPrototypeOf(this, NotContributorError.prototype);
+  }
+}
