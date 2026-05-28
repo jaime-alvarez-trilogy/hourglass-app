@@ -16,7 +16,7 @@ Push notification handling. Pairs with `src/hooks/useScheduledNotifications.ts` 
 
 ## Invariants — do not break these
 
-1. **`prev_approval_count` is count-based, not ID-based.** A different set of items with the same count change will not refire. Cross-week extensions of the approval window can spike the count and cause spurious notifications. See `docs/ARCHITECTURE.md` §8.1.
+1. **`prev_approval_ids` is the dedup source of truth** (`handler.ts:18`). Set-difference (`currentIds \ prevIds`) decides whether to fire. The legacy `prev_approval_count` integer was replaced in spec `06-push-dedup`; the legacy key is removed on every write of the new key as a one-shot migration. The first-ever read of `prev_approval_ids` seeds without firing. See `docs/ARCHITECTURE.md` §8.1.
 2. **`inFlightRef` only guards within `useScheduledNotifications.scheduleAll`.** It does not coordinate with `handleBackgroundPush`. Both can run concurrently. See §8.2.
 3. **`cancel + setItem` is not atomic.** A crash between cancelling an old notification ID and persisting the new one leaves an orphan. See §8.3.
 4. **iOS Calendar triggers persist past the app.** If AsyncStorage is cleared without cancelling the underlying iOS notification, the notification still fires. See §8.4.
