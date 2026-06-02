@@ -132,6 +132,22 @@ export function useHoursData(): UseHoursDataResult {
     };
   }
 
+  // No live data yet, but cached numbers exist on disk — show them immediately
+  // (stale-flagged) instead of blanking to a skeleton. The background refresh is
+  // still in flight (isLoading mirrors eitherLoading → drives the pull-to-refresh
+  // indicator), and fresh live data replaces this the moment it arrives. The
+  // cold-start hero should never be a blank skeleton when we already have numbers.
+  if (cache) {
+    return {
+      data: cache.data,
+      isLoading: eitherLoading,
+      isStale: true,
+      cachedAt: cache.cachedAt,
+      error: null,
+      refetch,
+    };
+  }
+
   // Still loading (no data yet)
   if (eitherLoading || !cacheLoaded) {
     return {

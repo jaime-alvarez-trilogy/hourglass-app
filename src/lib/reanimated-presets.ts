@@ -107,7 +107,7 @@ export const springPremium: WithSpringConfig = {
  * Feel: precise, satisfying, like a gauge settling.
  */
 export const timingChartFill: WithTimingConfig = {
-  duration: 1800,
+  duration: 600,
   easing: Easing.bezier(0.16, 1, 0.3, 1), // Expo ease-out — fast start, smooth settle
 };
 
