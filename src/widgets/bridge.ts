@@ -7,7 +7,7 @@
 import { Platform } from 'react-native';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getUrgencyLevel, getThursdayDeadlineGMT, getSundayMidnightGMT } from '../lib/hours';
+import { getUrgencyLevel, getSundayMidnightGMT, computePacingSignal } from '../lib/hours';
 import type { HoursData, DailyEntry } from '../lib/hours';
 import type { AIWeekData } from '../lib/ai';
 import type { CrossoverConfig } from '../types/config';
@@ -334,16 +334,26 @@ function buildWidgetData(
 
   // deadline may be a Date, an ISO string (JSON-deserialized from cache), or
   // undefined (old cache written before the deadline field was added). Handle all three.
+<<<<<<< HEAD
   // Managers with pending approvals use the Sunday midnight GMT approval cutoff;
   // all other cases use the Thursday timesheet deadline.
   const rawDeadlineMs = hoursData.deadline instanceof Date
     ? hoursData.deadline.getTime()
     : typeof hoursData.deadline === 'string'
       ? new Date(hoursData.deadline).getTime()
-      : getThursdayDeadlineGMT().getTime();
+      : getSundayMidnightGMT().getTime();
   const deadlineMs = actingAsManager && derivedPendingCount > 0
     ? getSundayMidnightGMT().getTime()
     : rawDeadlineMs;
+=======
+  // Fallback is the hard deadline: Sunday 23:59:59 UTC (week close), not Thursday
+  // (05-sunday-gmt-deadline).
+  const deadlineMs = hoursData.deadline instanceof Date
+    ? hoursData.deadline.getTime()
+    : typeof hoursData.deadline === 'string'
+      ? new Date(hoursData.deadline).getTime()
+      : getSundayMidnightGMT().getTime();
+>>>>>>> 22c9d26 (feat(05-sunday-gmt-deadline): hard deadline is Sunday 23:59:59 UTC, not Thursday)
   const urgency: WidgetUrgency = getUrgencyLevel(deadlineMs - now);
 
   // Format items for widget display
