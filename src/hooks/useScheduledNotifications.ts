@@ -1,7 +1,9 @@
 // FR1–FR3: useScheduledNotifications — 10-scheduled-notifications
 //
 // Schedules three local notifications on mount and every app foreground:
-//   1. Thursday 6pm deadline reminder (FR2)
+//   1. Thursday 6pm mid-week PACE-CHECK reminder (FR2) — NOT the hard deadline.
+//      The hours week closes Sunday 23:59:59 UTC (05-sunday-gmt-deadline);
+//      the true Sunday-night deadline reminder is deferred to spec 06.
 //   2. Monday 9am weekly summary (FR3)
 //   3. Monday 9am approval-expiry warning for managers (FR4)
 //
@@ -38,11 +40,15 @@ const MONDAY_EXPIRY_ID = 'hourglass:monday-expiry';
 // ── FR2: scheduleThursdayReminder ─────────────────────────────────────────────
 
 /**
- * Schedules the Thursday 6pm local deadline reminder. iOS replaces any
- * prior schedule with the same identifier (`hourglass:thursday`).
+ * Schedules the Thursday 6pm local mid-week PACE-CHECK reminder. iOS replaces
+ * any prior schedule with the same identifier (`hourglass:thursday`).
  *
- * Skips scheduling on Friday and Saturday (deadline has already passed
- * for this week) and on Thursday after 6pm (window closed).
+ * NOT the hard deadline — the Crossover hours week closes Sunday 23:59:59 UTC
+ * (05-sunday-gmt-deadline). This is a mid-week nudge on remaining hours; the
+ * true Sunday-night deadline reminder is deferred to spec 06.
+ *
+ * Skips scheduling on Friday and Saturday and on Thursday after 6pm (window
+ * closed — scheduling then would fire immediately).
  */
 async function scheduleThursdayReminder(
   hoursRemaining: number,
@@ -68,7 +74,7 @@ async function scheduleThursdayReminder(
     await Notifications.scheduleNotificationAsync({
       identifier: THURSDAY_ID,
       content: {
-        title: 'Hours Deadline Tonight',
+        title: 'Hours Pace Check',
         body,
       },
       trigger: {
@@ -190,10 +196,10 @@ async function scheduleMondayExpiryReminder(isManager: boolean): Promise<void> {
 // ── FR1: useScheduledNotifications ───────────────────────────────────────────
 
 /**
- * Schedules local notifications (Thursday 6pm deadline, Monday 9am weekly summary,
- * Monday 9am approval-expiry warning for managers) on mount and on every AppState
- * 'active' transition. Reads from AsyncStorage 'widget_data' and weekly history;
- * no API calls.
+ * Schedules local notifications (Thursday 6pm mid-week pace check, Monday 9am
+ * weekly summary, Monday 9am approval-expiry warning for managers) on mount and
+ * on every AppState 'active' transition. Reads from AsyncStorage 'widget_data'
+ * and weekly history; no API calls.
  *
  * Three concurrency guards layered:
  *   1. inFlightRef — intra-hook re-entry (spec 01-flood-guard, bebfb0f).

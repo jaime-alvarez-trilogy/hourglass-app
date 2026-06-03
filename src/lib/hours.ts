@@ -65,8 +65,10 @@ export function getSundayMidnightGMT(): Date {
  * Returns Thursday 23:59:59.999 UTC of the current UTC work week.
  * Mon–Thu: this Thursday. Fri–Sun: next Thursday.
  *
- * Mirrors the day-offset logic in computeDeadlineCountdown but returns
- * a Date object for use in calculateHours.
+ * PACE-CHECK ONLY — this is NOT the hard deadline. The Crossover hours week is
+ * Mon–Sun, so the real cutoff to log hours is Sunday 23:59:59 UTC; use
+ * getSundayMidnightGMT for the deadline. Retained for the Thursday mid-week
+ * pace-check reminder and its unit tests.
  */
 export function getThursdayDeadlineGMT(): Date {
   const now = new Date();
@@ -218,7 +220,10 @@ export function calculateHours(
   hourlyRate: number,
   weeklyLimit: number
 ): HoursData {
-  const deadline = getThursdayDeadlineGMT();
+  // Hard deadline is Sunday 23:59:59 UTC — the Crossover hours week closes
+  // Mon–Sun (05-sunday-gmt-deadline). NOT Thursday (getThursdayDeadlineGMT is
+  // pace-check only).
+  const deadline = getSundayMidnightGMT();
   const now = Date.now();
   const timeRemaining = deadline.getTime() - now;
   const limit = weeklyLimit || 40;
@@ -308,8 +313,9 @@ export function calculateHours(
 // ─── computeDeadlineCountdown ─────────────────────────────────────────────────
 
 /**
- * Returns time remaining until the Crossover timesheet deadline (Thursday 23:59:59 UTC).
- * Mon–Thu: deadline is this Thursday. Fri–Sun: deadline is next Thursday.
+ * Returns time remaining until the Crossover hours deadline (Sunday 23:59:59 UTC).
+ * The hours week is Mon–Sun, so the cutoff is this week's Sunday (end of today
+ * when called on a Sunday; never jumps to next week).
  *
  * - urgency: 'none' (>48h), 'warning' (24–48h), 'critical' (<24h)
  * - label: "2d 14h left" | "23h 45m left" | "45m left"
@@ -319,13 +325,13 @@ export function computeDeadlineCountdown(now = new Date()): {
   label: string;
   urgency: 'none' | 'warning' | 'critical';
 } {
-  // Thursday (UTC day 4) is the Crossover timesheet deadline
+  // Sunday (UTC day 0) closes the Crossover hours week.
   const utcDay = now.getUTCDay(); // 0 = Sunday
-  const daysUntilThursday = (4 - utcDay + 7) % 7; // 0 on Thursday, 6 on Friday
+  const daysUntilSunday = (0 - utcDay + 7) % 7; // 0 on Sunday, 6 on Monday
   const deadline = new Date(Date.UTC(
     now.getUTCFullYear(),
     now.getUTCMonth(),
-    now.getUTCDate() + daysUntilThursday,
+    now.getUTCDate() + daysUntilSunday,
     23, 59, 59, 0
   ));
 
