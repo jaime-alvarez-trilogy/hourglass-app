@@ -507,36 +507,62 @@ describe('getThursdayDeadlineGMT', () => {
   });
 });
 
-// ─── calculateHours deadline regression (FR2: 02-deadline-clock) ──────────────
+// ─── calculateHours deadline is Sunday (FR1: 05-sunday-gmt-deadline) ──────────
 //
-// SC2.1 — When called on Tuesday UTC, HoursData.deadline is a Thursday
-// SC2.2 — HoursData.timeRemaining is positive when called before Thursday 23:59:59 UTC
-// SC2.3 — Return type HoursData shape is unchanged (deadline is a Date)
+// The Crossover hours week runs Mon–Sun, so the hard deadline is Sunday 23:59:59
+// UTC (week close), NOT Thursday. calculateHours must source HoursData.deadline
+// from getSundayMidnightGMT(). This block replaces the prior Thursday regression
+// block (02-deadline-clock); the standalone getThursdayDeadlineGMT unit tests
+// above stay green because the function is retained (pace-check only).
 
-describe('calculateHours — deadline is Thursday (FR2 regression)', () => {
+describe('calculateHours — deadline is Sunday (FR1: 05-sunday-gmt-deadline)', () => {
   afterEach(() => {
     jest.useRealTimers();
   });
 
-  it('SC2.1 — deadline.getUTCDay() === 4 (Thursday) when called on Tuesday', () => {
+  it('SC1.1 — deadline.getUTCDay() === 0 (Sunday) when called on Tuesday', () => {
     // 2026-04-07 is a Tuesday UTC
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-04-07T12:00:00.000Z'));
     const result = calculateHours(null, null, 25, 40);
-    expect(result.deadline.getUTCDay()).toBe(4); // Thursday
+    expect(result.deadline.getUTCDay()).toBe(0); // Sunday
   });
 
-  it('SC2.2 — timeRemaining is positive when called before Thursday 23:59:59 UTC', () => {
-    // Monday — Thursday deadline is days away, timeRemaining should be large positive
+  it('SC1.2 — Wednesday 2026-04-08 → deadline is 2026-04-12 (Sunday) at 23:59:59 UTC', () => {
+    // 2026-04-08 is a Wednesday UTC; the Sunday of that Mon–Sun week is 2026-04-12
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-04-08T12:00:00.000Z'));
+    const result = calculateHours(null, null, 25, 40);
+    expect(result.deadline.getUTCFullYear()).toBe(2026);
+    expect(result.deadline.getUTCMonth()).toBe(3); // April = 3
+    expect(result.deadline.getUTCDate()).toBe(12);
+    expect(result.deadline.getUTCHours()).toBe(23);
+    expect(result.deadline.getUTCMinutes()).toBe(59);
+    expect(result.deadline.getUTCSeconds()).toBe(59);
+  });
+
+  it('SC1.3 — timeRemaining > 3 days when called Monday (deadline is days away)', () => {
+    // Monday — Sunday deadline is ~6 days away
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-04-06T09:00:00.000Z')); // Monday
     const result = calculateHours(null, null, 25, 40);
     expect(result.timeRemaining).toBeGreaterThan(0);
-    // Should be approximately 3 days + some hours in ms
-    expect(result.timeRemaining).toBeGreaterThan(2 * 24 * 60 * 60 * 1000);
+    expect(result.timeRemaining).toBeGreaterThan(3 * 24 * 60 * 60 * 1000);
   });
 
-  it('SC2.3 — deadline is a Date instance (HoursData shape unchanged)', () => {
+  it('SC1.4 — called Sunday 2026-04-12 10:00 UTC → this Sunday, not next week', () => {
+    // 2026-04-12 is a Sunday UTC; deadline must be end of TODAY, not next Sunday
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-04-12T10:00:00.000Z'));
+    const result = calculateHours(null, null, 25, 40);
+    expect(result.deadline.getUTCDay()).toBe(0); // Sunday
+    expect(result.deadline.getUTCDate()).toBe(12); // this Sunday
+    // 10:00 → 23:59:59 same day = positive but < 14h
+    expect(result.timeRemaining).toBeGreaterThan(0);
+    expect(result.timeRemaining).toBeLessThan(14 * 60 * 60 * 1000);
+  });
+
+  it('SC1.5 — deadline is a Date instance (HoursData shape unchanged)', () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-04-07T12:00:00.000Z'));
     const result = calculateHours(null, null, 25, 40);

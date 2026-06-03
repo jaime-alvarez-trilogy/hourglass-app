@@ -178,6 +178,39 @@ describe('FR1: useScheduledNotifications — source file contract (static analys
     expect(source).toContain("'active'");
     expect(source).toMatch(/scheduleAll/);
   });
+
+  // 05-sunday-gmt-deadline (FR4): neutralize the now-wrong Thursday "deadline
+  // tonight" copy — the hard deadline is Sunday, so the Thursday reminder is a
+  // mid-week pace check. The literal misleading string must be gone.
+  it('FR4-SC1 — source no longer contains "Hours Deadline Tonight"', () => {
+    expect(source).not.toContain('Hours Deadline Tonight');
+  });
+
+  it('FR4-SC2 — source contains neutralized pace-check title "Hours Pace Check"', () => {
+    expect(source).toContain('Hours Pace Check');
+  });
+
+  // 05-sunday-gmt-deadline (FR4/FR5): the deterministic id and schedule guards
+  // for the Thursday reminder are preserved (only the copy changes).
+  it('FR4-SC3 — Thursday id, weekday-5 and skip-after-6pm guards preserved', () => {
+    expect(source).toContain("'hourglass:thursday'");
+    expect(source).toContain('weekday: 5');
+    expect(source).toMatch(/localDay === 4 && localHour >= 18/);
+  });
+
+  // 05-sunday-gmt-deadline (FR4/FR5): the Monday summary and expiry reminders are
+  // separate signals and must be byte-for-byte unchanged. Their distinctive copy
+  // and the Monday-3pm-UTC cutoff stay intact.
+  it('FR5-SC1 — scheduleMondayExpiryReminder Monday-3pm-UTC cutoff unchanged', () => {
+    expect(source).toContain('must be reviewed by 3pm UTC');
+    expect(source).toContain('Approvals Expiring Today');
+    expect(source).toMatch(/utcHour >= 15/);
+  });
+
+  it('FR5-SC2 — scheduleMondaySummary present and unchanged', () => {
+    expect(source).toContain('scheduleMondaySummary');
+    expect(source).toContain("'hourglass:monday-summary'");
+  });
 });
 
 // ── FR2: scheduleThursdayReminder ─────────────────────────────────────────────
@@ -326,7 +359,10 @@ describe('FR2: scheduleThursdayReminder — via scheduleAll orchestration', () =
     jest.restoreAllMocks();
   });
 
-  it('SC2.6 — notification title is "Hours Deadline Tonight"', async () => {
+  // 05-sunday-gmt-deadline (FR4): the Thursday reminder is no longer the hard
+  // deadline (that is Sunday) — it is a mid-week PACE CHECK. The title must no
+  // longer claim "deadline tonight". The neutralized title is "Hours Pace Check".
+  it('SC2.6 — notification title is the neutralized pace-check title (not "Hours Deadline Tonight")', async () => {
     jest.spyOn(Date.prototype, 'getDay').mockReturnValue(2);
     jest.spyOn(Date.prototype, 'getHours').mockReturnValue(10);
 
@@ -334,11 +370,29 @@ describe('FR2: scheduleThursdayReminder — via scheduleAll orchestration', () =
     if (mod.__testOnly?.scheduleThursdayReminder) {
       await mod.__testOnly.scheduleThursdayReminder(5.5, 40);
       const call = mockScheduleNotification.mock.calls[0][0];
-      expect(call.content.title).toBe('Hours Deadline Tonight');
+      expect(call.content.title).toBe('Hours Pace Check');
+      expect(call.content.title).not.toMatch(/deadline|tonight/i);
     } else {
       const source = fs.readFileSync(HOOK_FILE, 'utf8');
-      expect(source).toContain('Hours Deadline Tonight');
+      expect(source).toContain('Hours Pace Check');
+      expect(source).not.toContain('Hours Deadline Tonight');
     }
+
+    jest.restoreAllMocks();
+  });
+
+  // 05-sunday-gmt-deadline (FR4): the literal misleading copy must be gone, and
+  // neither the title nor the body of the Thursday notification may imply that
+  // tonight is the deadline.
+  it('SC2.6b — Thursday notification content has no "deadline"/"tonight" wording', async () => {
+    jest.spyOn(Date.prototype, 'getDay').mockReturnValue(2);
+    jest.spyOn(Date.prototype, 'getHours').mockReturnValue(10);
+
+    const mod = require('../useScheduledNotifications');
+    await mod.__testOnly.scheduleThursdayReminder(5.5, 40);
+    const call = mockScheduleNotification.mock.calls[0][0];
+    expect(call.content.title).not.toMatch(/deadline|tonight/i);
+    expect(call.content.body).not.toMatch(/deadline|tonight/i);
 
     jest.restoreAllMocks();
   });
