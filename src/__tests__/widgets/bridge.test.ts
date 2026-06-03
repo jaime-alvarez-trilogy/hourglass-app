@@ -233,6 +233,52 @@ describe('updateWidgetData (FR1)', () => {
   });
 });
 
+// ─── FR2: 05-sunday-gmt-deadline — deadlineMs fallback is Sunday ───────────────
+//
+// When hoursData.deadline is neither a Date nor an ISO string (a legacy cache
+// written before the field existed), buildWidgetData falls back to the hard
+// deadline helper. That fallback must now be Sunday 23:59:59 UTC (week close),
+// NOT Thursday. A real Sunday Date still passes through unchanged.
+
+describe('updateWidgetData — deadlineMs fallback is Sunday (FR2)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('legacy cache (deadline undefined) → emits a Sunday 23:59:59 UTC timestamp', async () => {
+    // Simulate an old cached HoursData missing the deadline field.
+    const hoursData = makeHoursData();
+    delete (hoursData as Partial<HoursData>).deadline;
+    await updateWidgetData(hoursData, makeAIData(), 0, makeConfig());
+    const data = getWrittenWidgetData()!;
+    expect(typeof data.deadline).toBe('number');
+    const d = new Date(data.deadline as number);
+    expect(d.getUTCDay()).toBe(0); // Sunday
+    expect(d.getUTCHours()).toBe(23);
+    expect(d.getUTCMinutes()).toBe(59);
+    expect(d.getUTCSeconds()).toBe(59);
+  });
+
+  it('deadline already a Sunday Date passes through unchanged', async () => {
+    // 2026-04-12 23:59:59.999 UTC is a Sunday
+    const sunday = new Date('2026-04-12T23:59:59.999Z');
+    await updateWidgetData(makeHoursData({ deadline: sunday }), makeAIData(), 0, makeConfig());
+    const data = getWrittenWidgetData()!;
+    expect(data.deadline).toBe(sunday.getTime());
+  });
+
+  it('bridge.ts does not import or call getThursdayDeadlineGMT', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(
+      path.resolve(__dirname, '../../widgets/bridge.ts'),
+      'utf8',
+    );
+    expect(src).not.toContain('getThursdayDeadlineGMT');
+    expect(src).toContain('getSundayMidnightGMT');
+  });
+});
+
 // ─── FR2: buildTimelineEntries ─────────────────────────────────────────────────
 
 describe('buildTimelineEntries (FR2)', () => {

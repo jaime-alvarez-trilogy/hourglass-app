@@ -6,6 +6,10 @@ import { computeDeadlineCountdown, computePacingSignal } from '../hours';
 
 // ─── computeDeadlineCountdown ─────────────────────────────────────────────────
 
+// 05-sunday-gmt-deadline (FR3): the hard deadline is Sunday 23:59:59 UTC (week
+// close), NOT Thursday. computeDeadlineCountdown counts down to Sunday; the
+// urgency ramp (>48h none / 24–48h warning / <24h critical) now keys off Sunday,
+// so mid-week (e.g. Thursday) reads 'none' instead of the old false 'critical'.
 describe('computeDeadlineCountdown', () => {
   beforeEach(() => {
     // Freeze clock to a known Monday so any internal new Date() calls are stable
@@ -15,72 +19,79 @@ describe('computeDeadlineCountdown', () => {
   afterEach(() => {
     jest.useRealTimers();
   });
-  it('Monday UTC → > 48h → urgency none', () => {
-    // Monday 09:00 UTC — deadline is Thursday 23:59:59 UTC = ~86h away
+  it('Monday 2026-04-06 09:00 UTC → > 48h → urgency none, deadline is Sunday 2026-04-12', () => {
+    // Monday 09:00 UTC — deadline is Sunday 23:59:59 UTC = ~6d 15h away
     const monday = new Date('2026-04-06T09:00:00.000Z'); // A known Monday
     const result = computeDeadlineCountdown(monday);
 
     expect(result.urgency).toBe('none');
     expect(result.msRemaining).toBeGreaterThan(48 * 60 * 60 * 1000);
-    // Label should contain days and hours (e.g. "3d 14h left")
+    // Label should contain days and hours (e.g. "6d 14h left")
+    expect(result.label).toMatch(/^\d+d \d+h left$/);
+    // Deadline date is 2026-04-12 (the Sunday of that Mon–Sun week)
+    const deadline = new Date(monday.getTime() + result.msRemaining);
+    expect(deadline.getUTCDate()).toBe(12);
+    expect(deadline.getUTCDay()).toBe(0); // Sunday
+  });
+
+  it('Thursday 2026-04-09 14:00 UTC → urgency none (was critical under Thursday behavior)', () => {
+    // Thursday 14:00 UTC — deadline is Sunday 23:59:59 UTC = ~3d 10h away.
+    // Proves the ramp moved OFF Thursday: this used to be 'critical'.
+    const thursday = new Date('2026-04-09T14:00:00.000Z'); // A known Thursday
+    const result = computeDeadlineCountdown(thursday);
+
+    expect(result.urgency).toBe('none');
+    expect(result.msRemaining).toBeGreaterThan(48 * 60 * 60 * 1000);
     expect(result.label).toMatch(/^\d+d \d+h left$/);
   });
 
-  it('Wednesday 15:00 UTC → ~33h → urgency warning', () => {
-    // Wednesday 15:00 UTC — deadline is Thursday 23:59:59 UTC = ~33h away
-    const wednesday = new Date('2026-04-08T15:00:00.000Z'); // A known Wednesday
-    const result = computeDeadlineCountdown(wednesday);
+  it('Saturday 2026-04-11 20:00 UTC → ~28h → urgency warning', () => {
+    // Saturday 20:00 UTC — deadline is Sunday 23:59:59 UTC = ~28h away
+    const saturday = new Date('2026-04-11T20:00:00.000Z'); // A known Saturday
+    const result = computeDeadlineCountdown(saturday);
 
     expect(result.urgency).toBe('warning');
     expect(result.msRemaining).toBeGreaterThan(24 * 60 * 60 * 1000);
     expect(result.msRemaining).toBeLessThan(48 * 60 * 60 * 1000);
-    // Wednesday 15:00 UTC to Thursday 23:59:59 UTC = ~33h → "1d 8h left"
     expect(result.label).toMatch(/^\d+d \d+h left$/);
   });
 
-  it('Thursday 14:00 UTC → ~10h → urgency critical', () => {
-    // Thursday 14:00 UTC — deadline is Thursday 23:59:59 UTC = ~10h away
-    const thursday = new Date('2026-04-09T14:00:00.000Z'); // A known Thursday
-    const result = computeDeadlineCountdown(thursday);
+  it('Sunday 2026-04-12 14:00 UTC → ~10h → urgency critical', () => {
+    // Sunday 14:00 UTC — deadline is THIS Sunday 23:59:59 UTC = ~10h away
+    const sunday = new Date('2026-04-12T14:00:00.000Z'); // A known Sunday
+    const result = computeDeadlineCountdown(sunday);
 
     expect(result.urgency).toBe('critical');
     expect(result.msRemaining).toBeLessThan(24 * 60 * 60 * 1000);
+    expect(result.msRemaining).toBeGreaterThan(0);
     // Label should contain hours and minutes (e.g. "9h 59m left")
     expect(result.label).toMatch(/^\d+h \d+m left$/);
   });
 
-  it('Friday → deadline is NEXT Thursday (> 48h away → urgency none)', () => {
-    // Friday 10:00 UTC — deadline is next Thursday 23:59:59 UTC = ~6d 14h away
-    const friday = new Date('2026-04-10T10:00:00.000Z'); // A known Friday
-    const result = computeDeadlineCountdown(friday);
-
-    expect(result.urgency).toBe('none');
-    expect(result.msRemaining).toBeGreaterThan(48 * 60 * 60 * 1000);
-    expect(result.label).toMatch(/^\d+d \d+h left$/);
-  });
-
-  it('Sunday → deadline is next Thursday (urgency none)', () => {
+  it('called on Sunday returns this Sunday (0 days ahead), not next week', () => {
     const sunday = new Date('2026-04-12T12:00:00.000Z'); // A known Sunday
     const result = computeDeadlineCountdown(sunday);
 
-    expect(result.urgency).toBe('none');
-    expect(result.msRemaining).toBeGreaterThan(48 * 60 * 60 * 1000);
+    const deadline = new Date(sunday.getTime() + result.msRemaining);
+    expect(deadline.getUTCDate()).toBe(12); // this Sunday, not 2026-04-19
+    expect(deadline.getUTCDay()).toBe(0);
+    expect(result.urgency).toBe('critical'); // < 24h to end of today
   });
 
-  it('label uses "Xm left" format when < 1h remaining', () => {
-    // Thursday 23:30 UTC — ~30 minutes to deadline
-    const almostDeadline = new Date('2026-04-09T23:30:00.000Z');
+  it('label uses "Xm left" format when < 1h remaining (Sunday 23:30 UTC)', () => {
+    // Sunday 23:30 UTC — ~30 minutes to deadline (week close)
+    const almostDeadline = new Date('2026-04-12T23:30:00.000Z');
     const result = computeDeadlineCountdown(almostDeadline);
 
     expect(result.urgency).toBe('critical');
     expect(result.label).toMatch(/^\d+m left$/);
   });
 
-  it('msRemaining is close to expected value for Wednesday 15:00 UTC', () => {
-    const wednesday = new Date('2026-04-08T15:00:00.000Z');
-    const result = computeDeadlineCountdown(wednesday);
+  it('msRemaining is close to expected value for Saturday 15:00 UTC', () => {
+    const saturday = new Date('2026-04-11T15:00:00.000Z');
+    const result = computeDeadlineCountdown(saturday);
 
-    // Thursday 23:59:59 UTC - Wednesday 15:00 UTC = 32h 59m 59s = ~118799s
+    // Sunday 23:59:59 UTC - Saturday 15:00 UTC = 32h 59m 59s = ~118799s
     const expectedMs = (32 * 60 * 60 + 59 * 60 + 59) * 1000;
     expect(result.msRemaining).toBeCloseTo(expectedMs, -3); // within ~1 second
   });
