@@ -17,12 +17,12 @@ export async function fetchPendingManual(
   useQA: boolean,
   weekStartDate: string
 ): Promise<RawManualResponse[]> {
-  return apiGet<RawManualResponse[]>(
+  return (await apiGet<RawManualResponse[]>(
     '/api/timetracking/workdiaries/manual/pending',
     { weekStartDate },
     token,
     useQA
-  )
+  )) ?? []
 }
 
 /**
@@ -34,12 +34,12 @@ export async function fetchPendingOvertime(
   useQA: boolean,
   weekStartDate: string
 ): Promise<RawOvertimeResponse[]> {
-  return apiGet<RawOvertimeResponse[]>(
+  return (await apiGet<RawOvertimeResponse[]>(
     '/api/overtime/request',
     { status: 'PENDING', weekStartDate },
     token,
     useQA
-  )
+  )) ?? []
 }
 
 // ---------------------------------------------------------------------------
