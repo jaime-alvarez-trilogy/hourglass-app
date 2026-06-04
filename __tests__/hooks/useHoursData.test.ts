@@ -56,7 +56,7 @@ describe('fetchTimesheet', () => {
   it('calls strategy 1 (full params: date, managerId, period, teamId, userId) first', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
-      json: async () => timesheetResponse,
+      text: async () => JSON.stringify(timesheetResponse),
     });
     global.fetch = fetchMock as any;
 
@@ -73,8 +73,8 @@ describe('fetchTimesheet', () => {
   it('falls back to strategy 2 (no teamId) when strategy 1 returns empty array', async () => {
     const fetchMock = jest
       .fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => [] }) // strategy 1 empty
-      .mockResolvedValue({ ok: true, json: async () => timesheetResponse });
+      .mockResolvedValueOnce({ ok: true, text: async () => "[]" }) // strategy 1 empty
+      .mockResolvedValue({ ok: true, text: async () => JSON.stringify(timesheetResponse) });
 
     global.fetch = fetchMock as any;
 
@@ -89,9 +89,9 @@ describe('fetchTimesheet', () => {
   it('falls back to strategy 3 (minimal: date+period+userId) when strategy 2 returns empty', async () => {
     const fetchMock = jest
       .fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => [] }) // strategy 1
-      .mockResolvedValueOnce({ ok: true, json: async () => [] }) // strategy 2
-      .mockResolvedValue({ ok: true, json: async () => timesheetResponse });
+      .mockResolvedValueOnce({ ok: true, text: async () => "[]" }) // strategy 1
+      .mockResolvedValueOnce({ ok: true, text: async () => "[]" }) // strategy 2
+      .mockResolvedValue({ ok: true, text: async () => JSON.stringify(timesheetResponse) });
 
     global.fetch = fetchMock as any;
 
@@ -108,7 +108,7 @@ describe('fetchTimesheet', () => {
   it('returns first non-empty array response', async () => {
     const fetchMock = jest
       .fn()
-      .mockResolvedValue({ ok: true, json: async () => timesheetResponse });
+      .mockResolvedValue({ ok: true, text: async () => JSON.stringify(timesheetResponse) });
 
     global.fetch = fetchMock as any;
 
@@ -119,7 +119,7 @@ describe('fetchTimesheet', () => {
   it('uses getWeekStartDate(true) for the date param (UTC-based Monday)', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
-      json: async () => timesheetResponse,
+      text: async () => JSON.stringify(timesheetResponse),
     });
     global.fetch = fetchMock as any;
 
@@ -165,7 +165,7 @@ describe('fetchPayments', () => {
   it('calls correct endpoint with from/to UTC dates', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
-      json: async () => paymentsResponse,
+      text: async () => JSON.stringify(paymentsResponse),
     });
     global.fetch = fetchMock as any;
 
@@ -180,7 +180,7 @@ describe('fetchPayments', () => {
   it('formats from date as Monday 2026-03-02 for week containing 2026-03-04', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
-      json: async () => paymentsResponse,
+      text: async () => JSON.stringify(paymentsResponse),
     });
     global.fetch = fetchMock as any;
 
@@ -193,7 +193,7 @@ describe('fetchPayments', () => {
   it('formats to date as Sunday 2026-03-08 for week containing 2026-03-04', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
-      json: async () => paymentsResponse,
+      text: async () => JSON.stringify(paymentsResponse),
     });
     global.fetch = fetchMock as any;
 
@@ -209,7 +209,7 @@ describe('fetchPayments', () => {
     // Fixed time = 2026-03-04T12:00:00Z, Monday = 2026-03-02, Sunday = 2026-03-08
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
-      json: async () => paymentsResponse,
+      text: async () => JSON.stringify(paymentsResponse),
     });
     global.fetch = fetchMock as any;
 
@@ -241,7 +241,7 @@ describe('fetchPayments', () => {
   it('returns the first payment record from the array', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
-      json: async () => paymentsResponse,
+      text: async () => JSON.stringify(paymentsResponse),
     });
     global.fetch = fetchMock as any;
 
@@ -252,7 +252,7 @@ describe('fetchPayments', () => {
   it('returns null when payments array is empty', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
-      json: async () => [],
+      text: async () => "[]",
     });
     global.fetch = fetchMock as any;
 

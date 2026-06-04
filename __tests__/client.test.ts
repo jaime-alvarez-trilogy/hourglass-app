@@ -76,14 +76,14 @@ describe('FR3: getAuthToken', () => {
 // --- FR4: apiGet ---
 describe('FR4: apiGet', () => {
   it('attaches x-auth-token header with the token value', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: 1 }) });
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify({ data: 1 }) });
     await apiGet('/test', {}, 'mytoken', false);
     const [, options] = mockFetch.mock.calls[0];
     expect(options.headers['x-auth-token']).toBe('mytoken');
   });
 
   it('serializes params into query string', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) });
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, text: async () => '{}' });
     await apiGet('/test', { date: '2026-01-01', teamId: '4584' }, 'tok', false);
     const [url] = mockFetch.mock.calls[0];
     expect(url).toContain('date=2026-01-01');
@@ -91,17 +91,37 @@ describe('FR4: apiGet', () => {
   });
 
   it('no ? in URL when params is empty', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) });
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, text: async () => '{}' });
     await apiGet('/test', {}, 'tok', false);
     const [url] = mockFetch.mock.calls[0];
     expect(url).not.toContain('?');
   });
 
   it('request method is GET', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) });
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, text: async () => '{}' });
     await apiGet('/test', {}, 'tok', false);
     const [, options] = mockFetch.mock.calls[0];
     expect(options.method).toBe('GET');
+  });
+
+  // Regression (empty-body bug): a 200/204 with a zero-byte body must resolve to
+  // undefined, NOT throw "JSON Parse error: Unexpected end of input". apiGet used
+  // raw response.json() which crashed managers on the approvals screen when a
+  // pending GET (e.g. empty overtime queue) returned an empty body. parseBody now
+  // guards both apiGet and apiPut.
+  it('returns undefined on an empty 200 body (no JSON.parse crash)', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, text: async () => '' });
+    await expect(apiGet('/test', {}, 'tok', false)).resolves.toBeUndefined();
+  });
+
+  it('returns undefined on a 204 empty body', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 204, text: async () => '' });
+    await expect(apiGet('/test', {}, 'tok', false)).resolves.toBeUndefined();
+  });
+
+  it('parses a non-empty JSON body', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify({ a: 1 }) });
+    await expect(apiGet('/test', {}, 'tok', false)).resolves.toEqual({ a: 1 });
   });
 
   it('throws AuthError(401) on 401', async () => {

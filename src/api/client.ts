@@ -183,6 +183,23 @@ async function handleStatus(response: Response): Promise<never> {
 }
 
 // ---------------------------------------------------------------------------
+// Body parsing
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a response body as JSON, tolerating an EMPTY body. Crossover returns a
+ * 200/204 with a zero-byte body on approve/reject PUTs AND on some GETs (e.g. an
+ * empty pending-overtime queue). Raw `response.json()` throws "JSON Parse error:
+ * Unexpected end of input" on those; reading text first and returning `undefined`
+ * for an empty body avoids it. Used by BOTH apiGet and apiPut so the read and
+ * write paths can never drift apart again.
+ */
+async function parseBody<T>(response: Response): Promise<T> {
+  const text = await response.text();
+  return (text ? JSON.parse(text) : undefined) as T;
+}
+
+// ---------------------------------------------------------------------------
 // Public API: apiGet / apiPut
 // ---------------------------------------------------------------------------
 
@@ -221,7 +238,7 @@ export async function apiGet<T>(
   }
 
   if (!response.ok) await handleStatus(response);
-  return response.json() as Promise<T>;
+  return parseBody<T>(response);
 }
 
 /**
@@ -263,8 +280,5 @@ export async function apiPut<T>(
   }
 
   if (!response.ok) await handleStatus(response);
-  // Crossover approve/reject endpoints return an empty body on success.
-  // Reading as text first avoids "Unexpected end of input" from response.json().
-  const text = await response.text();
-  return (text ? JSON.parse(text) : undefined) as T;
+  return parseBody<T>(response);
 }

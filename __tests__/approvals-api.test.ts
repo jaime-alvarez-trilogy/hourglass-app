@@ -25,7 +25,7 @@ function successJson(data: unknown) {
   return {
     ok: true,
     status: 200,
-    json: async () => data,
+    text: async () => JSON.stringify(data),
   };
 }
 
