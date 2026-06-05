@@ -471,11 +471,12 @@ Not a TODO list — a catalog of things to remember when touching these subsyste
 ### 8.3 Cancel + setItem is not atomic
 
 - **Resolved** by spec `07-notification-lifecycle`. Calendar schedulers no longer track AsyncStorage IDs — each call passes a deterministic `identifier` (`hourglass:thursday`, `hourglass:monday-summary`, `hourglass:monday-expiry`). iOS replaces same-id schedules, so there is no cancel/setItem window. The legacy `notif_thursday_id` / `notif_monday_id` / `notif_expiry_id` keys are no longer referenced in code; `sweepOrphanNotifications` removes them as one-shot migration.
+- **Migration gap closed** by spec `09-orphan-sweep-migration`. Builds ≤9 scheduled with **random-UUID** identifiers via the old cancel/reschedule pattern, leaking duplicate Thursday-6pm notifications. Those orphans are not `hourglass:*`, so the original sweep skipped them and they survived the upgrade (a barrage of non-identical "Hours Deadline Tonight" notifications firing together at 6pm). `sweepOrphanNotifications` now cancels **any** scheduled notification whose id is not in `EXPECTED_IDENTIFIERS` (regardless of prefix), clearing the build-9 orphans on the next foreground.
 
 ### 8.4 Calendar triggers persist past the app
 
-- **Mitigated** by spec `07-notification-lifecycle`. On every `scheduleAll` mount, `sweepOrphanNotifications` calls `getAllScheduledNotificationsAsync()` and cancels any `hourglass:*` identifier not in `EXPECTED_IDENTIFIERS`. A reinstall (or any AsyncStorage wipe that leaves iOS schedules intact) is now self-healing on the next foreground.
-- **Residual risk**: any new `hourglass:*` identifier introduced by a future spec must be added to `EXPECTED_IDENTIFIERS` in the same PR, or the sweep will quietly cancel it on next mount. Documented in `src/lib/scheduleLock.ts` JSDoc and `src/notifications/README.md` invariant 5.
+- **Mitigated** by spec `07-notification-lifecycle`, **broadened** by `09-orphan-sweep-migration`. On every `scheduleAll` mount, `sweepOrphanNotifications` calls `getAllScheduledNotificationsAsync()` and cancels **any** identifier not in `EXPECTED_IDENTIFIERS` (any prefix — `getAllScheduledNotificationsAsync` only returns this app's notifications). A reinstall, an AsyncStorage wipe, or a leftover build-9 random-id orphan is now self-healing on the next foreground.
+- **Residual risk**: any new scheduled notification introduced by a future spec must add its identifier to `EXPECTED_IDENTIFIERS` in the same PR, or the sweep will cancel it on next mount. Documented in `src/lib/scheduleLock.ts` JSDoc and `src/notifications/README.md` invariant 5.
 
 ### 8.5 ~~Auth token refetched every request~~ (resolved by spec 04)
 
