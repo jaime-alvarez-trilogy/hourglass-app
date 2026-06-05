@@ -140,23 +140,42 @@ describe('FR2: withScheduleLock', () => {
 // ─── FR4: sweepOrphanNotifications ───────────────────────────────────────────
 
 describe('FR4: sweepOrphanNotifications', () => {
-  it('T9 — mixed list: only hourglass:* not-in-expected are cancelled', async () => {
+  it('T9 — broadened sweep: ALL non-expected identifiers are cancelled (any prefix)', async () => {
     mockGetAll.mockResolvedValueOnce([
       { identifier: 'hourglass:thursday' },
       { identifier: 'hourglass:monday-summary' },
       { identifier: 'hourglass:monday-expiry' },
       { identifier: 'hourglass:foo' },
       { identifier: 'hourglass:legacy-abc-123' },
+      { identifier: '7F3A1C2E-9B4D-4E5F-A1B2-C3D4E5F60718' }, // build-9 random-UUID orphan
       { identifier: 'some-other-app:reminder' },
     ]);
 
     await sweepOrphanNotifications();
 
-    expect(mockCancel).toHaveBeenCalledTimes(2);
+    // Every identifier NOT in EXPECTED_IDENTIFIERS is cancelled, regardless of prefix.
+    expect(mockCancel).toHaveBeenCalledTimes(4);
     expect(mockCancel).toHaveBeenCalledWith('hourglass:foo');
     expect(mockCancel).toHaveBeenCalledWith('hourglass:legacy-abc-123');
-    // Non-hourglass identifier is left alone
-    expect(mockCancel).not.toHaveBeenCalledWith('some-other-app:reminder');
+    expect(mockCancel).toHaveBeenCalledWith('7F3A1C2E-9B4D-4E5F-A1B2-C3D4E5F60718');
+    expect(mockCancel).toHaveBeenCalledWith('some-other-app:reminder');
+    // The three canonical identifiers are preserved.
+    expect(mockCancel).not.toHaveBeenCalledWith('hourglass:thursday');
+    expect(mockCancel).not.toHaveBeenCalledWith('hourglass:monday-summary');
+    expect(mockCancel).not.toHaveBeenCalledWith('hourglass:monday-expiry');
+  });
+
+  it('T9b — build-9 regression: a bare random-UUID orphan (no hourglass: prefix) IS cancelled', async () => {
+    mockGetAll.mockResolvedValueOnce([
+      { identifier: 'hourglass:thursday' },
+      { identifier: 'A1B2C3D4-0000-1111-2222-333344445555' },
+    ]);
+
+    await sweepOrphanNotifications();
+
+    expect(mockCancel).toHaveBeenCalledTimes(1);
+    expect(mockCancel).toHaveBeenCalledWith('A1B2C3D4-0000-1111-2222-333344445555');
+    expect(mockCancel).not.toHaveBeenCalledWith('hourglass:thursday');
   });
 
   it('T10 — all expected identifiers: no cancellations', async () => {
