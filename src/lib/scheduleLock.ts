@@ -4,25 +4,25 @@
 // calendar-trigger scheduling (useScheduledNotifications.scheduleAll) and
 // push-trigger scheduling (handleBackgroundPush). See docs/ARCHITECTURE.md §8.2.
 //
-// sweepOrphanNotifications — at every scheduleAll mount, cancel any
-// `hourglass:*` notification whose identifier is not in EXPECTED_IDENTIFIERS,
-// and remove the legacy notif_*_id AsyncStorage keys. Mitigates §8.3 (orphans
-// from crashes mid-write before this spec moved to deterministic identifiers)
-// and §8.4 (calendar triggers surviving uninstall/reinstall).
+// sweepOrphanNotifications — at every scheduleAll mount, cancel ANY scheduled
+// notification whose identifier is not in EXPECTED_IDENTIFIERS (any prefix), and
+// remove the legacy notif_*_id AsyncStorage keys. Mitigates §8.3 — including the
+// random-UUID orphans left by the pre-07 cancel/reschedule pattern (build 9) that
+// the old `hourglass:`-only sweep could not see (09-orphan-sweep-migration) — and
+// §8.4 (calendar triggers surviving uninstall/reinstall).
 
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const LOCK_KEY = 'notif_schedule_lock';
 const STALE_MS = 30_000;
-const PREFIX = 'hourglass:';
 
 /**
  * Canonical set of identifiers scheduled by useScheduledNotifications.
  *
- * IMPORTANT: any future spec that adds a `'hourglass:*'` identifier must
- * add it here in the same PR. Otherwise the orphan sweep will quietly
- * cancel it on next mount.
+ * IMPORTANT: the orphan sweep cancels EVERY scheduled notification whose id is
+ * not in this set. Any future spec that schedules a new notification MUST add
+ * its identifier here in the same PR, or the sweep will cancel it on next mount.
  */
 export const EXPECTED_IDENTIFIERS: ReadonlySet<string> = new Set([
   'hourglass:thursday',
@@ -85,8 +85,12 @@ export async function withScheduleLock<T>(
 }
 
 /**
- * Cancel any `hourglass:*` calendar notification whose identifier is not in
- * EXPECTED_IDENTIFIERS, and remove the legacy notif_*_id AsyncStorage keys.
+ * Cancel ANY scheduled notification whose identifier is not in
+ * EXPECTED_IDENTIFIERS (regardless of prefix), and remove the legacy notif_*_id
+ * AsyncStorage keys. `getAllScheduledNotificationsAsync` returns only this app's
+ * notifications, so this safely clears stray/orphaned schedules — including the
+ * random-UUID orphans left by the pre-07 cancel/reschedule pattern (build 9),
+ * which the old `hourglass:`-prefixed sweep could not see.
  * Idempotent. All errors swallowed. See docs/ARCHITECTURE.md §8.3 and §8.4.
  */
 export async function sweepOrphanNotifications(): Promise<void> {
@@ -100,11 +104,7 @@ export async function sweepOrphanNotifications(): Promise<void> {
 
   for (const n of scheduled) {
     const id = n.identifier;
-    if (
-      typeof id === 'string' &&
-      id.startsWith(PREFIX) &&
-      !EXPECTED_IDENTIFIERS.has(id)
-    ) {
+    if (typeof id === 'string' && !EXPECTED_IDENTIFIERS.has(id)) {
       try {
         await Notifications.cancelScheduledNotificationAsync(id);
       } catch {
