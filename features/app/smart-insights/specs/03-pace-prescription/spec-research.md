@@ -22,22 +22,29 @@ export interface HoursData {
   daily: DailyEntry[]; // [{date, hours, isToday}] — only days with activity
   weeklyEarnings: number;
   todayEarnings: number;
-  hoursRemaining: number;  // weeklyLimit - total (can be negative = overtime)
+  hoursRemaining: number;  // Math.max(0, weeklyLimit - total) — clamped ≥ 0, never negative; overtime is in overtimeHours
   overtimeHours: number;
   timeRemaining: number;   // ms until Thursday deadline
   deadline: Date;
 }
 ```
-`hoursData.hoursRemaining` = hours still needed. When negative, user has already exceeded target.
+`hoursData.hoursRemaining` is computed as `Math.max(0, weeklyLimit - total)` in `calculateHours` — it is **clamped ≥ 0** and is 0 (not negative) once at/over target. Overtime is carried separately in `hoursData.overtimeHours`. (We recompute remaining locally from `weeklyLimit - total` anyway; the field is corroboration.)
 
 ### `WorkPattern` from spec 02
 `dayWeights: number[]` (length 7, Mon=0, fractions summing to 1.0, rest days = 0).
 
-### Day-of-week arithmetic
-We need to know which days remain this week (today through Sunday). Use UTC day arithmetic consistent with the rest of the codebase (ARCHITECTURE §3.1 rule: never use `toISOString()` on local dates).
+### Day-of-week arithmetic — use LOCAL day for the today-index (deliberate, documented)
+We need the today-index and the "remaining days this week" horizon. **Use the LOCAL weekday** (`now.getDay()`), NOT UTC. Rationale:
+- The today-subtraction in step 5 subtracts `hoursData.today`, which `calculateHours` matches by the **local** YYYY-MM-DD date string (`src/lib/hours.ts:248-258, 282`). The today-index MUST use the same (local) basis or, near a UTC/local boundary (e.g. Sun 7pm EST = Mon 00:00 UTC), we'd subtract one day's worked hours from another day's slot.
+- The user experiences "today" and "their work days" in local time.
+
+This is a deliberate exception to the general "API dates are UTC" rule (ARCHITECTURE §3.1) — that rule governs dates sent to/compared with the API; the prescription's day-index is a local-display concern. Caveat (documented, accepted): `dayWeights` (spec 02) derive from spec 01's `dailyHours`, which are keyed off UTC-Monday `weekDates`. In a narrow boundary window the local weekday may be ≤1 position off the UTC-keyed weight slot. Accepted as a minor imprecision because `dayWeights` is a multi-week smoothed average (adjacent work-day weights are similar). Do NOT "fix" this by switching the today-index to `getUTCDay()` — that breaks the larger, more visible today-subtraction.
+
+### Which "week"? Work week = Mon–Sun (not the Thursday submission deadline)
+Hours accumulate against the **Mon–Sun work week** (MEMORY: "Week boundary Mon–Sun"). `hoursData.deadline` (Thursday 23:59:59 UTC) is the *timesheet submission* deadline — a different concern. The prescription distributes remaining hours across remaining **work-week** days (today → Sunday, minus rest days). The `summaryLine` must NOT name a specific deadline day ("by Friday"/"by Thursday") — it just states per-day hours ("Need 5.2h today · 3.1h Tue"). This sidesteps the Thursday/Sunday ambiguity entirely.
 
 ### `config.weeklyLimit` from `useConfig` (`src/hooks/useConfig.ts`)
-The 40h (or contract) weekly target. Source for remaining hours.
+`config.weeklyLimit: number` (default 40 — confirmed `src/types/config.ts:16`). The 40h (or contract) weekly target. `useConfig().config` is `CrossoverConfig | null` — the hook must guard null `config` as well as null `hoursData`.
 
 ### `hoursData.daily` for today's hours already worked
 `DailyEntry[]` — only present for days that have tracked time. Today's entry (where `isToday === true`) gives hours already worked today, which should be subtracted when computing what's still needed today.
@@ -80,12 +87,18 @@ export interface Prescription {
   days: DayPrescription[];       // only remaining work days (today → last work day this week)
   totalRemaining: number;        // total hours still needed (= hoursData.hoursRemaining, clamped ≥ 0)
   patternBased: boolean;         // true if WorkPattern was used; false if fell back to equal-weight
-  summaryLine: string;           // e.g. "Need 5.2h today · 3.1h tomorrow" or "You're done for the week 🎉"
+  summaryLine: string;           // e.g. "Need 5.2h today · 3.1h Tue" or "You're done for the week" (no emoji)
 }
 ```
 
 ### `computePrescription` (new, in `src/lib/prescription.ts`)
 ```typescript
+/**
+ * Pure. Distributes remaining weekly hours across the user's remaining work days,
+ * weighted by their personal day pattern (or equal Mon–Fri when pattern is unavailable).
+ * `now` is injectable for deterministic tests. Returns status 'done' at/over target,
+ * 'insufficient_data' when pattern isn't ready, else 'active'.
+ */
 export function computePrescription(
   hoursData: HoursData,
   pattern: WorkPattern,
@@ -94,22 +107,27 @@ export function computePrescription(
 ): Prescription
 ```
 **Algorithm:**
-1. `hoursRemaining = Math.max(0, weeklyLimit - hoursData.total)`. If 0 → return `{ status: 'done', days: [], totalRemaining: 0, patternBased: false, summaryLine: "You're done for the week 🎉" }`.
-2. Determine remaining day indices: `today = now.getDay()` adjusted to Mon=0 convention; remaining days = `[today, today+1, …, 6]` (cap at Sunday). Filter out rest days (where `pattern.dayWeights[i] === 0` when `status === 'ready'`; or where `i > 4` when status = `'insufficient_data'`).
+1. `hoursRemaining = Math.max(0, weeklyLimit - hoursData.total)`. If 0 → return `{ status: 'done', days: [], totalRemaining: 0, patternBased: false, summaryLine: "You're done for the week" }` (no emoji).
+2. Today-index, Mon=0 convention, **LOCAL** day (see Day-of-week note above): `const todayIndex = (now.getDay() + 6) % 7;` (Sun→6, Mon→0 … Sat→5 — numerically equivalent to the LOCAL-branch idiom at `src/lib/hours.ts:109-110`, which computes the same value via `dayOfWeek === 0 ? 6 : dayOfWeek - 1`; note line 99 is the UTC branch and is NOT the reference here). Remaining day indices = `[todayIndex, todayIndex+1, …, 6]` (cap at Sunday=6; if `todayIndex===6`, only Sunday). Filter out rest days: when `pattern.status === 'ready'`, drop `i` where `pattern.dayWeights[i] === 0`; when `'insufficient_data'`, keep only `i <= 4` (Mon–Fri).
 3. `patternBased = pattern.status === 'ready'`.
-4. Compute weights for remaining days: `w[i] = patternBased ? pattern.dayWeights[i] : (i <= 4 ? 1/remainingWorkdayCount : 0)`. Normalize to sum = 1.
-5. For each remaining day `i`: `rawHours = hoursRemaining × w[i]`. If `i === todayIndex`: subtract `todayAlreadyWorked = hoursData.today`; clamp to ≥ 0.
-6. Build `DayPrescription[]` for all remaining work days.
-7. Build `summaryLine`: show the 2 highest-hours days. E.g. "Need 5.2h today · 3.1h Tue" or "Need 2.8h today" (if only today left).
+4. Compute weights for the surviving remaining days: `w[i] = patternBased ? pattern.dayWeights[i] : 1` (equal). Renormalize across the surviving set so they sum to 1.
+5. For each remaining day `i`: `rawHours = hoursRemaining × normalizedW[i]`. If `i === todayIndex`: `hoursNeeded = max(0, rawHours − hoursData.today)`; else `hoursNeeded = rawHours`.
+   - Edge: if today's already-worked exceeds today's raw share, today shows 0 — the residual stays distributed on later days (do not re-spread; the simple per-day share is acceptable and avoids an iterative solve). Documented tradeoff.
+6. Build `DayPrescription[]` for all surviving remaining work days. If the surviving set is empty (e.g. only Sat/Sun left and both are rest days) → return `status: 'done'` with `summaryLine: "You're done for the week"` (nothing actionable left this week).
+7. Build `summaryLine` from the top-2 by `hoursNeeded`: "Need {x}h today · {y}h {dayLabel}" (today first if present), or "Need {x}h today" if only today, or "Need {x}h {dayLabel}" if today is already met but later days remain. Round to 1 decimal.
 8. Return `{ status: 'active', days, totalRemaining: hoursRemaining, patternBased, summaryLine }`.
 
 ### `usePrescription` hook (new, in `src/hooks/usePrescription.ts`)
 ```typescript
+/**
+ * Composes useHoursData + useWorkPattern + useConfig into a live Prescription.
+ * Returns null while hoursData or config is still loading. Recomputes on data change.
+ */
 export function usePrescription(): Prescription | null
 ```
 - `useHoursData()`, `useWorkPattern()`, `useConfig()`
-- Returns `null` if `hoursData` is null (still loading)
-- Returns `useMemo(() => computePrescription(hoursData, pattern, config.weeklyLimit), [hoursData, pattern, config.weeklyLimit])`
+- **Guard null `config` AND null `hoursData`:** `if (!hoursData || !config) return null;` (`useConfig().config` is `CrossoverConfig | null` — reading `config.weeklyLimit` unguarded would crash during load).
+- Returns `useMemo(() => (!hoursData || !config) ? null : computePrescription(hoursData, pattern, config.weeklyLimit), [hoursData, pattern, config])`
 
 ## Test Plan
 
@@ -123,7 +141,7 @@ export function usePrescription(): Prescription | null
 - [ ] `patternBased: true` when pattern.status === 'ready'
 
 **"Done" path:**
-- [ ] 40h worked → `status: 'done'`, `summaryLine: "You're done for the week 🎉"`
+- [ ] 40h worked → `status: 'done'`, `summaryLine: "You're done for the week"` (no emoji)
 - [ ] 42h worked (overtime) → `status: 'done'` (hoursRemaining = 0 after clamp)
 
 **Pattern fallback:**
@@ -132,23 +150,32 @@ export function usePrescription(): Prescription | null
 
 **Rest-day exclusion:**
 - [ ] Friday is a rest day (dayWeights[4] = 0) → Friday absent from `days`
-- [ ] Only Saturday and Sunday remain → `days = []`, show "You're done for the week" (or 0 remaining)
+- [ ] Only Saturday and Sunday remain, both rest days → `status: 'done'` ("nothing actionable left")
+
+**Day-of-week / Mon=0 conversion (m1 — most error-prone line):**
+- [ ] **Sunday** (`now.getDay() === 0`) → `todayIndex === 6` (NOT -1); only Sunday remains in horizon
+- [ ] Monday (`getDay() === 1`) → `todayIndex === 0`; full Mon–Sun horizon
+- [ ] Saturday (`getDay() === 6`) → `todayIndex === 5`
+- [ ] Inject `now` in a non-UTC scenario (e.g. a Date near midnight) → today-index uses LOCAL day, consistent with `hoursData.today` (does not flip to UTC day)
 
 **Edge cases:**
-- [ ] Thursday afternoon, 38h worked, 40h limit → 2h needed, only today + Fri left
-- [ ] Today's worked hours exceed today's prescription → today = 0, remaining days absorb the gap
+- [ ] Thursday afternoon, 38h worked, 40h limit → 2h needed, distributed over surviving work days
+- [ ] Today's worked hours exceed today's prescription → today = 0, residual stays on later days (no re-spread)
 - [ ] `hoursRemaining` fractional (e.g. 7.3h) → distributed correctly, summaryLine rounded to 1 decimal
 
 **`summaryLine` formatting:**
 - [ ] Two or more work days remaining → "Need Xh today · Yh Tue"
 - [ ] Only today left → "Need Xh today"
-- [ ] status = 'done' → "You're done for the week 🎉"
+- [ ] Today already met, later days remain → "Need Xh Wed" (no "today")
+- [ ] status = 'done' → "You're done for the week" (no emoji)
 - [ ] Hours rounded to 1 decimal
+
+**Hour-source consistency note (m7):** `dayWeights` derive from spec 01 `dailyHours` (work-diary slot counts), while distributed magnitude uses `hoursData.total`/`today` (payments/timesheet, includes approved manual time). Because `dayWeights` are RELATIVE (normalized to sum 1), total magnitude is always correct; only the *day-shape* (and rest-day classification) can skew for manual-heavy users. Accepted tradeoff — documented, not a bug. No test asserts cross-source equality.
 
 **Mocks needed:**
 - `HoursData` fixture factory (parameterized by `total`, `today`)
 - `WorkPattern` fixture: ready + insufficient_data variants
-- `now` parameter for deterministic day-of-week
+- `now` parameter for deterministic day-of-week (cover Sun/Mon/Sat)
 
 ## Files to Create/Modify
 
@@ -156,10 +183,10 @@ export function usePrescription(): Prescription | null
 |---|---|
 | `src/lib/prescription.ts` | New — `Prescription`, `DayPrescription` types, `computePrescription` |
 | `src/hooks/usePrescription.ts` | New — `usePrescription` composing hook |
-| `src/__tests__/lib/prescription.test.ts` | New — all test cases above |
+| `src/lib/__tests__/prescription.test.ts` | New — all test cases above (co-located with sibling lib tests, the dominant convention) |
 
 ## Verification Tiers
 
 - **Tier 1 (unit tests):** Pure function — all cases injectable via `now` param.
 - **Tier 2 (manual):** Temporarily surface `prescription.summaryLine` in a `console.log` on Overview mount. Verify the numbers make sense mid-week.
-- **Tier 3 (TestFlight):** Verify summaryLine matches expectation on Monday (should show full week) vs Thursday afternoon (only today + Fri remaining).
+- **Tier 3 (TestFlight):** Verify summaryLine matches expectation on Monday (should show full week) vs Thursday afternoon (today + remaining work days). Specifically confirm on a **Sunday** the chip shows a sane single-day figure (not a crash / `dayWeights[-1]`).

@@ -45,23 +45,29 @@ Per `WIDGET-INFO-DESIGN.md` and existing tokens:
 
 ## Key Decisions
 
-**D1: All computation in one pure function `computeAIInsights(aiPct, brainliftHours)`.**
-Returns a `AIInsights` object with nullable fields per insight. Consumers check for null.
+**D1: All computation in one pure function `computeAIInsights(aiPct, brainliftHours, weekStarts)`.**
+Returns an `AIInsights` object with nullable fields per insight. Consumers check for null. All three arrays are index-aligned, oldest→newest, current week last.
 
 **D2: Slope uses last 8 weeks, not all 24.**
-Short-term trend (8 weeks) is more actionable than a 6-month slope. 24 weeks would surface plateaus as "flat" even if the last 2 months were improving.
+Short-term trend (8 weeks) is more actionable than a 6-month slope. 24 weeks would surface plateaus as "flat" even if the last 2 months were improving. (Distinct from D7: the *input* is full history; the trend *window* is the last 8 of it.)
 
 **D3: Personal best is the maximum aiPct in the full history.**
-Use all available weeks — personal best doesn't expire. Include the week label so the UI can say "Apr 7."
+Use all available weeks — personal best doesn't expire. Source the label from the matching `weekStarts[maxIndex]` so the UI can say "Apr 7."
 
 **D4: BrainLift threshold for the correlation split = 5h.**
 This is already the existing BrainLift weekly target (`brainliftTarget: '5h'` in widget). Consistent.
 
 **D5: Express slope as "X pts over 8 weeks" not as a per-week rate.**
-More human-readable. Positive = trending up (cyan), negative = trending down (warning amber).
+More human-readable. Positive = trending up, negative = trending down. The chip dot stays `colors.cyan` in BOTH directions (cyan = AI is color-locked); direction is conveyed by the "up/down" wording, not by switching to amber (N2 — amber is the pace/warning token and would break the color-to-meaning lock).
 
-**D6: `computeAIInsights` does NOT directly consume `useOverviewData`.**
-It takes raw arrays. This makes it testable without hooks and reusable anywhere.
+**D6: `computeAIInsights` is pure and takes raw arrays — it does NOT consume any hook.**
+Testable in isolation, reusable anywhere. The `useAIInsights` hook (the stateful wrapper) reads `useWeeklyHistory` + `useHoursData` + `useAIData` and assembles the arrays. `useOverviewData` is explicitly NOT used (it exposes only formatted `weekLabels`, never raw `weekStart`).
+
+**D7: Insights always read the FULL history, never the chart window.**
+`useAIInsights()` takes no `window` param. If it sliced to the Overview's default 4-week window, trend (≥5 wk) and correlation (≥9 wk) would be permanently null. Insight significance is independent of which chart range the user is viewing.
+
+**D8: Layering is clean (record for review).**
+`statsUtils.ts`, `aiInsights.ts`, `formatWeekStartLabel` are all `src/lib/*` and import only types + other lib helpers — no `src/api`, no `src/store`, no AsyncStorage, no hooks. The hook layer (`useAIInsights`) lives in `src/hooks/*`. Conforms to CLAUDE.md §Module layering.
 
 ## Interface Contracts
 
@@ -104,36 +110,61 @@ export interface AIInsights {
 ```
 
 ### `computeAIInsights` (new, in `src/lib/aiInsights.ts`)
-```typescript
-export function computeAIInsights(
-  aiPct: number[],           // ordered oldest→newest, includes current week as last entry
-  brainliftHours: number[],  // same length and alignment
-): AIInsights
-```
+The authoritative signature is the 3-arg form (`aiPct`, `brainliftHours`, `weekStarts`) defined under "`computeAIInsights` signature" below — all three arrays index-aligned, oldest→newest, current week last. (`weekStarts` is required to source `best.weekLabel`; see D1, m6, and Algorithm step 2.)
+
 **Algorithm:**
 1. **Trend:** take last `min(8, n)` entries of `aiPct`. If < 5 entries → `trend: null`. Else: `slopePts = linearSlope(window) × (windowLength - 1)` (total change). `direction`: |slopePts| < 2 → 'flat'; > 0 → 'up'; < 0 → 'down'.
-2. **Best:** if < 4 entries → `best: null`. Else: find max of `aiPct`. Format `weekStart` to "MMM D" using `weekLabels` alignment (pass in separately) or compute from index. `currentPct = aiPct[n-1]`.
+2. **Best:** if < 4 entries → `best: null`. Else: find `maxIndex` = argmax of `aiPct`. `weekLabel = formatWeekStartLabel(weekStarts[maxIndex])` (the actual snapshot date — NOT `getWeekLabels`, which would mislabel on a backfill gap). `currentPct = aiPct[n-1]`; `ptsBelowBest = max(0, peakPct - currentPct)`.
 3. **BrainLift correlation:** build pairs `(brainliftHours[i], aiPct[i+1])` for i=0..n-2. If pairs.length < 8 → null. Compute `r = pearsonR(BL values, AI-next values)`. If |r| < 0.35 → null. Else compute group averages (≥5h vs <5h BL weeks).
 
 ### `useAIInsights` hook (new, in `src/hooks/useAIInsights.ts`)
 ```typescript
-export function useAIInsights(window: 4 | 12 | 24): AIInsights
+/**
+ * Derives AI trend, personal best, and BrainLift→AI lag correlation from the
+ * FULL weekly history (always 24 weeks — independent of the Overview chart window).
+ * Reads useWeeklyHistory().snapshots directly. Returns AIInsights with nullable
+ * fields when there is insufficient data per insight.
+ */
+export function useAIInsights(): AIInsights
 ```
-- Calls `useOverviewData(window)` to get `aiPct[]` and `brainliftHours[]`
-- Returns `useMemo(() => computeAIInsights(data.aiPct, data.brainliftHours), [data.aiPct, data.brainliftHours])`
 
-**Note on `best.weekLabel`:** `computeAIInsights` needs the best week's date. Pass the `weekLabels` array as a third parameter OR derive it from the index (index of max × 7-day offset from current Monday). Second approach is self-contained — use that.
+**No `window` parameter — and `useOverviewData` is NOT the source.** Two reasons (both M3):
+1. **Window starvation:** the app's default chart window is `4`. If insights were sliced to the window, the trend (needs ≥5 weeks) and correlation (needs ≥9 weeks) would be *permanently null* at the default view regardless of how much history is stored. Insights must always read the full history.
+2. **`useOverviewData` exposes only `weekLabels` (formatted "MMM D"), never raw `weekStart` dates.** It cannot supply the `weekStarts: string[]` that `computeAIInsights` needs for `best.weekLabel`. Read `useWeeklyHistory().snapshots` directly instead — each snapshot carries `weekStart` (YYYY-MM-DD).
 
-Actually: simplest approach — `computeAIInsights` also takes `weekStarts: string[]` (the `YYYY-MM-DD` Monday dates, aligned with `aiPct`). Format the best week as `"MMM D"` from the `weekStart` at the max-index. This is cleaner than reconstructing from index arithmetic.
-
-### Revised signature
+**Hook body (mirrors `useOverviewData`'s current-week handling, src/hooks/useOverviewData.ts:56-89):**
 ```typescript
+const { snapshots } = useWeeklyHistory();
+const { data: hoursData } = useHoursData();
+const { data: aiData } = useAIData();
+return useMemo(() => {
+  const currentMonday = getWeekStartDate(true);            // UTC Monday
+  const past = snapshots.filter(s => s.weekStart < currentMonday); // exclude in-progress week
+  const currentAiPct = aiData ? Math.round((aiData.aiPctLow + aiData.aiPctHigh) / 2) : 0;
+  const currentBL = aiData?.brainliftHours ?? 0;
+  // Append current week as the last, aligned entry across all three arrays
+  const aiPct        = [...past.map(s => s.aiPct),          currentAiPct];
+  const brainlift    = [...past.map(s => s.brainliftHours), currentBL];
+  const weekStarts   = [...past.map(s => s.weekStart),      currentMonday];
+  return computeAIInsights(aiPct, brainlift, weekStarts);
+}, [snapshots, hoursData, aiData]);
+```
+This keeps spec 04 honestly "blocked by: none" — it depends only on the existing history store, not on specs 01–03.
+
+### `computeAIInsights` signature
+```typescript
+/**
+ * Pure. Computes 8-week trend slope, personal-best week, and BrainLift→next-week-AI
+ * correlation. All three arrays must be index-aligned, oldest→newest, current week last.
+ * Returns nullable fields when guards fail (trend <5 wk, best <4 wk, corr <8 pairs or |r|<0.35).
+ */
 export function computeAIInsights(
   aiPct: number[],
   brainliftHours: number[],
-  weekStarts: string[],   // YYYY-MM-DD, same length — needed for best.weekLabel
+  weekStarts: string[],   // YYYY-MM-DD Mondays, index-aligned with aiPct — source for best.weekLabel
 ): AIInsights
 ```
+**`best.weekLabel` sourcing (m6):** format from `weekStarts[maxIndex]`, the ACTUAL snapshot `weekStart` — never from `getWeekLabels()` output (which back-counts from today and would mislabel the week if a backfill gap exists). Use a shared `formatWeekStartLabel(weekStart): string` extracted from `src/lib/hours.ts`'s month-name logic (N3 — do not inline a second `MONTHS` array).
 
 ## Test Plan
 
@@ -162,6 +193,7 @@ export function computeAIInsights(
 - [ ] Peak at week 3 → `best.weekLabel` matches `weekStarts[3]` formatted as "MMM D"
 - [ ] Current week is the peak → `ptsBelowBest = 0`
 - [ ] Current week 6pts below peak → `ptsBelowBest = 6`
+- [ ] **Backfill-gap alignment:** history with a missing intermediate week → `best.weekLabel` maps to the correct snapshot's `weekStart` (proves it sources `weekStarts[maxIndex]`, not a back-counted label)
 
 **BrainLift correlation:**
 - [ ] < 8 pairs → null
@@ -177,11 +209,14 @@ export function computeAIInsights(
 
 | File | Change |
 |---|---|
-| `src/lib/statsUtils.ts` | New — `linearSlope`, `pearsonR` |
-| `src/lib/aiInsights.ts` | New — `AIInsights` types, `computeAIInsights` |
-| `src/hooks/useAIInsights.ts` | New — `useAIInsights` hook |
-| `src/__tests__/lib/statsUtils.test.ts` | New — slope + correlation tests |
-| `src/__tests__/lib/aiInsights.test.ts` | New — all insight computation tests |
+| `src/lib/statsUtils.ts` | New — `linearSlope`, `pearsonR` (each JSDoc'd: n<2 and length-mismatch guards) |
+| `src/lib/aiInsights.ts` | New — `AIInsights` types, `computeAIInsights` (JSDoc'd) |
+| `src/lib/hours.ts` | Extract/export `formatWeekStartLabel(weekStart: string): string` from the existing `getWeekLabels` month-name logic (N3 — shared, no duplicated `MONTHS` array) |
+| `src/hooks/useAIInsights.ts` | New — `useAIInsights()` hook (no window param; reads `useWeeklyHistory` + `useHoursData` + `useAIData`) |
+| `src/lib/__tests__/statsUtils.test.ts` | New — slope + correlation tests (co-located, dominant lib-test convention) |
+| `src/lib/__tests__/aiInsights.test.ts` | New — all insight computation tests |
+
+**Note:** `useOverviewData.ts` is intentionally NOT modified — insights read `useWeeklyHistory` directly (M3). No shared-hook change, so existing Overview chart consumers are unaffected.
 
 ## Verification Tiers
 

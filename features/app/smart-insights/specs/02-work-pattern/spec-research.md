@@ -36,7 +36,10 @@ Fewer than 4 weeks → return `{ status: 'insufficient_data' }`. Consumers degra
 Weeks with all-zero `dailyHours` (old snapshots, week with no work) are excluded from the average calculation to avoid diluting the pattern.
 
 **D5: `inferWorkPattern` is a pure function.**
-No side effects, no AsyncStorage. Takes the `WeeklySnapshot[]` array and returns a `WorkPattern`. Easily testable and usable in `useMemo`.
+No side effects, no AsyncStorage. Takes the `WeeklySnapshot[]` array and returns a `WorkPattern`. Easily testable and usable in `useMemo`. Layering (CLAUDE.md §Module layering, N6): `src/lib/workPattern.ts` imports only the `WeeklySnapshot` TYPE from `src/lib/weeklyHistory.ts` (type-only, lib→lib) — no hooks, no `src/api`, no `src/store`, no AsyncStorage. `useWorkPattern` (the stateful read) lives in `src/hooks/`.
+
+**D6: `dayWeights` are derived from work-diary `dailyHours` (spec 01) and are RELATIVE.**
+The pattern reflects work-diary screen-tracked hours, which can differ from payments/timesheet hours for manual-heavy users (manual time lands in timesheet, not the work diary). Because `dayWeights` are normalized (sum to 1) and only express *day-shape*, this is acceptable for distributing pace (see spec 03 m7 note). The only real consequence is rest-day misclassification for someone whose manual-time days have near-zero tracked slots — a rare edge, documented not fixed.
 
 ## Interface Contracts
 
@@ -114,7 +117,7 @@ export function useWorkPattern(): WorkPattern
 |---|---|
 | `src/lib/workPattern.ts` | New — `WorkPattern` type, `inferWorkPattern`, constants |
 | `src/hooks/useWorkPattern.ts` | New — `useWorkPattern` hook (thin wrapper around `inferWorkPattern`) |
-| `src/__tests__/lib/workPattern.test.ts` | New — all test cases above |
+| `src/lib/__tests__/workPattern.test.ts` | New — all test cases above (co-located with the sibling `src/lib/__tests__/weeklyHistory.test.ts`; this is the dominant lib-test convention — 23 files vs 3 in the legacy `src/__tests__/lib/`) |
 
 ## Verification Tiers
 

@@ -92,11 +92,15 @@ function computeDailyHours(
 - Returns the 7-element array
 
 ### Modified `mergeWeeklySnapshot` call in `useHistoryBackfill`
-After `computeWeekAI`, also call `computeDailyHours` and include in the merge:
+After `computeWeekAI`, also call `computeDailyHours` and include in the merge (at the existing call site near `useHistoryBackfill.ts:154`):
 ```typescript
 const dailyHours = computeDailyHours(monday, slotsData);
 updated = mergeWeeklySnapshot(updated, { weekStart: monday, aiPct, brainliftHours, dailyHours });
 ```
+
+**Backfill gating (m12 — known limitation, accepted):** the backfill loop only processes weeks where `!entry || entry.aiPct === 0` (`useHistoryBackfill.ts:106`). Weeks that were AI-backfilled in a *prior* app session (so `aiPct > 0`) are skipped and will **never gain `dailyHours`** retroactively. Consequence: existing users keep `dailyHours: undefined` on already-backfilled weeks; only newly-processed weeks get it. Consumers treat missing `dailyHours` as `[0×7]`, so `inferWorkPattern` (spec 02) simply needs 4 *fresh* weeks to accumulate — acceptable, no forced re-backfill. Document this; do NOT widen the gate (re-fetching all 24 weeks of work diary on every update is the exact OOM/API-burst risk the gate exists to prevent).
+
+**No added fetch / no retained memory (N8):** `computeDailyHours` reads the `slotsData` already in scope from the existing per-day fetch (lines 132-147) and returns a `number[7]`. It adds no API call, retains no slot references beyond the current iteration, and does not change the deliberate 300ms inter-week GC pause. The per-week `saveWeeklyHistory` write already happens (drives the chart animation) — adding `dailyHours` to that same partial does not multiply writes.
 
 ## Test Plan
 
@@ -114,21 +118,25 @@ updated = mergeWeeklySnapshot(updated, { weekStart: monday, aiPct, brainliftHour
 - [ ] mondayStr is a Sunday (shouldn't happen; guard gracefully → index 0 = 0)
 - [ ] Partial week (only 3 days fetched) → remaining indices = 0
 
-**Integration — mergeWeeklySnapshot with dailyHours:**
-- [ ] Old snapshot without `dailyHours` + merge with `dailyHours` → snapshot gains the field
-- [ ] Snapshot already has `dailyHours` → merge overwrites it
-- [ ] `dailyHours` survives round-trip through JSON (no Date coercion issues)
+**Integration — mergeWeeklySnapshot with dailyHours (regression-critical):**
+- [ ] Old snapshot without `dailyHours` + merge `{...dailyHours}` → snapshot gains the field
+- [ ] Snapshot already has `dailyHours` → merge with a partial that OMITS `dailyHours` (mimics `useAIData`/`useEarningsHistory` writers) → existing `dailyHours` is PRESERVED (spread keeps it). This guards the field-wipe risk: the other two writers never include `dailyHours`, and merge is `{...existing, ...partial}`.
+- [ ] `dailyHours` survives round-trip through `saveWeeklyHistory`→`loadWeeklyHistory` (JSON; `loadWeeklyHistory` only does `Array.isArray`, no strict schema — optional field passes through)
 
 **Mocks needed:**
 - `WorkDiarySlot[]` fixtures: array of N slots (tags/events don't matter for this spec)
+
+## Migration / regression notes (N8 — verified safe)
+- `dailyHours` is **optional** (`dailyHours?:`). No schema version bump, no migration: `loadWeeklyHistory` (`weeklyHistory.ts:72-82`) validates only `Array.isArray`, so old persisted snapshots load unchanged and read `dailyHours === undefined`.
+- The three snapshot writers were traced: `useEarningsHistory` writes `{weekStart, earnings, hours, overtime}`; `useAIData` (both flush sites) writes `{weekStart, aiPct, brainliftHours}`; only `useHistoryBackfill` writes `dailyHours`. None writes a full object, so none clobbers `dailyHours`. **This spec must NOT add `dailyHours` to the other two writers** — the single write site is intentional.
 
 ## Files to Create/Modify
 
 | File | Change |
 |---|---|
-| `src/lib/weeklyHistory.ts` | Add `dailyHours?: number[]` to `WeeklySnapshot` interface |
-| `src/hooks/useHistoryBackfill.ts` | Add `computeDailyHours` helper; include in `mergeWeeklySnapshot` call |
-| `src/__tests__/hooks/useHistoryBackfill.test.ts` | Tests for `computeDailyHours` + integration with merge |
+| `src/lib/weeklyHistory.ts` | Add `dailyHours?: number[]` to `WeeklySnapshot` interface (JSDoc the field: length 7, Mon=0, work-diary slot hours, absent on old/skipped weeks) |
+| `src/hooks/useHistoryBackfill.ts` | Add `computeDailyHours` helper (internal — no JSDoc per CLAUDE.md); include in the existing `mergeWeeklySnapshot` call (~line 154) |
+| `src/hooks/__tests__/useHistoryBackfill.test.ts` | Tests for `computeDailyHours` + merge-preservation integration (CORRECTED path — real backfill tests live under `src/hooks/__tests__/`, not `src/__tests__/hooks/`; if the file doesn't exist, co-locate with `src/hooks/__tests__/useHistoryBackfillAppBreakdown.test.ts`) |
 
 ## Verification Tiers
 
