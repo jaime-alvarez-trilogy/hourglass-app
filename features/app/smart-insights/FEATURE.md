@@ -52,6 +52,8 @@ After this feature ships:
 
 **Critical path:** 01 → 02 → 03 → 05. Spec 04 runs in parallel with 01–03 and joins at 05.
 
+> **Dependency-graph note (validated):** Spec 04's "Blocked By: —" holds because `useAIInsights` reads `useWeeklyHistory().snapshots` directly (each snapshot already carries `aiPct`, `brainliftHours`, `weekStart`) — it does NOT depend on spec 01's `dailyHours`, nor on `useOverviewData`. No spec modifies `useOverviewData` or any other shared hook, so existing Overview chart consumers are unaffected (no unintended blast radius). All other edges (01→02→03, 03/04→05) match the actual import graph.
+
 ## Design constraint
 
 All components must follow the existing design system:
