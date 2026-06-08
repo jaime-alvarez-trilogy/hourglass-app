@@ -1,4 +1,5 @@
 import type { PanelState } from './reanimated-presets';
+import type { Prescription } from './prescription';
 export type { PanelState };
 
 /** Fraction of expected pace considered "on track" (within 15% of pace). */
@@ -64,6 +65,51 @@ export function computePanelState(
 
   if (pacingRatio >= PACING_ON_TRACK_THRESHOLD) return 'onTrack';
   if (pacingRatio >= PACING_BEHIND_THRESHOLD) return 'behind';
+  return 'critical';
+}
+
+// Urgency thresholds — reciprocals of the pacing thresholds so both functions
+// agree on what "on track", "behind", and "crushing it" mean.
+const URGENCY_CRUSHING = 1 / PACING_CRUSHING_THRESHOLD; // ≤ 0.80
+const URGENCY_ON_TRACK = 1 / PACING_ON_TRACK_THRESHOLD; // ≤ 1.176
+const URGENCY_BEHIND   = 1 / PACING_BEHIND_THRESHOLD;   // ≤ 1.667
+
+/**
+ * Derives panel state from the current Prescription (03-pace-prescription).
+ * Uses remaining hours / remaining work-day capacity as the urgency signal,
+ * which respects the user's 5-day pattern and today's partial hours.
+ * Falls back to computePanelState when prescription.status === 'insufficient_data'.
+ */
+export function computePrescriptionPanelState(
+  prescription: Prescription,
+  hoursWorked: number,
+  weeklyLimit: number,
+): PanelState {
+  if (weeklyLimit <= 0) return 'idle';
+  if (hoursWorked === 0) return 'idle';
+  if (hoursWorked > weeklyLimit) return 'overtime';
+  if (hoursWorked >= weeklyLimit) return 'crushedIt';
+
+  // Week ended
+  if (prescription.status === 'done') {
+    return prescription.totalRemaining > 0 ? 'behind' : 'crushedIt';
+  }
+
+  // Not enough history for pattern — fall back to linear model
+  if (prescription.status === 'insufficient_data') {
+    return computePanelState(hoursWorked, weeklyLimit, computeDaysElapsed());
+  }
+
+  // Active: urgency = remaining hours / remaining day capacity
+  const daysLeft = prescription.days.length;
+  if (daysLeft === 0) return 'onTrack';
+
+  const normalDailyHours = weeklyLimit / 5;
+  const urgency = prescription.totalRemaining / (daysLeft * normalDailyHours);
+
+  if (urgency <= URGENCY_CRUSHING) return 'aheadOfPace';
+  if (urgency <= URGENCY_ON_TRACK) return 'onTrack';
+  if (urgency <= URGENCY_BEHIND)   return 'behind';
   return 'critical';
 }
 

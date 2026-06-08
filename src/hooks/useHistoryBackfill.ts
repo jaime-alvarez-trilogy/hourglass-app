@@ -69,6 +69,14 @@ function weekDates(mondayStr: string): string[] {
   return dates;
 }
 
+/** Returns hours worked each day of the week (Mon=0 … Sun=6) from work diary slot counts. */
+function computeDailyHours(
+  mondayStr: string,
+  slotsData: Record<string, WorkDiarySlot[]>,
+): number[] {
+  return weekDates(mondayStr).map(date => (slotsData[date]?.length ?? 0) * 10 / 60);
+}
+
 /** Computes AI% midpoint and BrainLift hours from a map of per-day TagData. */
 function computeWeekAI(dayData: Record<string, TagData>): { aiPct: number; brainliftHours: number } {
   let totalSlots = 0, aiUsage = 0, secondBrain = 0, noTags = 0;
@@ -102,8 +110,8 @@ async function runBackfill(
   for (let n = 1; n <= BACKFILL_MAX; n++) {
     const monday = getMondayNWeeksAgo(n);
     const entry = historyMap.get(monday);
-    // Fill if missing or aiPct === 0 (any week with real work is unlikely to be truly 0%)
-    if (!entry || entry.aiPct === 0) {
+    // Fill if missing, aiPct === 0, or dailyHours not yet computed (added in spec 01)
+    if (!entry || entry.aiPct === 0 || entry.dailyHours === undefined) {
       weeksToFill.push(monday);
     }
   }
@@ -151,7 +159,8 @@ async function runBackfill(
     // Only write if we got at least some data (avoid overwriting with all-zeros)
     if (Object.keys(dayData).length > 0) {
       const { aiPct, brainliftHours } = computeWeekAI(dayData);
-      updated = mergeWeeklySnapshot(updated, { weekStart: monday, aiPct, brainliftHours });
+      const dailyHours = computeDailyHours(monday, slotsData);
+      updated = mergeWeeklySnapshot(updated, { weekStart: monday, aiPct, brainliftHours, dailyHours });
       // Save + notify after each week so useWeeklyHistory re-reads incrementally.
       // This drives the progressive chart animation — each write triggers a re-read
       // which grows data.length by 1, re-triggering TrendSparkline's clip reveal.

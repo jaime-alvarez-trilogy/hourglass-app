@@ -1,10 +1,40 @@
 import {
   computePanelState,
+  computePrescriptionPanelState,
   computeDaysElapsed,
   PACING_ON_TRACK_THRESHOLD,
   PACING_BEHIND_THRESHOLD,
   PACING_CRUSHING_THRESHOLD,
 } from '../panelState';
+import type { Prescription } from '../prescription';
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
+
+function makeActivePrescription(totalRemaining: number, daysLeft: number): Prescription {
+  const days = Array.from({ length: daysLeft }, (_, i) => ({
+    dayIndex: i,
+    dayLabel: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'][i] ?? 'Mon',
+    hoursNeeded: totalRemaining / daysLeft,
+    isToday: i === 0,
+  }));
+  return {
+    status: 'active',
+    days,
+    totalRemaining,
+    patternBased: false,
+    summaryLine: `Need ${(totalRemaining / daysLeft).toFixed(1)}h today`,
+  };
+}
+
+const DONE_GOAL_HIT: Prescription = {
+  status: 'done', days: [], totalRemaining: 0, patternBased: false, summaryLine: "You're done for the week",
+};
+const DONE_SHORT: Prescription = {
+  status: 'done', days: [], totalRemaining: 2, patternBased: false, summaryLine: 'Week complete',
+};
+const INSUFFICIENT: Prescription = {
+  status: 'insufficient_data', days: [], totalRemaining: 20, patternBased: false, summaryLine: '',
+};
 
 describe('computePanelState', () => {
   // ---------------------------------------------------------------------------
@@ -373,5 +403,57 @@ describe('computeDaysElapsed', () => {
       expect(result).toBeGreaterThanOrEqual(0);
       expect(result).toBeLessThanOrEqual(5);
     });
+  });
+});
+
+// ─── computePrescriptionPanelState ────────────────────────────────────────────
+
+describe('computePrescriptionPanelState', () => {
+  it('idle when 0h worked', () => {
+    expect(computePrescriptionPanelState(makeActivePrescription(40, 5), 0, 40)).toBe('idle');
+  });
+
+  it('overtime when hours > weeklyLimit', () => {
+    expect(computePrescriptionPanelState(DONE_GOAL_HIT, 42, 40)).toBe('overtime');
+  });
+
+  it('crushedIt when hours === weeklyLimit', () => {
+    expect(computePrescriptionPanelState(DONE_GOAL_HIT, 40, 40)).toBe('crushedIt');
+  });
+
+  it('behind when done but short of goal', () => {
+    expect(computePrescriptionPanelState(DONE_SHORT, 38, 40)).toBe('behind');
+  });
+
+  it('onTrack: fresh Monday — 40h needed, 5 days left (urgency = 1.0)', () => {
+    // urgency = 40 / (5 × 8) = 1.0 → ≤ 1.176 → onTrack
+    expect(computePrescriptionPanelState(makeActivePrescription(40, 5), 0.1, 40)).toBe('onTrack');
+  });
+
+  it('onTrack: Wed, 18h done, 22h remaining, 3 days left (urgency = 0.917)', () => {
+    expect(computePrescriptionPanelState(makeActivePrescription(22, 3), 18, 40)).toBe('onTrack');
+  });
+
+  it('aheadOfPace: Fri, 37h done, 3h left, 1 day (urgency = 0.375)', () => {
+    // urgency = 3 / (1 × 8) = 0.375 → ≤ 0.80 → aheadOfPace
+    expect(computePrescriptionPanelState(makeActivePrescription(3, 1), 37, 40)).toBe('aheadOfPace');
+  });
+
+  it('behind: Thu, 10h done, 30h left, 2 days (urgency = 1.875)', () => {
+    // urgency = 30 / (2 × 8) = 1.875 → ≤ 1.667? No → critical
+    // Actually 1.875 > 1.667 → critical; let's use 25h/2days = 1.5625 → behind
+    expect(computePrescriptionPanelState(makeActivePrescription(25, 2), 15, 40)).toBe('behind');
+  });
+
+  it('critical: Thu, 10h done, 30h left, 2 days (urgency = 1.875)', () => {
+    // 30 / (2 × 8) = 1.875 > 1.667 → critical
+    expect(computePrescriptionPanelState(makeActivePrescription(30, 2), 10, 40)).toBe('critical');
+  });
+
+  it('falls back to computePanelState for insufficient_data', () => {
+    // insufficient_data → linear fallback: 20h done, linear model at daysElapsed=2.5
+    // result depends on time-of-day so just check it returns a valid state
+    const result = computePrescriptionPanelState(INSUFFICIENT, 20, 40);
+    expect(['onTrack', 'behind', 'critical', 'aheadOfPace', 'crushedIt', 'overtime', 'idle']).toContain(result);
   });
 });

@@ -47,6 +47,11 @@ import { ApprovalUrgencyCard } from '@/src/components/ApprovalUrgencyCard';
 import { useApprovalItems } from '@/src/hooks/useApprovalItems';
 import { getApprovalMeshState } from '@/src/lib/approvalMeshSignal';
 import type { ScrubChangeCallback } from '@/src/hooks/useScrubGesture';
+import { InsightChip } from '@/src/components/InsightChip';
+import { useInsightChips } from '@/src/hooks/useInsightChips';
+import { useWeeklyHistory } from '@/src/hooks/useWeeklyHistory';
+import { computeDayWindowAvgs } from '@/src/lib/dayPatternUtils';
+import { DayPatternChart } from '@/src/components/DayPatternChart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -126,7 +131,7 @@ function ChartSection({
   const gesture = useMemo(() => Gesture.Pan()
     .minDistance(5)
     .activeOffsetX([-5, 5])
-    .failOffsetY([-5, 5])
+    .failOffsetY([-10, 10])
     .onUpdate((e) => {
       if (data.length === 0 || cardWidth === 0) return;
       const idx = Math.max(0, Math.min(Math.round((e.x / cardWidth) * (data.length - 1)), data.length - 1));
@@ -217,8 +222,9 @@ export default function OverviewScreen() {
   // Approval mesh signal: amber (behind) Mon-Wed, coral (critical) Thu-Sun UTC.
   // When non-null, overrides earningsPace for Node C and adds floor glow at Requests tab.
   const approvalMeshState = getApprovalMeshState(approvalItems.length);
-  // 08-dark-glass-polish: count 4→3 because Hours+AI% share one stagger row
-  const { getEntryStyle } = useStaggeredEntry({ count: 3 });
+  // 05-insights-ui: count 3→6 — chips occupy indices 3, 4, 5 in the same cascade
+  // 03-overview-integration: count 6→7 — Work Pattern at index 6
+  const { getEntryStyle } = useStaggeredEntry({ count: 7 });
 
   // Ensure earnings/hours history is populated even if home tab hasn't run yet
   useEarningsHistory(24);
@@ -289,6 +295,17 @@ export default function OverviewScreen() {
   const ambientColor = earningsPace !== null
     ? getAmbientColor({ type: 'earningsPace', ratio: earningsPace })
     : null;
+
+  // ── Insight chips (05-insights-ui) ─────────────────────────────────────────
+  const insightChips = useInsightChips();
+
+  // ── Day-pattern chart (03-overview-integration) ────────────────────────────
+  const { snapshots } = useWeeklyHistory();
+  const [patternCardWidth, setPatternCardWidth] = useState(0);
+  const patternData = useMemo(
+    () => computeDayWindowAvgs(snapshots, window),
+    [snapshots, window],
+  );
 
   // ── Snapshot panel animation ───────────────────────────────────────────────
   // Height animates 0 → SNAPSHOT_PANEL_HEIGHT so the panel takes no space at rest —
@@ -428,9 +445,22 @@ export default function OverviewScreen() {
             </View>
           </Animated.View>
 
+          {/* Insights — right after hero card (05-insights-ui, moved above charts) */}
+          {insightChips.length > 0 && (
+            <View className="mt-4">
+              <SectionLabel className="mb-3">INSIGHTS</SectionLabel>
+              <View className="gap-3">
+                {insightChips.map((chip, i) => {
+                  const { key, ...chipProps } = chip;
+                  return <InsightChip key={key} {...chipProps} animatedStyle={getEntryStyle(i)} />;
+                })}
+              </View>
+            </View>
+          )}
+
           {/* 08-dark-glass-polish FR1: Bento grid layout */}
           {/* Earnings — full width (primary importance) */}
-          <Animated.View style={getEntryStyle(0)}>
+          <Animated.View style={getEntryStyle(3)}>
           <Animated.View {...setTag('home-earnings-card')}>
           <ChartSection
             label="WEEKLY EARNINGS"
@@ -452,7 +482,7 @@ export default function OverviewScreen() {
           </Animated.View>
 
           {/* Hours + AI% — side-by-side half-width cards (secondary metrics) */}
-          <Animated.View style={[getEntryStyle(1), { flexDirection: 'row', gap: 8 }]}>
+          <Animated.View style={[getEntryStyle(4), { flexDirection: 'row', gap: 8 }]}>
             <View style={{ flex: 1 }}>
             <ChartSection
               label="WEEKLY HOURS"
@@ -495,7 +525,7 @@ export default function OverviewScreen() {
           </Animated.View>
 
           {/* BrainLift — full width at bottom */}
-          <Animated.View style={getEntryStyle(2)}>
+          <Animated.View style={getEntryStyle(5)}>
           <ChartSection
             label="BRAINLIFT HOURS"
             heroValue={`${heroBrainlift.toFixed(1)}h`}
@@ -512,6 +542,26 @@ export default function OverviewScreen() {
             externalCursorIndex={scrubWeekIndex}
             chartKey={`brainlift-${chartKey}-${window}`}
           />
+          </Animated.View>
+
+          {/* Work Pattern — 7-bar day-of-week chart (03-overview-integration) */}
+          <Animated.View style={[getEntryStyle(6)]}>
+            <Card>
+              <SectionLabel>WORK PATTERN</SectionLabel>
+              <Text style={{ color: colors.textMuted, fontSize: 11, marginBottom: 6 }}>
+                {window === 24 ? '24W avg' : `${window}W vs prior ${window}W`}
+              </Text>
+              <View
+                onLayout={e => setPatternCardWidth(e.nativeEvent.layout.width)}
+              >
+                <DayPatternChart
+                  current={patternData.current}
+                  prev={patternData.prev}
+                  width={patternCardWidth}
+                  height={80}
+                />
+              </View>
+            </Card>
           </Animated.View>
         </ScrollView>
       </SafeAreaView>

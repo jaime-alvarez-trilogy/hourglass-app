@@ -211,6 +211,8 @@ describe('FR1: useStaggeredEntry — shared value allocation', () => {
 });
 
 // ─── FR2: Home screen (index.tsx) ─────────────────────────────────────────────
+// Updated by 04-home-integration: count 4→5, adds Day Pattern at stagger 2,
+// AI Trajectory shifts 2→3, Earnings shifts 3→4.
 
 describe('FR2: Home screen — useStaggeredEntry integration', () => {
   it('imports useStaggeredEntry from @/src/hooks/useStaggeredEntry', () => {
@@ -224,9 +226,10 @@ describe('FR2: Home screen — useStaggeredEntry integration', () => {
     expect(source).toMatch(/import\s+Animated[\s,{][\s\S]*?from\s+['"]react-native-reanimated['"]/);
   });
 
-  it('calls useStaggeredEntry with count: 4', () => {
+  // SC5.1: count updated 4→5 (04-home-integration adds Day Pattern at slot 2)
+  it('SC4.1: calls useStaggeredEntry with count: 5', () => {
     const source = fs.readFileSync(HOME_FILE, 'utf8');
-    expect(source).toMatch(/useStaggeredEntry\s*\(\s*\{\s*count\s*:\s*4/);
+    expect(source).toMatch(/useStaggeredEntry\s*\(\s*\{\s*count\s*:\s*5/);
   });
 
   it('wraps hero PanelGradient zone with Animated.View getEntryStyle(0)', () => {
@@ -239,24 +242,30 @@ describe('FR2: Home screen — useStaggeredEntry integration', () => {
     expect(source).toMatch(/getEntryStyle\(1\)/);
   });
 
-  it('wraps AI trajectory card zone with Animated.View getEntryStyle(2)', () => {
+  // SC5.2: Day Pattern card at stagger 2 (04-home-integration)
+  it('SC3.3: wraps Day Pattern card with Animated.View getEntryStyle(2)', () => {
     const source = fs.readFileSync(HOME_FILE, 'utf8');
     expect(source).toMatch(/getEntryStyle\(2\)/);
   });
 
-  it('wraps earnings card zone with Animated.View getEntryStyle(3)', () => {
+  // SC5.3: AI Trajectory shifted from 2→3 (04-home-integration)
+  it('SC4.2: wraps AI trajectory card zone with Animated.View getEntryStyle(3)', () => {
     const source = fs.readFileSync(HOME_FILE, 'utf8');
     expect(source).toMatch(/getEntryStyle\(3\)/);
   });
 
-  it('does NOT wrap UrgencyBanner with getEntryStyle', () => {
+  // SC5.4: Earnings shifted from 3→4 (04-home-integration)
+  it('SC4.3: wraps earnings card zone with Animated.View getEntryStyle(4)', () => {
     const source = fs.readFileSync(HOME_FILE, 'utf8');
-    // Ensure UrgencyBanner is not inside an Animated.View with getEntryStyle
-    // The UrgencyBanner must appear in the source without being preceded by getEntryStyle
-    // on the same wrapper — check that UrgencyBanner is not wrapped in an entry style view
-    // Simple assertion: getEntryStyle should only be called 4 times (indices 0-3)
+    expect(source).toMatch(/getEntryStyle\(4\)/);
+  });
+
+  // SC5.5: total call count updated to 5 (04-home-integration)
+  it('SC4.4: getEntryStyle called exactly 5 times total (indices 0–4); UrgencyBanner NOT wrapped', () => {
+    const source = fs.readFileSync(HOME_FILE, 'utf8');
+    // UrgencyBanner must not be wrapped; Day Pattern + AI Traj + Earnings each get one slot
     const entryStyleCalls = (source.match(/getEntryStyle\(\d+\)/g) || []).length;
-    expect(entryStyleCalls).toBe(4);
+    expect(entryStyleCalls).toBe(5);
   });
 });
 
@@ -368,6 +377,8 @@ describe('FR4: Approvals screen — useStaggeredEntry integration', () => {
 });
 
 // ─── FR5: Overview screen (overview.tsx) ──────────────────────────────────────
+// Updated by 03-overview-integration: count 6→7, adds getEntryStyle(6) for Work Pattern.
+// Re-ordered: InsightChips at i (dynamic, 0–2), charts at 3/4/5, Work Pattern at 6.
 
 describe('FR5: Overview screen — useStaggeredEntry integration', () => {
   it('imports useStaggeredEntry from @/src/hooks/useStaggeredEntry', () => {
@@ -375,30 +386,45 @@ describe('FR5: Overview screen — useStaggeredEntry integration', () => {
     expect(source).toMatch(/useStaggeredEntry.*from.*@\/src\/hooks\/useStaggeredEntry/);
   });
 
-  it('calls useStaggeredEntry with count: 3', () => {
+  // SC5.1: count 7 (InsightChips 0–2, charts 3/4/5, Work Pattern 6)
+  it('SC5.1: calls useStaggeredEntry with count: 7', () => {
     const source = fs.readFileSync(OVERVIEW_FILE, 'utf8');
-    expect(source).toMatch(/useStaggeredEntry\s*\(\s*\{\s*count\s*:\s*3/);
+    expect(source).toMatch(/useStaggeredEntry\s*\(\s*\{\s*count\s*:\s*7/);
   });
 
-  it('wraps Earnings ChartSection with getEntryStyle(0)', () => {
+  // Slots 0–2 are used by InsightChips (dynamic: getEntryStyle(i) in .map()).
+  // Slots 3–5 are used by ChartSection wrappers (literal indices).
+  // Slot 6 is used by the Work Pattern section.
+
+  // SC5.4: Earnings at index 3
+  it('SC5.4: wraps Earnings ChartSection with getEntryStyle(3)', () => {
     const source = fs.readFileSync(OVERVIEW_FILE, 'utf8');
-    expect(source).toMatch(/getEntryStyle\(0\)/);
+    expect(source).toMatch(/getEntryStyle\(3\)/);
   });
 
-  it('wraps Hours ChartSection with getEntryStyle(1)', () => {
+  // SC5.5: Hours+AI% at index 4
+  it('SC5.5: wraps Hours+AI ChartSection row with getEntryStyle(4)', () => {
     const source = fs.readFileSync(OVERVIEW_FILE, 'utf8');
-    expect(source).toMatch(/getEntryStyle\(1\)/);
+    expect(source).toMatch(/getEntryStyle\(4\)/);
   });
 
-  it('wraps AI Usage ChartSection with getEntryStyle(2)', () => {
+  // SC5.6: BrainLift at index 5
+  it('SC5.6: wraps BrainLift ChartSection with getEntryStyle(5)', () => {
     const source = fs.readFileSync(OVERVIEW_FILE, 'utf8');
-    expect(source).toMatch(/getEntryStyle\(2\)/);
+    expect(source).toMatch(/getEntryStyle\(5\)/);
   });
 
-  it('uses exactly 3 getEntryStyle calls (one per ChartSection)', () => {
+  // SC5.2: Work Pattern section at index 6
+  it('SC5.2: wraps Work Pattern section with getEntryStyle(6)', () => {
+    const source = fs.readFileSync(OVERVIEW_FILE, 'utf8');
+    expect(source).toMatch(/getEntryStyle\(6\)/);
+  });
+
+  // SC5.3: total literal getEntryStyle calls is 4 (indices 3, 4, 5, 6; InsightChips use i)
+  it('SC5.3: uses exactly 4 literal getEntryStyle calls (indices 3, 4, 5, 6; InsightChips use i)', () => {
     const source = fs.readFileSync(OVERVIEW_FILE, 'utf8');
     const calls = (source.match(/getEntryStyle\(\d+\)/g) || []).length;
-    expect(calls).toBe(3);
+    expect(calls).toBe(4);
   });
 
   it('scrub snapshot panel Animated.View does NOT use getEntryStyle', () => {
@@ -410,9 +436,8 @@ describe('FR5: Overview screen — useStaggeredEntry integration', () => {
 
   it('4W/12W/24W toggle header row is NOT wrapped with getEntryStyle', () => {
     const source = fs.readFileSync(OVERVIEW_FILE, 'utf8');
-    // The toggle is inside OverviewHeroCard — getEntryStyle should only be on ChartSection wrappers
-    // Already verified by the "exactly 3 calls" test above
+    // The toggle is inside OverviewHeroCard — literal getEntryStyle calls only for chart wrappers
     const calls = (source.match(/getEntryStyle\(\d+\)/g) || []).length;
-    expect(calls).toBeLessThanOrEqual(3);
+    expect(calls).toBeLessThanOrEqual(4);
   });
 });

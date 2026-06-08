@@ -68,3 +68,8 @@ All components must follow the existing design system:
 | Date | Spec | Description |
 |---|---|---|
 | 2026-06-06 | — | Feature created. Research phase complete. |
+| 2026-06-06 | [01-daily-history-store](specs/01-daily-history-store/spec.md) | **Complete.** `dailyHours?: number[]` added to `WeeklySnapshot`; `computeDailyHours` helper + backfill integration. 21 tests, 423 total passing. |
+| 2026-06-06 | [04-ai-insights](specs/04-ai-insights/spec.md) | **Complete.** `linearSlope`, `pearsonR`, `computeAIInsights`, `formatWeekStartLabel`, `useAIInsights`. 59 new tests, 4182 total passing. |
+| 2026-06-06 | [02-work-pattern](specs/02-work-pattern/spec.md) | **Complete.** `inferWorkPattern` pure function + `useWorkPattern` hook. 24 tests, 4182 total passing. |
+| 2026-06-06 | [03-pace-prescription](specs/03-pace-prescription/spec.md) | **Complete.** `computePrescription` pure function + `usePrescription` hook. 42 tests, 4224 total passing. |
+| 2026-06-06 | [05-insights-ui](specs/05-insights-ui/spec.md) | **Complete.** `InsightChip` component + `useInsightChips` hook + `insightFormatting.ts` formatters + `overview.tsx` insights section. 75 new tests, 4299 total passing. |
