@@ -14,6 +14,14 @@ export interface WeeklySnapshot {
   aiPct: number;            // Midpoint AI% for the week (0 if unknown)
   brainliftHours: number;   // BrainLift hours for the week (0 if unknown)
   overtime?: number;        // Actual overtime hours above weekly limit (may be absent in old snapshots)
+  /**
+   * Hours worked per day of the week (Mon=0 … Sun=6).
+   * Length 7. Computed from work diary slot counts (slot × 10 min / 60).
+   * Absent on snapshots from weeks already processed before this field was added,
+   * or on weeks gated out by the aiPct > 0 backfill guard.
+   * Consumers treat missing as [0,0,0,0,0,0,0].
+   */
+  dailyHours?: number[];
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────

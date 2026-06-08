@@ -7,7 +7,7 @@
 import { Platform } from 'react-native';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getUrgencyLevel, getThursdayDeadlineGMT } from '../lib/hours';
+import { getUrgencyLevel, getThursdayDeadlineGMT, getSundayMidnightGMT } from '../lib/hours';
 import type { HoursData, DailyEntry } from '../lib/hours';
 import type { AIWeekData } from '../lib/ai';
 import type { CrossoverConfig } from '../types/config';
@@ -327,19 +327,24 @@ function buildWidgetData(
     };
   }
 
-  // deadline may be a Date, an ISO string (JSON-deserialized from cache), or
-  // undefined (old cache written before the deadline field was added). Handle all three.
-  const deadlineMs = hoursData.deadline instanceof Date
-    ? hoursData.deadline.getTime()
-    : typeof hoursData.deadline === 'string'
-      ? new Date(hoursData.deadline).getTime()
-      : getThursdayDeadlineGMT().getTime();
-  const urgency: WidgetUrgency = getUrgencyLevel(deadlineMs - now);
-
   // pendingCount is derived from approvalItems, not the passed-in parameter
   // devManagerView acts as isManager for widget purposes (debug preview)
   const actingAsManager = config.isManager || (config.devManagerView ?? false);
   const derivedPendingCount = actingAsManager ? approvalItems.length : 0;
+
+  // deadline may be a Date, an ISO string (JSON-deserialized from cache), or
+  // undefined (old cache written before the deadline field was added). Handle all three.
+  // Managers with pending approvals use the Sunday midnight GMT approval cutoff;
+  // all other cases use the Thursday timesheet deadline.
+  const rawDeadlineMs = hoursData.deadline instanceof Date
+    ? hoursData.deadline.getTime()
+    : typeof hoursData.deadline === 'string'
+      ? new Date(hoursData.deadline).getTime()
+      : getThursdayDeadlineGMT().getTime();
+  const deadlineMs = actingAsManager && derivedPendingCount > 0
+    ? getSundayMidnightGMT().getTime()
+    : rawDeadlineMs;
+  const urgency: WidgetUrgency = getUrgencyLevel(deadlineMs - now);
 
   // Format items for widget display
   const widgetApprovalItems = actingAsManager ? formatApprovalItems(approvalItems, 3) : [];

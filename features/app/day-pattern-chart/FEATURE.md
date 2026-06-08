@@ -62,13 +62,22 @@ The 4W / 12W / 24W toggle on Overview already surfaces earnings, hours, and AI% 
 | `app/(tabs)/index.tsx` (modified) | 04 |
 | `src/hooks/__tests__/useStaggeredEntry.test.ts` (FR2 block updated) | 04 |
 
+## Changelog
+
+| Date | Spec | Description |
+|------|------|-------------|
+| 2026-06-06 | [01-computation](specs/01-computation/spec.md) | Add spec, checklist, and implementation for `computeDayWindowAvgs` pure function |
+| 2026-06-06 | [02-chart-component](specs/02-chart-component/spec.md) | Add spec and checklist for `DayPatternChart` visual component |
+| 2026-06-06 | [03-overview-integration](specs/03-overview-integration/spec.md) | Add spec, checklist, and implementation for wiring DayPatternChart into Overview tab |
+| 2026-06-06 | [04-home-integration](specs/04-home-integration/spec.md) | Add spec, checklist, and implementation for wiring static DayPatternChart into Home tab |
+
 ## Checklist
 
-- [ ] 01-computation: spec written
-- [ ] 01-computation: implemented
-- [ ] 02-chart-component: spec written
-- [ ] 02-chart-component: implemented
-- [ ] 03-overview-integration: spec written
-- [ ] 03-overview-integration: implemented
-- [ ] 04-home-integration: spec written
-- [ ] 04-home-integration: implemented
+- [x] 01-computation: spec written
+- [x] 01-computation: implemented
+- [x] 02-chart-component: spec written
+- [x] 02-chart-component: implemented
+- [x] 03-overview-integration: spec written
+- [x] 03-overview-integration: implemented
+- [x] 04-home-integration: spec written
+- [x] 04-home-integration: implemented

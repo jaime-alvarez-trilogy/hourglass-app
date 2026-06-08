@@ -32,9 +32,11 @@ import { useEarningsHistory } from '@/src/hooks/useEarningsHistory';
 import { useAIData } from '@/src/hooks/useAIData';
 import { useFocusKey } from '@/src/hooks/useFocusKey';
 import { useStaggeredEntry } from '@/src/hooks/useStaggeredEntry';
-import { computePanelState, computeDaysElapsed } from '@/src/lib/panelState';
+import { computePanelState, computePrescriptionPanelState, computeDaysElapsed } from '@/src/lib/panelState';
 import { computeAICone } from '@/src/lib/aiCone';
 import { getUrgencyLevel, getWeekLabels, computeDeadlineCountdown, computePacingSignal } from '@/src/lib/hours';
+import { usePrescription } from '@/src/hooks/usePrescription';
+import { useWorkPattern } from '@/src/hooks/useWorkPattern';
 import { setTag } from '@/src/lib/sharedTransitions';
 import { colors } from '@/src/lib/colors';
 import AnimatedMeshBackground from '@/src/components/AnimatedMeshBackground';
@@ -45,6 +47,7 @@ import MetricValue from '@/src/components/MetricValue';
 import WeeklyBarChart from '@/src/components/WeeklyBarChart';
 import TrendSparkline from '@/src/components/TrendSparkline';
 import AIConeChart from '@/src/components/AIConeChart';
+import { DayPatternChart } from '@/src/components/DayPatternChart';
 import Card from '@/src/components/Card';
 import SectionLabel from '@/src/components/SectionLabel';
 import SkeletonLoader from '@/src/components/SkeletonLoader';
@@ -161,9 +164,10 @@ export default function HoursDashboard() {
   const [chartDims, setChartDims] = useState({ width: 0, height: 0 });
   const [sparklineDims, setSparklineDims] = useState({ width: 0, height: 0 });
   const [compactConeDims, setCompactConeDims] = useState({ width: 0, height: 100 });
+  const [patternCardWidth, setPatternCardWidth] = useState(0);
 
   const chartKey = useFocusKey();
-  const { getEntryStyle } = useStaggeredEntry({ count: 4 });
+  const { getEntryStyle } = useStaggeredEntry({ count: 5 });
 
   // Approval urgency card (01-approval-urgency-card)
   const { items: approvalItems } = useApprovalItems();
@@ -177,10 +181,33 @@ export default function HoursDashboard() {
     () => (aiData ? computeAICone(aiData.dailyBreakdown, weeklyLimit, previousWeekPercent) : null),
     [aiData, weeklyLimit, previousWeekPercent],
   );
+  const prescription = usePrescription();
+  const pattern = useWorkPattern();
+  const showPatternChart = pattern.avgDailyHours.length === 7 && pattern.weeksUsed >= 2;
   const daysElapsed = computeDaysElapsed();
   const basePanelState = computePanelState(data?.total ?? 0, weeklyLimit, daysElapsed);
-  // Dev override: force overtime panel for UI testing
-  const panelState: PanelState = config?.devOvertimePreview ? 'overtime' : basePanelState;
+  // Use prescription-based pacing when available — respects 5-day work pattern and
+  // today's partial hours. Falls back to linear model when prescription is null.
+  const panelState: PanelState = config?.devOvertimePreview
+    ? 'overtime'
+    : prescription
+      ? computePrescriptionPanelState(prescription, data?.total ?? 0, weeklyLimit)
+      : basePanelState;
+
+  // Today's avg hours: personal pattern when ready, else weeklyLimit/5 standard.
+  // Shown on weekdays (0–4) and also on rest days if the pattern marks them as work days.
+  const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const todayPatternIndex = (new Date().getDay() + 6) % 7; // JS Sun=0 → Mon=0
+  const isPatternReady = pattern.status === 'ready';
+  // A day counts as a work day if the pattern says so, OR (without pattern data) it's Mon–Fri.
+  // Never fabricate a weekend avg from weeklyLimit/5 — that number means nothing for Sat/Sun.
+  const patternCoversToday =
+    isPatternReady
+      ? pattern.avgDailyHours[todayPatternIndex] >= 0.5
+      : todayPatternIndex <= 4;
+  const todayAvgHours = patternCoversToday
+    ? (isPatternReady ? pattern.avgDailyHours[todayPatternIndex] : weeklyLimit / 5)
+    : null;
 
   // FR2/FR3/FR4/FR5 (01-week-countdown-pacing): deadline countdown + pacing signal
   // 60-second clock keeps countdown and pacing fresh while screen is visible (02-deadline-clock)
@@ -338,14 +365,25 @@ export default function HoursDashboard() {
                   sizeClass="text-5xl"
                   colorClass="text-textPrimary"
                 />
-                {/* FR5: Pacing label under hours hero, hidden on weekend and when target met */}
-                {pacing && pacing.hoursPerDayNeeded > 0 && (
+                {/* Pace prescription — pattern-weighted daily breakdown (03-pace-prescription) */}
+                {prescription?.status === 'active' && (
                   <Text
                     className="text-sm font-sans mb-1"
                     style={{ color: colors.textSecondary }}
                     testID="pacing-label"
                   >
-                    {pacing.label}
+                    {prescription.summaryLine}
+                  </Text>
+                )}
+                {todayAvgHours !== null && (
+                  <Text
+                    className="text-xs font-sans mb-1"
+                    style={{ color: colors.textMuted }}
+                    testID="pattern-avg-label"
+                  >
+                    {isPatternReady
+                      ? `your avg ${DAY_NAMES[todayPatternIndex]} is ${todayAvgHours.toFixed(1)}h`
+                      : `typical ${DAY_NAMES[todayPatternIndex]}: ${todayAvgHours.toFixed(1)}h`}
                   </Text>
                 )}
                 <Text className="text-textSecondary text-sm font-sans mb-4">
@@ -451,9 +489,27 @@ export default function HoursDashboard() {
         </Card>
         </Animated.View>
 
+        {/* ── Zone 2: Day Pattern card (04-home-integration) ──────────────── */}
+        {showPatternChart && (
+          <Animated.View style={[getEntryStyle(2)]}>
+            <Card>
+              <SectionLabel>WORK PATTERN</SectionLabel>
+              <View
+                onLayout={e => setPatternCardWidth(e.nativeEvent.layout.width)}
+              >
+                <DayPatternChart
+                  current={pattern.avgDailyHours}
+                  width={patternCardWidth}
+                  height={80}
+                />
+              </View>
+            </Card>
+          </Animated.View>
+        )}
+
         {/* ── Zone 2.5: AI Trajectory compact card (FR2 03-ai-tab-integration) ── */}
         {coneData && (
-          <Animated.View style={getEntryStyle(2)}>
+          <Animated.View style={getEntryStyle(3)}>
           <Animated.View {...setTag('home-ai-card')}>
           <Card borderAccentColor={colors.cyan}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -484,7 +540,7 @@ export default function HoursDashboard() {
         )}
 
         {/* ── Zone 3: Earnings ─────────────────────────────────────────── */}
-        <Animated.View style={getEntryStyle(3)}>
+        <Animated.View style={getEntryStyle(4)}>
         <Animated.View {...setTag('home-earnings-card')}>
         <Card borderAccentColor={colors.gold}>
           <SectionLabel className="mb-2">EARNINGS</SectionLabel>

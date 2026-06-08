@@ -161,6 +161,20 @@ export function formatTimeRemaining(ms: number): string {
   return `${totalMinutes}m`;
 }
 
+// ─── formatWeekStartLabel ─────────────────────────────────────────────────────
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * Formats a YYYY-MM-DD Monday date string as "MMM D" (e.g. "Apr 7").
+ * Uses local timezone — parses without a Z suffix to avoid UTC offset shifts.
+ * Shared by getWeekLabels and computeAIInsights (via aiInsights.ts).
+ */
+export function formatWeekStartLabel(weekStart: string): string {
+  const d = new Date(weekStart + 'T00:00:00');
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+}
+
 // ─── getWeekLabels ────────────────────────────────────────────────────────────
 
 /**
@@ -173,7 +187,6 @@ export function formatTimeRemaining(ms: number): string {
  */
 export function getWeekLabels(count: number): string[] {
   if (count === 0) return [];
-  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const result: string[] = [];
   const now = new Date();
   const dow = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
