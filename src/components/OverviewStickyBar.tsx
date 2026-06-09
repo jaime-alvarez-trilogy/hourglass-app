@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
+import { BlurView } from 'expo-blur';
 import { colors } from '@/src/lib/colors';
 import { springSnappy, timingSmooth } from '@/src/lib/reanimated-presets';
 
@@ -61,15 +62,14 @@ export function OverviewStickyBar({
 
   return (
     <Animated.View
-      style={[style, barStyle]}
+      style={[style, barStyle, styles.shadow]}
       pointerEvents={visible ? 'auto' : 'none'}
     >
-      {/* FR1 — surface */}
-      <View style={{
-        backgroundColor: colors.surfaceElevated,
+      {/* FR1 — frosted glass surface */}
+      <BlurView intensity={60} tint="dark" style={{
         borderRadius: 12,
         borderWidth: 1,
-        borderColor: colors.border,
+        borderColor: 'rgba(255,255,255,0.15)',
         height: 52,
         overflow: 'hidden',
       }}>
@@ -128,7 +128,7 @@ export function OverviewStickyBar({
             </View>
           )}
         </Animated.View>
-      </View>
+      </BlurView>
     </Animated.View>
   );
 }
@@ -136,4 +136,10 @@ export function OverviewStickyBar({
 const styles = StyleSheet.create({
   centred: { justifyContent: 'center', alignItems: 'center' },
   scrubPad: { paddingHorizontal: 12, justifyContent: 'center' },
+  shadow: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.45,
+    shadowRadius: 16,
+  },
 });
