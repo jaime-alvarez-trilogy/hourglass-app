@@ -100,37 +100,32 @@ export function OverviewStickyBar({
         {/* FR3 — scrub layer: week snapshot metrics */}
         <Animated.View style={[StyleSheet.absoluteFill, styles.scrubPad, scrubLayerStyle]}>
           {scrubSnapshot && (
-            <>
-              <Text style={{ color: colors.textMuted, fontSize: 11, marginBottom: 4 }}>
-                {scrubSnapshot.label}
-              </Text>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ color: colors.gold, fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] }}>
-                    {scrubSnapshot.earnings}
-                  </Text>
-                  <Text style={{ color: colors.textMuted, fontSize: 10, marginTop: 2 }}>Earnings</Text>
-                </View>
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ color: scrubSnapshot.hoursColor, fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] }}>
-                    {scrubSnapshot.hoursLabel}
-                  </Text>
-                  <Text style={{ color: colors.textMuted, fontSize: 10, marginTop: 2 }}>Hours</Text>
-                </View>
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ color: colors.cyan, fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] }}>
-                    {scrubSnapshot.aiPct}
-                  </Text>
-                  <Text style={{ color: colors.textMuted, fontSize: 10, marginTop: 2 }}>AI%</Text>
-                </View>
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ color: colors.violet, fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] }}>
-                    {scrubSnapshot.brainlift}
-                  </Text>
-                  <Text style={{ color: colors.textMuted, fontSize: 10, marginTop: 2 }}>BrainLift</Text>
-                </View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ color: colors.gold, fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] }}>
+                  {scrubSnapshot.earnings}
+                </Text>
+                <Text style={{ color: colors.textMuted, fontSize: 10, marginTop: 1 }}>Earnings</Text>
               </View>
-            </>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ color: scrubSnapshot.hoursColor, fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] }}>
+                  {scrubSnapshot.hoursLabel}
+                </Text>
+                <Text style={{ color: colors.textMuted, fontSize: 10, marginTop: 1 }}>Hours</Text>
+              </View>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ color: colors.cyan, fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] }}>
+                  {scrubSnapshot.aiPct}
+                </Text>
+                <Text style={{ color: colors.textMuted, fontSize: 10, marginTop: 1 }}>AI%</Text>
+              </View>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ color: colors.violet, fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] }}>
+                  {scrubSnapshot.brainlift}
+                </Text>
+                <Text style={{ color: colors.textMuted, fontSize: 10, marginTop: 1 }}>BrainLift</Text>
+              </View>
+            </View>
           )}
         </Animated.View>
       </View>

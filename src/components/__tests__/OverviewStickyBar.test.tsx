@@ -131,9 +131,10 @@ describe('FR3: OverviewStickyBar — scrub state (week snapshot metrics)', () =>
     expect(src).toMatch(/colors\.violet/);
   });
 
-  it('SC3.4: source renders scrubSnapshot.label', () => {
+  it('SC3.4: source renders scrubSnapshot earnings and hours values', () => {
     const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toMatch(/scrubSnapshot\.label/);
+    expect(src).toMatch(/scrubSnapshot\.earnings/);
+    expect(src).toMatch(/scrubSnapshot\.hoursLabel/);
   });
 
   it('SC3.5: smoke — renders without crash (visible=true, scrubSnapshot=FULL_SCRUB_SNAPSHOT)', () => {
