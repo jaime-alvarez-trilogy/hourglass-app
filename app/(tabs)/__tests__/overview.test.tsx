@@ -36,6 +36,7 @@ import * as fs from 'fs';
 
 const HOURGLASSWS_ROOT = path.resolve(__dirname, '../../..');
 const OVERVIEW_FILE = path.join(HOURGLASSWS_ROOT, 'app', '(tabs)', 'overview.tsx');
+const STICKY_BAR_FILE = path.join(HOURGLASSWS_ROOT, 'src', 'components', 'OverviewStickyBar.tsx');
 
 // ─── FR4: Source analysis — state declarations ────────────────────────────────
 
@@ -164,14 +165,14 @@ describe('OverviewScreen FR4 (07-overview-sync) — hero value logic', () => {
 // ─── FR5: Source analysis — snapshot panel ───────────────────────────────────
 
 describe('OverviewScreen FR5 (07-overview-sync) — source analysis: snapshot panel', () => {
-  it('SC5.1 — useSharedValue present (for panelOpacity)', () => {
-    const source = fs.readFileSync(OVERVIEW_FILE, 'utf8');
+  it('SC5.1 — useSharedValue present in OverviewStickyBar (panel animation delegated)', () => {
+    const source = fs.readFileSync(STICKY_BAR_FILE, 'utf8');
     expect(source).toMatch(/useSharedValue/);
   });
 
-  it('SC5.2 — translateY or panelTranslateY present (snapshot panel slide)', () => {
-    const source = fs.readFileSync(OVERVIEW_FILE, 'utf8');
-    expect(source).toMatch(/translateY|panelTranslate/);
+  it('SC5.2 — translateY present in OverviewStickyBar (panel slide animation)', () => {
+    const source = fs.readFileSync(STICKY_BAR_FILE, 'utf8');
+    expect(source).toMatch(/translateY|barTranslateY/);
   });
 
   it('SC5.3 — "Week of" label prefix present', () => {
@@ -204,18 +205,18 @@ describe('OverviewScreen FR5 (07-overview-sync) — source analysis: snapshot pa
     expect(source).toMatch(/brainliftHours|BrainLift/);
   });
 
-  it('SC5.5 — uses springPremium for animation', () => {
-    const source = fs.readFileSync(OVERVIEW_FILE, 'utf8');
-    expect(source).toMatch(/springPremium/);
+  it('SC5.5 — OverviewStickyBar uses springSnappy for animation', () => {
+    const source = fs.readFileSync(STICKY_BAR_FILE, 'utf8');
+    expect(source).toMatch(/springSnappy/);
   });
 
-  it('SC5.5 — uses withSpring from reanimated', () => {
-    const source = fs.readFileSync(OVERVIEW_FILE, 'utf8');
+  it('SC5.5 — OverviewStickyBar uses withSpring from reanimated', () => {
+    const source = fs.readFileSync(STICKY_BAR_FILE, 'utf8');
     expect(source).toMatch(/withSpring/);
   });
 
-  it('SC5.6 — useAnimatedStyle used (panel always rendered, opacity-driven)', () => {
-    const source = fs.readFileSync(OVERVIEW_FILE, 'utf8');
+  it('SC5.6 — OverviewStickyBar uses useAnimatedStyle (panel always rendered, opacity-driven)', () => {
+    const source = fs.readFileSync(STICKY_BAR_FILE, 'utf8');
     expect(source).toMatch(/useAnimatedStyle/);
   });
 
@@ -314,10 +315,10 @@ describe('OverviewScreen FR4+FR5 (07-overview-sync) — file contract', () => {
     expect(source).toMatch(/useOverviewData/);
   });
 
-  it('overview.tsx imports useSharedValue from react-native-reanimated after FR5 implementation', () => {
+  it('overview.tsx imports OverviewStickyBar (panel animation delegated to component)', () => {
     // FAILS in red phase, PASSES after implementation
     const source = fs.readFileSync(OVERVIEW_FILE, 'utf8');
-    expect(source).toMatch(/useSharedValue/);
+    expect(source).toMatch(/import.*OverviewStickyBar/);
     expect(source).toMatch(/react-native-reanimated/);
   });
 });
@@ -414,14 +415,14 @@ describe('OverviewScreen FR5 (03-overview-hero) — source: hero card integratio
     expect(source).toMatch(/<OverviewHeroCard/);
   });
 
-  it('SC5.2 — OverviewHeroCard appears before scrub panel Animated.View', () => {
+  it('SC5.2 — OverviewHeroCard appears before OverviewStickyBar in render', () => {
     const source = fs.readFileSync(OVERVIEW_FILE, 'utf8');
     const heroIdx = source.indexOf('<OverviewHeroCard');
-    // Use the inline JSX comment that marks the scrub panel Animated.View in the render
-    const scrubIdx = source.indexOf('{/* Week snapshot panel');
+    // OverviewStickyBar is the floating panel that replaced the inline Animated.View panel
+    const stickyIdx = source.indexOf('<OverviewStickyBar');
     expect(heroIdx).toBeGreaterThan(-1);
-    expect(scrubIdx).toBeGreaterThan(-1);
-    expect(heroIdx).toBeLessThan(scrubIdx);
+    expect(stickyIdx).toBeGreaterThan(-1);
+    expect(heroIdx).toBeLessThan(stickyIdx);
   });
 
   it('SC5.3 — OverviewHeroCard receives window prop', () => {
