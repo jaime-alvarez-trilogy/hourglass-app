@@ -49,6 +49,7 @@ import { getApprovalMeshState } from '@/src/lib/approvalMeshSignal';
 import type { ScrubChangeCallback } from '@/src/hooks/useScrubGesture';
 import { InsightChip } from '@/src/components/InsightChip';
 import { useInsightChips } from '@/src/hooks/useInsightChips';
+import { OverviewStickyBar } from '@/src/components/OverviewStickyBar';
 import { useWeeklyHistory } from '@/src/hooks/useWeeklyHistory';
 import { computeDayWindowAvgs } from '@/src/lib/dayPatternUtils';
 import { DayPatternChart } from '@/src/components/DayPatternChart';
@@ -405,45 +406,16 @@ export default function OverviewScreen() {
           />
 
           {/* Week snapshot panel — always rendered, animated opacity/translateY */}
-          <Animated.View
-            style={[panelStyle, {
-              backgroundColor: colors.surfaceElevated,
-              borderRadius: 12,
-              paddingHorizontal: 16,
-              paddingVertical: 10,
-            }]}
-            pointerEvents={scrubWeekIndex !== null ? 'auto' : 'none'}
-          >
-            <Text style={{ color: colors.textMuted ?? '#888', fontSize: 11, marginBottom: 6 }}>
-              {snapLabel}
-            </Text>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              <View style={{ alignItems: 'center' }}>
-                <Text style={{ color: colors.gold, fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] }}>
-                  {`$${Math.round(heroEarnings).toLocaleString()}`}
-                </Text>
-                <Text style={{ color: colors.textMuted ?? '#888', fontSize: 10, marginTop: 2 }}>Earnings</Text>
-              </View>
-              <View style={{ alignItems: 'center' }}>
-                <Text style={{ color: computeSnapshotHoursColor(heroHours, weeklyLimit), fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] }}>
-                  {`${heroHours.toFixed(1)}h`}
-                </Text>
-                <Text style={{ color: colors.textMuted ?? '#888', fontSize: 10, marginTop: 2 }}>Hours</Text>
-              </View>
-              <View style={{ alignItems: 'center' }}>
-                <Text style={{ color: colors.cyan, fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] }}>
-                  {`${Math.round(heroAiPct)}%`}
-                </Text>
-                <Text style={{ color: colors.textMuted ?? '#888', fontSize: 10, marginTop: 2 }}>AI%</Text>
-              </View>
-              <View style={{ alignItems: 'center' }}>
-                <Text style={{ color: colors.violet, fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] }}>
-                  {`${heroBrainlift.toFixed(1)}h`}
-                </Text>
-                <Text style={{ color: colors.textMuted ?? '#888', fontSize: 10, marginTop: 2 }}>BrainLift</Text>
-              </View>
-            </View>
-          </Animated.View>
+          <OverviewStickyBar
+            animatedStyle={panelStyle}
+            isActive={scrubWeekIndex !== null}
+            snapLabel={snapLabel}
+            heroEarnings={heroEarnings}
+            heroHours={heroHours}
+            heroAiPct={heroAiPct}
+            heroBrainlift={heroBrainlift}
+            weeklyLimit={weeklyLimit}
+          />
 
           {/* Insights — right after hero card (05-insights-ui, moved above charts) */}
           {insightChips.length > 0 && (
