@@ -12,7 +12,7 @@ Extracts the inline scrub snapshot panel (Animated.View with panelStyle) from ov
 
 | # | Spec | Status |
 |---|------|--------|
-| 01 | [sticky-bar](specs/01-sticky-bar/spec.md) | Draft |
+| 01 | [sticky-bar](specs/01-sticky-bar/spec.md) | Complete |
 
 ## Changelog
 
