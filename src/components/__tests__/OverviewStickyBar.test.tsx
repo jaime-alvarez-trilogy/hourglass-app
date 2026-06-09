@@ -1,21 +1,26 @@
 // Tests: OverviewStickyBar component — 01-sticky-bar
 //
-// FR1: Component file exists and exports OverviewStickyBar with correct props
-// FR2: Static visual structure (Animated.View, snapLabel, 4 metric columns, colors)
-// FR3: Pointer events control (isActive → pointerEvents)
-// FR4: Value formatting (earnings, hours, AI%, BrainLift)
-// FR5: overview.tsx integration (import, usage, panelStyle constraint)
+// FR1: Component file, exports (ScrubSnapshot, OverviewStickyBarProps, OverviewStickyBar)
+// FR2: Picker state — 4W/12W/24W toggle pills
+// FR3: Scrub state — week snapshot metrics with correct brand colors
+// FR4: Visibility animation — own SharedValues, withSpring, pointerEvents
+// FR5: overview.tsx integration — scroll tracking, floating placement, no panelStyle
 //
-// Strategy: Source-file static analysis throughout.
-// Reanimated animated styles cannot be exercised in jest-expo/node preset.
-// Static analysis matches the established pattern in this codebase
-// (see InsightChip.test.tsx, ApprovalUrgencyCard.test.tsx, useStaggeredEntry.test.ts).
-//
-// Tests will FAIL (red phase) until src/components/OverviewStickyBar.tsx is created
-// and overview.tsx is updated to use it.
+// Strategy: source-file static analysis + smoke renders, matching the codebase pattern
+// (DayPatternChart.test.tsx, WeeklyBarChart.test.tsx).
 
+import React from 'react';
+import renderer from 'react-test-renderer';
 import * as fs from 'fs';
 import * as path from 'path';
+
+// ─── Reanimated mock (required for any file importing react-native-reanimated) ─
+
+jest.mock('react-native-reanimated', () => {
+  const Reanimated = require('react-native-reanimated/mock');
+  Reanimated.default.call = jest.fn();
+  return Reanimated;
+});
 
 // ─── File paths ───────────────────────────────────────────────────────────────
 
@@ -23,241 +28,199 @@ const HOURGLASSWS_ROOT = path.resolve(__dirname, '../../..');
 const COMPONENT_FILE = path.join(HOURGLASSWS_ROOT, 'src', 'components', 'OverviewStickyBar.tsx');
 const OVERVIEW_FILE = path.join(HOURGLASSWS_ROOT, 'app', '(tabs)', 'overview.tsx');
 
-// ─── FR1: Component file exists and exports ───────────────────────────────────
+// ─── Fixture ──────────────────────────────────────────────────────────────────
+
+const FULL_SCRUB_SNAPSHOT = {
+  label: 'Week of Apr 14',
+  earnings: '$2,340',
+  hoursLabel: '38.5h',
+  hoursColor: '#10B981',
+  aiPct: '91%',
+  brainlift: '5.2h',
+};
+
+// ─── FR1: Component file and exports ─────────────────────────────────────────
 
 describe('FR1: OverviewStickyBar — file and exports', () => {
-  // SC1.1
   it('SC1.1: file exists at src/components/OverviewStickyBar.tsx', () => {
     expect(fs.existsSync(COMPONENT_FILE)).toBe(true);
   });
 
-  // SC1.2
   it('SC1.2: exports OverviewStickyBar as named export', () => {
     const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
     expect(src).toMatch(/export\s+function\s+OverviewStickyBar/);
   });
 
-  // SC1.3 — all 8 props present in props interface
-  it('SC1.3: props interface includes animatedStyle', () => {
+  it('SC1.3: exports ScrubSnapshot interface', () => {
     const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toMatch(/animatedStyle\s*:/);
+    expect(src).toMatch(/export\s+interface\s+ScrubSnapshot/);
   });
 
-  it('SC1.3: props interface includes isActive', () => {
+  it('SC1.4: exports OverviewStickyBarProps interface', () => {
     const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toMatch(/isActive\s*:/);
+    expect(src).toMatch(/export\s+interface\s+OverviewStickyBarProps/);
   });
 
-  it('SC1.3: props interface includes snapLabel', () => {
+  it('SC1.5: props include window, onWindowChange, scrubSnapshot, visible', () => {
     const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toMatch(/snapLabel\s*:/);
-  });
-
-  it('SC1.3: props interface includes heroEarnings', () => {
-    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toMatch(/heroEarnings\s*:/);
-  });
-
-  it('SC1.3: props interface includes heroHours', () => {
-    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toMatch(/heroHours\s*:/);
-  });
-
-  it('SC1.3: props interface includes heroAiPct', () => {
-    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toMatch(/heroAiPct\s*:/);
-  });
-
-  it('SC1.3: props interface includes heroBrainlift', () => {
-    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toMatch(/heroBrainlift\s*:/);
-  });
-
-  it('SC1.3: props interface includes weeklyLimit', () => {
-    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toMatch(/weeklyLimit\s*:/);
+    expect(src).toMatch(/window\s*:/);
+    expect(src).toMatch(/onWindowChange\s*:/);
+    expect(src).toMatch(/scrubSnapshot\s*:/);
+    expect(src).toMatch(/visible\s*:/);
   });
 });
 
-// ─── FR2: Static visual structure ────────────────────────────────────────────
+// ─── FR2: Picker state ────────────────────────────────────────────────────────
 
-describe('FR2: OverviewStickyBar — static visual structure', () => {
-  // SC2.1
-  it('SC2.1: root element is Animated.View receiving animatedStyle', () => {
+describe('FR2: OverviewStickyBar — picker state (4W/12W/24W toggle)', () => {
+  it('SC2.1: source renders window options 4, 12, 24', () => {
     const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    // Animated.View should appear before other JSX elements in the return
-    expect(src).toMatch(/Animated\.View/);
-    // animatedStyle is referenced in the component body
-    expect(src).toMatch(/animatedStyle/);
+    expect(src).toMatch(/\[4,\s*12,\s*24\]/);
   });
 
-  // SC2.2
-  it('SC2.2: renders snapLabel text', () => {
-    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toMatch(/\{snapLabel\}/);
-  });
-
-  // SC2.3 — four metric columns with value + label
-  it('SC2.3: renders Earnings metric column with label', () => {
-    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toContain('Earnings');
-  });
-
-  it('SC2.3: renders Hours metric column with label', () => {
-    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toContain('Hours');
-  });
-
-  it('SC2.3: renders AI% metric column with label', () => {
-    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toMatch(/AI%/);
-  });
-
-  it('SC2.3: renders BrainLift metric column with label', () => {
-    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toContain('BrainLift');
-  });
-
-  // SC2.4
-  it('SC2.4: earnings value text uses colors.gold', () => {
-    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toMatch(/colors\.gold/);
-  });
-
-  // SC2.5
-  it('SC2.5: AI% value text uses colors.cyan', () => {
-    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toMatch(/colors\.cyan/);
-  });
-
-  // SC2.6
-  it('SC2.6: BrainLift value text uses colors.violet', () => {
+  it('SC2.2: active pill text uses colors.violet', () => {
     const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
     expect(src).toMatch(/colors\.violet/);
   });
 
-  // SC2.7 — hours color via computeSnapshotHoursColor logic
-  it('SC2.7: hours color uses computeSnapshotHoursColor or equivalent threshold logic', () => {
+  it('SC2.3: active pill background uses colors.surface', () => {
     const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    // Either calls a named function or contains the threshold logic inline
-    const hasNamedFn = /computeSnapshotHoursColor/.test(src);
-    const hasThresholdLogic = /0\.85/.test(src) && /0\.60/.test(src);
-    expect(hasNamedFn || hasThresholdLogic).toBe(true);
+    expect(src).toMatch(/colors\.surface[^E]/); // surface not surfaceElevated
   });
 
-  // SC2.8
-  it('SC2.8: root Animated.View uses colors.surfaceElevated background', () => {
+  it('SC2.4: inactive pill text uses colors.textMuted', () => {
     const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toMatch(/colors\.surfaceElevated/);
+    expect(src).toMatch(/colors\.textMuted/);
+  });
+
+  it('SC2.5: track uses colors.border as background', () => {
+    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
+    expect(src).toMatch(/colors\.border/);
+  });
+
+  it('SC2.6: smoke — renders without crash (visible=true, scrubSnapshot=null)', () => {
+    const { OverviewStickyBar } = require('../OverviewStickyBar');
+    expect(() =>
+      renderer.create(
+        <OverviewStickyBar
+          window={4}
+          onWindowChange={jest.fn()}
+          scrubSnapshot={null}
+          visible={true}
+        />
+      )
+    ).not.toThrow();
   });
 });
 
-// ─── FR3: Pointer events control ─────────────────────────────────────────────
+// ─── FR3: Scrub state ─────────────────────────────────────────────────────────
 
-describe('FR3: OverviewStickyBar — pointer events', () => {
-  // SC3.1
-  it('SC3.1: pointerEvents is driven by isActive prop', () => {
+describe('FR3: OverviewStickyBar — scrub state (week snapshot metrics)', () => {
+  it('SC3.1: source uses colors.gold for earnings column', () => {
     const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    // isActive controls pointerEvents — either conditional expression or ternary
-    expect(src).toMatch(/isActive/);
+    expect(src).toMatch(/colors\.gold/);
+  });
+
+  it('SC3.2: source uses colors.cyan for AI% column', () => {
+    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
+    expect(src).toMatch(/colors\.cyan/);
+  });
+
+  it('SC3.3: source uses colors.violet for BrainLift column', () => {
+    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
+    expect(src).toMatch(/colors\.violet/);
+  });
+
+  it('SC3.4: source renders scrubSnapshot.label', () => {
+    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
+    expect(src).toMatch(/scrubSnapshot\.label/);
+  });
+
+  it('SC3.5: smoke — renders without crash (visible=true, scrubSnapshot=FULL_SCRUB_SNAPSHOT)', () => {
+    const { OverviewStickyBar } = require('../OverviewStickyBar');
+    expect(() =>
+      renderer.create(
+        <OverviewStickyBar
+          window={4}
+          onWindowChange={jest.fn()}
+          scrubSnapshot={FULL_SCRUB_SNAPSHOT}
+          visible={true}
+        />
+      )
+    ).not.toThrow();
+  });
+
+  it('SC3.6: smoke — renders without crash (visible=false, scrubSnapshot=null)', () => {
+    const { OverviewStickyBar } = require('../OverviewStickyBar');
+    expect(() =>
+      renderer.create(
+        <OverviewStickyBar
+          window={12}
+          onWindowChange={jest.fn()}
+          scrubSnapshot={null}
+          visible={false}
+        />
+      )
+    ).not.toThrow();
+  });
+});
+
+// ─── FR4: Visibility animation ────────────────────────────────────────────────
+
+describe('FR4: OverviewStickyBar — visibility animation', () => {
+  it('SC4.1: imports springSnappy from @/src/lib/reanimated-presets', () => {
+    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
+    expect(src).toMatch(/springSnappy/);
+    expect(src).toMatch(/reanimated-presets/);
+  });
+
+  it('SC4.2: source uses useSharedValue(0) for initial opacity', () => {
+    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
+    expect(src).toMatch(/useSharedValue\s*\(\s*0\s*\)/);
+  });
+
+  it('SC4.3: source uses withSpring for animation', () => {
+    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
+    expect(src).toMatch(/withSpring/);
+  });
+
+  it('SC4.4: source binds pointerEvents to visible prop', () => {
+    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
     expect(src).toMatch(/pointerEvents/);
-  });
-
-  it('SC3.1: pointerEvents uses "auto" for active state', () => {
-    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toMatch(/'auto'/);
-  });
-
-  it('SC3.1: pointerEvents uses "none" for inactive state', () => {
-    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toMatch(/'none'/);
-  });
-
-  it('SC3.1: isActive ternary drives pointerEvents value', () => {
-    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    // isActive ? 'auto' : 'none' or isActive ? "auto" : "none"
-    expect(src).toMatch(/isActive\s*\?\s*['"]auto['"]\s*:\s*['"]none['"]/);
-  });
-});
-
-// ─── FR4: Value formatting ────────────────────────────────────────────────────
-
-describe('FR4: OverviewStickyBar — value formatting', () => {
-  // SC4.1
-  it('SC4.1: earnings formatted with Math.round and toLocaleString', () => {
-    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toMatch(/Math\.round\s*\(\s*heroEarnings\s*\)/);
-    expect(src).toMatch(/\.toLocaleString\s*\(\s*\)/);
-  });
-
-  // SC4.2
-  it('SC4.2: hours formatted with toFixed(1) and h suffix', () => {
-    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toMatch(/heroHours\.toFixed\s*\(\s*1\s*\)/);
-    // String contains 'h' suffix after hours value
-    expect(src).toMatch(/heroHours\.toFixed\(\s*1\s*\)[`'"]\s*h|h[`'"]/);
-  });
-
-  // SC4.3
-  it('SC4.3: AI% formatted with Math.round and % suffix', () => {
-    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toMatch(/Math\.round\s*\(\s*heroAiPct\s*\)/);
-    expect(src).toMatch(/%/);
-  });
-
-  // SC4.4
-  it('SC4.4: BrainLift formatted with toFixed(1) and h suffix', () => {
-    const src = fs.readFileSync(COMPONENT_FILE, 'utf8');
-    expect(src).toMatch(/heroBrainlift\.toFixed\s*\(\s*1\s*\)/);
+    expect(src).toMatch(/visible/);
   });
 });
 
 // ─── FR5: overview.tsx integration ───────────────────────────────────────────
 
 describe('FR5: overview.tsx — OverviewStickyBar integration', () => {
-  // SC5.1
-  it('SC5.1: overview.tsx imports OverviewStickyBar from @/src/components/OverviewStickyBar', () => {
+  it('SC5.1: overview.tsx imports OverviewStickyBar', () => {
     const src = fs.readFileSync(OVERVIEW_FILE, 'utf8');
     expect(src).toMatch(/import.*OverviewStickyBar.*from.*['"]@\/src\/components\/OverviewStickyBar['"]/);
   });
 
-  // SC5.2
-  it('SC5.2: overview.tsx uses <OverviewStickyBar', () => {
+  it('SC5.2: overview.tsx adds onScroll to ScrollView (scroll tracking)', () => {
+    const src = fs.readFileSync(OVERVIEW_FILE, 'utf8');
+    expect(src).toMatch(/onScroll\s*=/);
+  });
+
+  it('SC5.3: overview.tsx contains heroCardBottomRef for threshold tracking', () => {
+    const src = fs.readFileSync(OVERVIEW_FILE, 'utf8');
+    expect(src).toMatch(/heroCardBottomRef/);
+  });
+
+  it('SC5.4: overview.tsx contains stickyBarVisible state', () => {
+    const src = fs.readFileSync(OVERVIEW_FILE, 'utf8');
+    expect(src).toMatch(/stickyBarVisible/);
+  });
+
+  it('SC5.5: overview.tsx does NOT contain panelStyle (removed)', () => {
+    const src = fs.readFileSync(OVERVIEW_FILE, 'utf8');
+    expect(src).not.toMatch(/panelStyle/);
+  });
+
+  it('SC5.6: overview.tsx renders <OverviewStickyBar', () => {
     const src = fs.readFileSync(OVERVIEW_FILE, 'utf8');
     expect(src).toMatch(/<OverviewStickyBar/);
-  });
-
-  // SC5.3 — critical: existing useStaggeredEntry.test.ts constraint
-  it('SC5.3: overview.tsx still contains panelStyle (useAnimatedStyle definition)', () => {
-    const src = fs.readFileSync(OVERVIEW_FILE, 'utf8');
-    expect(src).toMatch(/panelStyle/);
-  });
-
-  // SC5.4
-  it('SC5.4: overview.tsx still declares panelOpacity shared value', () => {
-    const src = fs.readFileSync(OVERVIEW_FILE, 'utf8');
-    expect(src).toMatch(/panelOpacity/);
-  });
-
-  it('SC5.4: overview.tsx still declares panelTranslateY shared value', () => {
-    const src = fs.readFileSync(OVERVIEW_FILE, 'utf8');
-    expect(src).toMatch(/panelTranslateY/);
-  });
-
-  it('SC5.4: overview.tsx still declares panelHeight shared value', () => {
-    const src = fs.readFileSync(OVERVIEW_FILE, 'utf8');
-    expect(src).toMatch(/panelHeight/);
-  });
-
-  it('SC5.4: overview.tsx still declares panelMarginBottom shared value', () => {
-    const src = fs.readFileSync(OVERVIEW_FILE, 'utf8');
-    expect(src).toMatch(/panelMarginBottom/);
-  });
-
-  // SC5.5 — explicitly mirrors the existing useStaggeredEntry.test.ts assertion
-  it('SC5.5: overview.tsx panelStyle check mirrors existing useStaggeredEntry.test.ts assertion', () => {
-    const source = fs.readFileSync(OVERVIEW_FILE, 'utf8');
-    // This assertion is identical to the one in useStaggeredEntry.test.ts line ~432
-    expect(source).toMatch(/panelStyle/);
   });
 });

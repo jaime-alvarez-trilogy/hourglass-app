@@ -23,14 +23,13 @@ import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { useConfig } from '@/src/hooks/useConfig';
 import { useOverviewData } from '@/src/hooks/useOverviewData';
 import { useFocusKey } from '@/src/hooks/useFocusKey';
 import { useEarningsHistory } from '@/src/hooks/useEarningsHistory';
 import { colors } from '@/src/lib/colors';
-import { springPremium, springBouncy, springSnappy } from '@/src/lib/reanimated-presets';
 import { useStaggeredEntry } from '@/src/hooks/useStaggeredEntry';
 import AmbientBackground, { getAmbientColor } from '@/src/components/AmbientBackground';
 import AnimatedMeshBackground from '@/src/components/AnimatedMeshBackground';
@@ -237,9 +236,15 @@ export default function OverviewScreen() {
   const [scrubWeekIndex, setScrubWeekIndex] = useState<number | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const lastHapticIndex = useRef<number | null>(null);
+  const scrolledPastHeroRef = useRef<boolean>(false);
+  const scrubbingRef = useRef<boolean>(false);
+  const heroCardBottomRef = useRef<number>(0);
+  const [stickyBarVisible, setStickyBarVisible] = useState<boolean>(false);
 
   const handleScrubChange = useCallback((index: number | null) => {
     setScrubWeekIndex(index);
+    scrubbingRef.current = index !== null;
+    setStickyBarVisible(scrolledPastHeroRef.current || index !== null);
     // Lock scroll while scrubbing so vertical drift doesn't pan the list
     scrollRef.current?.setNativeProps({ scrollEnabled: index === null });
     // Haptic tick when crossing to a new index
@@ -256,6 +261,14 @@ export default function OverviewScreen() {
     setScrubWeekIndex(null);
     setWindow(newWindow);
   };
+
+  const handleScroll = useCallback((e: { nativeEvent: { contentOffset: { y: number } } }) => {
+    const past = e.nativeEvent.contentOffset.y > heroCardBottomRef.current;
+    if (past !== scrolledPastHeroRef.current) {
+      scrolledPastHeroRef.current = past;
+      setStickyBarVisible(past || scrubbingRef.current);
+    }
+  }, []);
 
   // ── Data ───────────────────────────────────────────────────────────────────
   const { data: overviewData } = useOverviewData(window);
@@ -308,36 +321,6 @@ export default function OverviewScreen() {
     [snapshots, window],
   );
 
-  // ── Snapshot panel animation ───────────────────────────────────────────────
-  // Height animates 0 → SNAPSHOT_PANEL_HEIGHT so the panel takes no space at rest —
-  // charts sit flush below the hero card and the panel slides in during scrub.
-  const SNAPSHOT_PANEL_HEIGHT = 64;
-  const panelOpacity = useSharedValue(0);
-  const panelTranslateY = useSharedValue(8);
-  const panelHeight = useSharedValue(0);
-  const panelMarginBottom = useSharedValue(0);
-
-  useEffect(() => {
-    if (scrubWeekIndex !== null) {
-      panelOpacity.value = withSpring(1, springPremium);
-      panelTranslateY.value = withSpring(0, springPremium);
-      panelHeight.value = withSpring(SNAPSHOT_PANEL_HEIGHT, springBouncy);
-      panelMarginBottom.value = withSpring(4, springBouncy);
-    } else {
-      panelOpacity.value = withSpring(0, springPremium);
-      panelTranslateY.value = withSpring(8, springPremium);
-      panelHeight.value = withSpring(0, springSnappy);
-      panelMarginBottom.value = withSpring(0, springSnappy);
-    }
-  }, [scrubWeekIndex]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const panelStyle = useAnimatedStyle(() => ({
-    opacity: panelOpacity.value,
-    transform: [{ translateY: panelTranslateY.value }],
-    height: panelHeight.value,
-    marginBottom: panelMarginBottom.value,
-    overflow: 'hidden',
-  }));
 
   // ── Hero value helpers ─────────────────────────────────────────────────────
   const lastIdx = overviewData.earnings.length - 1;
@@ -363,6 +346,15 @@ export default function OverviewScreen() {
     ? `Week of ${overviewData.weekLabels[scrubWeekIndex] ?? ''}`
     : '';
 
+  const stickyBarScrubData = scrubWeekIndex !== null ? {
+    label: snapLabel,
+    earnings: `$${Math.round(heroEarnings).toLocaleString()}`,
+    hoursLabel: `${heroHours.toFixed(1)}h`,
+    hoursColor: computeSnapshotHoursColor(heroHours, weeklyLimit),
+    aiPct: `${Math.round(heroAiPct)}%`,
+    brainlift: `${heroBrainlift.toFixed(1)}h`,
+  } : null;
+
   return (
     <FadeInScreen>
       <SafeAreaView edges={['top']} className="flex-1 bg-background">
@@ -379,6 +371,8 @@ export default function OverviewScreen() {
           ref={scrollRef}
           className="flex-1"
           contentContainerStyle={{ padding: 16, paddingTop: 8, paddingBottom: 100, gap: 12 }}
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
         >
           {/* ── Approval urgency card (01-approval-urgency-card) ──────────── */}
           {isManager && approvalItems.length > 0 && (
@@ -389,32 +383,22 @@ export default function OverviewScreen() {
           )}
 
           {/* Hero card — period totals + window toggle (replaces standalone header) */}
-          <OverviewHeroCard
-            totalEarnings={totalEarnings}
-            totalHours={totalHours}
-            overtimeHours={overtimeHours}
-            window={window}
-            onWindowChange={handleWindowChange}
-            hoursHitRate={hoursHitRate}
-          />
+          <View onLayout={e => { heroCardBottomRef.current = e.nativeEvent.layout.y + e.nativeEvent.layout.height; }}>
+            <OverviewHeroCard
+              totalEarnings={totalEarnings}
+              totalHours={totalHours}
+              overtimeHours={overtimeHours}
+              window={window}
+              onWindowChange={handleWindowChange}
+              hoursHitRate={hoursHitRate}
+            />
+          </View>
 
           {/* 02-earnings-pace-projection: EWMA annual projection card */}
           <EarningsPaceCard
             earnings={overviewData.earnings}
             targetWeeklyEarnings={hourlyRate * weeklyLimit}
             window={window}
-          />
-
-          {/* Week snapshot panel — always rendered, animated opacity/translateY */}
-          <OverviewStickyBar
-            animatedStyle={panelStyle}
-            isActive={scrubWeekIndex !== null}
-            snapLabel={snapLabel}
-            heroEarnings={heroEarnings}
-            heroHours={heroHours}
-            heroAiPct={heroAiPct}
-            heroBrainlift={heroBrainlift}
-            weeklyLimit={weeklyLimit}
           />
 
           {/* Insights — right after hero card (05-insights-ui, moved above charts) */}
@@ -536,6 +520,15 @@ export default function OverviewScreen() {
             </Card>
           </Animated.View>
         </ScrollView>
+
+        {/* Floating sticky bar — outside ScrollView, overlays chart content */}
+        <OverviewStickyBar
+          window={window}
+          onWindowChange={handleWindowChange}
+          scrubSnapshot={stickyBarScrubData}
+          visible={stickyBarVisible}
+          style={{ position: 'absolute', top: 8, left: 16, right: 16, zIndex: 10 }}
+        />
       </SafeAreaView>
     </FadeInScreen>
   );

@@ -427,11 +427,9 @@ describe('FR5: Overview screen — useStaggeredEntry integration', () => {
     expect(calls).toBe(4);
   });
 
-  it('scrub snapshot panel Animated.View does NOT use getEntryStyle', () => {
+  it('overview.tsx renders OverviewStickyBar for floating scrub display', () => {
     const source = fs.readFileSync(OVERVIEW_FILE, 'utf8');
-    // The snapshot panel is always rendered with its own panelStyle animation
-    // It must still use panelStyle (not replaced by getEntryStyle)
-    expect(source).toMatch(/panelStyle/);
+    expect(source).toMatch(/OverviewStickyBar/);
   });
 
   it('4W/12W/24W toggle header row is NOT wrapped with getEntryStyle', () => {
