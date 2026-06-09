@@ -22,7 +22,7 @@ import { View, Text, ScrollView } from 'react-native';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { useConfig } from '@/src/hooks/useConfig';
@@ -214,6 +214,7 @@ function ChartSection({
 export default function OverviewScreen() {
   const router = useRouter();
   const chartKey = useFocusKey();
+  const { top: safeTop } = useSafeAreaInsets();
   const { config } = useConfig();
 
   // Approval urgency card (01-approval-urgency-card)
@@ -527,7 +528,7 @@ export default function OverviewScreen() {
           onWindowChange={handleWindowChange}
           scrubSnapshot={stickyBarScrubData}
           visible={stickyBarVisible}
-          style={{ position: 'absolute', top: 8, left: 16, right: 16, zIndex: 10 }}
+          style={{ position: 'absolute', top: safeTop + 8, left: 16, right: 16, zIndex: 10 }}
         />
       </SafeAreaView>
     </FadeInScreen>
