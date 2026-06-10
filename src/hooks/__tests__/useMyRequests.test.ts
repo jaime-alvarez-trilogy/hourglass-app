@@ -114,6 +114,21 @@ describe('useMyRequests — static analysis of source contract', () => {
 // we test it by driving the mocks and calling the exported helper directly.
 
 import { buildMyRequestsQueryFn } from '../../hooks/useMyRequests';
+import type { WorkDiarySlot } from '../../types/api';
+
+/** Minimal WorkDiarySlot for test mocks — only fields relevant to useMyRequests logic. */
+function makeSlot(overrides: Pick<WorkDiarySlot, 'autoTracker' | 'status' | 'memo' | 'tags' | 'actions'>): WorkDiarySlot {
+  return {
+    date: '2026-06-09T12:00:00Z',
+    time: '12:00:00',
+    activityLevel: 0,
+    intensityScore: 0,
+    productivityCategory: 'UNCATEGORIZED',
+    activities: [],
+    secondBrainDeepDive: null,
+    ...overrides,
+  };
+}
 
 describe('useMyRequests — buildMyRequestsQueryFn (query logic)', () => {
   beforeEach(() => {
@@ -145,10 +160,10 @@ describe('useMyRequests — buildMyRequestsQueryFn (query logic)', () => {
       // passing a fixed "today" date to buildMyRequestsQueryFn
       mockFetchWorkDiary.mockImplementation(async (assignmentId, date) => {
         if (date === '2026-03-09') { // Monday
-          return [{ tags: [], autoTracker: false, status: 'PENDING', memo: 'Monday work', actions: [] }];
+          return [makeSlot({ tags: [], autoTracker: false, status: 'PENDING', memo: 'Monday work', actions: [] })];
         }
         if (date === '2026-03-10') { // Tuesday
-          return [{ tags: [], autoTracker: false, status: 'APPROVED', memo: 'Tuesday work', actions: [] }];
+          return [makeSlot({ tags: [], autoTracker: false, status: 'APPROVED', memo: 'Tuesday work', actions: [] })];
         }
         return [];
       });
@@ -233,7 +248,7 @@ describe('useMyRequests — buildMyRequestsQueryFn (query logic)', () => {
         }
         // Only return a manual entry on Tuesday; all other days return []
         if (date === '2026-03-10') {
-          return [{ tags: [], autoTracker: false, status: 'APPROVED', memo: 'Tuesday task', actions: [] }];
+          return [makeSlot({ tags: [], autoTracker: false, status: 'APPROVED', memo: 'Tuesday task', actions: [] })];
         }
         return [];
       });
@@ -255,7 +270,7 @@ describe('useMyRequests — buildMyRequestsQueryFn (query logic)', () => {
       mockLoadConfig.mockResolvedValue(CONFIG as any);
       mockLoadCredentials.mockResolvedValue(CREDENTIALS);
       mockFetchWorkDiary.mockResolvedValue([
-        { tags: [], autoTracker: true, status: 'APPROVED', memo: '', actions: [] },
+        makeSlot({ tags: [], autoTracker: true, status: 'APPROVED', memo: '', actions: [] }),
       ]);
 
       const queryFn = buildMyRequestsQueryFn('2026-03-11');
@@ -358,7 +373,7 @@ describe('useMyRequests — 02-contributor-history: 3-week date range', () => {
       mockFetchWorkDiary.mockImplementation(async (_assignmentId, date) => {
         if (date === '2025-03-31') {
           return [
-            { tags: [], autoTracker: false, status: 'APPROVED', memo: 'Two weeks ago task', actions: [] },
+            makeSlot({ tags: [], autoTracker: false, status: 'APPROVED', memo: 'Two weeks ago task', actions: [] }),
           ];
         }
         return [];
@@ -380,7 +395,7 @@ describe('useMyRequests — 02-contributor-history: 3-week date range', () => {
       mockFetchWorkDiary.mockImplementation(async (_assignmentId, date) => {
         if (date === '2025-04-01') {
           return [
-            { tags: [], autoTracker: false, status: 'REJECTED', memo: 'Expired request', actions: [] },
+            makeSlot({ tags: [], autoTracker: false, status: 'REJECTED', memo: 'Expired request', actions: [] }),
           ];
         }
         return [];
@@ -402,7 +417,7 @@ describe('useMyRequests — 02-contributor-history: 3-week date range', () => {
       mockFetchWorkDiary.mockImplementation(async (_assignmentId, date) => {
         if (date === '2025-04-07') {
           return [
-            { tags: [], autoTracker: false, status: 'PENDING', memo: 'Last week pending', actions: [] },
+            makeSlot({ tags: [], autoTracker: false, status: 'PENDING', memo: 'Last week pending', actions: [] }),
           ];
         }
         return [];
@@ -424,13 +439,13 @@ describe('useMyRequests — 02-contributor-history: 3-week date range', () => {
 
       mockFetchWorkDiary.mockImplementation(async (_assignmentId, date) => {
         if (date === '2025-04-14') {
-          return [{ tags: [], autoTracker: false, status: 'PENDING', memo: 'This week', actions: [] }];
+          return [makeSlot({ tags: [], autoTracker: false, status: 'PENDING', memo: 'This week', actions: [] })];
         }
         if (date === '2025-04-07') {
-          return [{ tags: [], autoTracker: false, status: 'APPROVED', memo: 'Last week', actions: [] }];
+          return [makeSlot({ tags: [], autoTracker: false, status: 'APPROVED', memo: 'Last week', actions: [] })];
         }
         if (date === '2025-03-31') {
-          return [{ tags: [], autoTracker: false, status: 'REJECTED', memo: 'Two weeks ago', actions: [] }];
+          return [makeSlot({ tags: [], autoTracker: false, status: 'REJECTED', memo: 'Two weeks ago', actions: [] })];
         }
         return [];
       });
@@ -482,7 +497,7 @@ describe('useMyRequests — 02-contributor-history: 3-week date range', () => {
         if (date < '2025-04-14') {
           throw new Error('Network error for old dates');
         }
-        return [{ tags: [], autoTracker: false, status: 'PENDING', memo: 'Today entry', actions: [] }];
+        return [makeSlot({ tags: [], autoTracker: false, status: 'PENDING', memo: 'Today entry', actions: [] })];
       });
 
       const queryFn = buildMyRequestsQueryFn('2025-04-14');
