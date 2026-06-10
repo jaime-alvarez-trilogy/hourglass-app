@@ -22,6 +22,13 @@ export interface WeeklySnapshot {
    * Consumers treat missing as [0,0,0,0,0,0,0].
    */
   dailyHours?: number[];
+  /**
+   * Slot count per local hour of day (all Mon–Sun days combined).
+   * Length 24, index = local device hour (0-23), value = total slots that hour across the week.
+   * Absent on snapshots from weeks processed before this field was added.
+   * Consumers treat missing as all-zeros; inferWorkSchedule returns null for < 4 valid weeks.
+   */
+  hourlySlots?: number[];
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -53,13 +60,17 @@ export function mergeWeeklySnapshot(
       i === idx ? { ...s, ...partial } : s,
     );
   } else {
-    // Append new entry with defaults for missing fields
+    // Append new entry with defaults for missing required fields; optional fields
+    // (overtime, dailyHours, hourlySlots) are included only when present in partial.
     const entry: WeeklySnapshot = {
       weekStart: partial.weekStart,
       hours: partial.hours ?? 0,
       earnings: partial.earnings ?? 0,
       aiPct: partial.aiPct ?? 0,
       brainliftHours: partial.brainliftHours ?? 0,
+      ...(partial.overtime !== undefined && { overtime: partial.overtime }),
+      ...(partial.dailyHours !== undefined && { dailyHours: partial.dailyHours }),
+      ...(partial.hourlySlots !== undefined && { hourlySlots: partial.hourlySlots }),
     };
     updated = [...history, entry];
   }
