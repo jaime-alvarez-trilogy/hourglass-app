@@ -291,11 +291,35 @@ Earnings are computed as `displayedHours × hourlyRate`, **not** `amount / hours
 **Query params:**
 - `assignmentId` — **assignment.id** (e.g. 79996). NOT candidate.id, NOT token userId.
 - `date` — single date in **local** timezone (no UTC conversion). Returns one day at a time.
+- `timeZoneId` (optional) — numeric timezone ID (e.g. `408` for America/Chicago). When omitted, `slot.date` and `slot.time` are returned in **UTC**. When provided, both are local to that timezone. Most callers omit this.
 
 **Response shape** — flat array, one element per slot (~6/hour, ~31/working day):
 
 ```typescript
 {
+  // Scheduling fields (confirmed 2026-06-09 from live prod response)
+  date: string;              // ISO 8601 + tz offset. Without timeZoneId: UTC, e.g. "2026-06-09T12:50:00Z"
+  time: string;              // "HH:MM:SS". Without timeZoneId: UTC. Use slot.date for hour extraction.
+  // Hour extraction: new Date(slot.date).getHours() → device-local hour (0-23), regardless of timeZoneId
+
+  // Activity fields (confirmed 2026-06-09)
+  activityLevel: number;     // 1-100 — keyboard/mouse activity intensity
+  intensityScore: number;    // 1-100 — weighted productivity intensity
+  productivityCategory: "PRODUCTIVE" | "COMMUNICATION" | "UNCATEGORIZED";
+  activities: string[];      // Confirmed values: "AI", "PURE_AI", "Chat", "Meeting", "Office",
+                             //   "Development", "Uncategorized"
+
+  // BrainLift (second_brain slots only; null on all others)
+  secondBrainDeepDive: {
+    probability: string;                      // Float-as-string, e.g. "84.4"
+    ai_tool_actively_present: number;         // 0-100
+    deep_ai_research_and_synthesis: number;   // 0-100
+    building_custom_ai_tools: number;         // 0-100
+    documenting_ai_system_or_prompts: number; // 0-100
+    routine_operational_work: number;         // 0-100
+  } | null;
+
+  // Existing fields
   tags: string[];                    // ["ai_usage"], ["second_brain"], ["not_second_brain"], [], or combinations
   autoTracker: boolean;              // true = auto-tracker, false = manual entry
   status: "PENDING" | "APPROVED" | "REJECTED";   // For manual entries
@@ -312,6 +336,45 @@ Earnings are computed as `displayedHours × hourlyRate`, **not** `amount / hours
     activity: string;                // "AI" | "PURE_AI" | "OTHER"
   }>;
   type?: "WEB" | "MOBILE";           // Submission source for manual entries
+}
+```
+
+**Example — productive AI slot (no BrainLift):**
+```json
+{
+  "date": "2026-06-09T06:50:00-06:00",
+  "time": "06:50:00",
+  "activityLevel": 100,
+  "intensityScore": 100,
+  "productivityCategory": "PRODUCTIVE",
+  "activities": ["AI", "PURE_AI"],
+  "tags": ["ai_usage"],
+  "autoTracker": true,
+  "status": "APPROVED",
+  "secondBrainDeepDive": null
+}
+```
+
+**Example — BrainLift slot:**
+```json
+{
+  "date": "2026-06-09T12:20:00-06:00",
+  "time": "12:20:00",
+  "activityLevel": 90,
+  "intensityScore": 85,
+  "productivityCategory": "PRODUCTIVE",
+  "activities": ["AI"],
+  "tags": ["second_brain"],
+  "autoTracker": true,
+  "status": "APPROVED",
+  "secondBrainDeepDive": {
+    "probability": "84.4",
+    "ai_tool_actively_present": 90,
+    "deep_ai_research_and_synthesis": 85,
+    "building_custom_ai_tools": 60,
+    "documenting_ai_system_or_prompts": 45,
+    "routine_operational_work": 10
+  }
 }
 ```
 
