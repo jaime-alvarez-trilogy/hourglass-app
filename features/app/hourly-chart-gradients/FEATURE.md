@@ -31,4 +31,7 @@ The hourly histogram bars currently use plain `View` with `backgroundColor` (a f
 
 ## Changelog
 
-- `01-skia-gradient-bars` — pending
+### 01-skia-gradient-bars
+- **Status**: Complete
+- **Date**: 2026-06-10
+- **Commits**: `test(FR1-FR3)`, `feat(FR1-FR2)`, `fix(01-skia-gradient-bars)` ×2 (hooks-after-return + geometry guards; strengthened import/animation assertions)
