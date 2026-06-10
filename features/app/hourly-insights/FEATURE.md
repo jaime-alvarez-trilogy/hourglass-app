@@ -84,3 +84,5 @@ Visual language follows DayPatternChart + InsightChip conventions:
 | Date | Spec | Description |
 |---|---|---|
 | 2026-06-10 | — | Feature created. Architecture designed after user confirmed: all three directions (focus quality + AI timing + histogram) surfaced as dedicated Patterns card on Overview tab below DayPatternChart. |
+| 2026-06-10 | [01-enriched-hourly-aggregation](specs/01-enriched-hourly-aggregation/spec.md) | Complete: spec + tests + implementation. `WeeklySnapshot` extended with 3 new hourly fields; `computeHourlyEnrichment` fused helper; backfill guard upgraded; 4544 tests pass. |
+| 2026-06-10 | [02-hourly-pattern-insights](specs/02-hourly-pattern-insights/spec.md) | Complete. `computeHourlyProfile`, `inferFocusWindow`, `inferAIHotZone`, `formatHour` pure fns in `src/lib/hourlyInsights.ts` + `useHourlyInsights` hook. 49 tests passing. |
