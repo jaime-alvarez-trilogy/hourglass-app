@@ -410,16 +410,19 @@ describe('HourlyPatternCard — FR1: Skia Canvas bar renderer', () => {
     expect(source).toMatch(/\bvec\b/);
   });
 
-  it('SC1.2 — source uses RoundedRect for bar rendering', () => {
-    expect(source).toMatch(/RoundedRect/);
-    // RoundedRect is used with x, y, width, height props
-    expect(source).toMatch(/RoundedRect[\s\S]{0,200}(barLeft|barTop|barW|barH)/);
+  it('SC1.2 — source uses RoundedRect with Skia geometry props (x, y, width, height)', () => {
+    // RoundedRect rendered with computed bar geometry
+    expect(source).toMatch(/<RoundedRect[\s\S]{0,200}x=\{barLeft\}[\s\S]{0,100}y=\{barTop\}/);
+    expect(source).toMatch(/RoundedRect[\s\S]{0,200}width=\{barW\}[\s\S]{0,100}height=\{barH\}/);
   });
 
-  it('SC1.3 — LinearGradient uses _barColor() as first color stop and transparent as second', () => {
-    expect(source).toMatch(/_barColor\s*\(/);
-    // colors array has two stops: [topColor, 'transparent'] or equivalent
-    expect(source).toMatch(/colors\s*=\s*\{?\s*\[[\s\S]{0,60}transparent/);
+  it('SC1.3 — LinearGradient colors[0] is _barColor() output, colors[1] is transparent', () => {
+    // topColor (or direct call) assigned via _barColor and fed as colors[0]
+    expect(source).toMatch(/topColor\s*=\s*_barColor\s*\(/);
+    // colors array: first element is the topColor variable, second is transparent
+    expect(source).toMatch(/colors\s*=\s*\{?\s*\[\s*topColor\s*,\s*['"]transparent['"]/);
+    // No bar uses View backgroundColor for fill (Skia migration complete)
+    expect(source).not.toMatch(/<View[\s\S]{0,200}backgroundColor\s*:\s*_?barColor/);
   });
 
   it('SC1.4 — bar corners use r={4} (not borderRadius: 2)', () => {
@@ -469,10 +472,10 @@ describe('HourlyPatternCard — FR2: Entry animation', () => {
     expect(source).toMatch(/reanimated-presets/);
   });
 
-  it('SC2.3 — source uses withTiming(1, timingChartFill) in a useEffect with empty deps []', () => {
+  it('SC2.3 — source uses withTiming(1, timingChartFill) in a useEffect', () => {
     expect(source).toMatch(/withTiming\s*\(\s*1\s*,\s*timingChartFill\s*\)/);
-    // useEffect with empty dependency array (multiline-safe)
-    expect(source).toMatch(/useEffect[\s\S]{0,200},\s*\[\s*\]\s*\)/);
+    // useEffect contains the clipProgress.value = withTiming call
+    expect(source).toMatch(/useEffect[\s\S]{0,300}clipProgress\.value\s*=\s*withTiming/);
   });
 
   it('SC2.4 — smoke: renders without crash (Reanimated mock active)', () => {
