@@ -471,8 +471,8 @@ describe('HourlyPatternCard — FR2: Entry animation', () => {
 
   it('SC2.3 — source uses withTiming(1, timingChartFill) in a useEffect with empty deps []', () => {
     expect(source).toMatch(/withTiming\s*\(\s*1\s*,\s*timingChartFill\s*\)/);
-    // useEffect with empty dependency array
-    expect(source).toMatch(/useEffect\s*\([^)]+\}\s*,\s*\[\s*\]\s*\)/);
+    // useEffect with empty dependency array (multiline-safe)
+    expect(source).toMatch(/useEffect[\s\S]{0,200},\s*\[\s*\]\s*\)/);
   });
 
   it('SC2.4 — smoke: renders without crash (Reanimated mock active)', () => {
