@@ -51,3 +51,4 @@ Follows the Smart Insights design system:
 | Date | Spec | Description |
 |---|---|---|
 | 2026-06-09 | — | Feature created. API confirmed: `slot.date` gives local hour via `new Date(slot.date).getHours()`. Live prod response validated all slot fields. |
+| 2026-06-10 | [01-hourly-data-layer](specs/01-hourly-data-layer/spec.md) | Spec created: extend `WorkDiarySlot` type, add `hourlySlots[24]` to `WeeklySnapshot`, compute in backfill hook, update API docs. |
