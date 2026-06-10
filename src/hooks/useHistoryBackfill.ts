@@ -77,6 +77,20 @@ function computeDailyHours(
   return weekDates(mondayStr).map(date => (slotsData[date]?.length ?? 0) * 10 / 60);
 }
 
+/** Returns 24-element slot count array indexed by device-local hour (0-23).
+ *  Accumulates counts across all days in slotsData. Uses slot.date parsed by
+ *  new Date().getHours() which gives local time regardless of API timezone params. */
+export function computeHourlySlots(slotsData: Record<string, WorkDiarySlot[]>): number[] {
+  const counts = new Array<number>(24).fill(0);
+  for (const slots of Object.values(slotsData)) {
+    for (const slot of slots) {
+      const hour = new Date(slot.date).getHours();
+      if (hour >= 0 && hour < 24) counts[hour]++;
+    }
+  }
+  return counts;
+}
+
 /** Computes AI% midpoint and BrainLift hours from a map of per-day TagData. */
 function computeWeekAI(dayData: Record<string, TagData>): { aiPct: number; brainliftHours: number } {
   let totalSlots = 0, aiUsage = 0, secondBrain = 0, noTags = 0;
@@ -160,7 +174,8 @@ async function runBackfill(
     if (Object.keys(dayData).length > 0) {
       const { aiPct, brainliftHours } = computeWeekAI(dayData);
       const dailyHours = computeDailyHours(monday, slotsData);
-      updated = mergeWeeklySnapshot(updated, { weekStart: monday, aiPct, brainliftHours, dailyHours });
+      const hourlySlots = computeHourlySlots(slotsData);
+      updated = mergeWeeklySnapshot(updated, { weekStart: monday, aiPct, brainliftHours, dailyHours, hourlySlots });
       // Save + notify after each week so useWeeklyHistory re-reads incrementally.
       // This drives the progressive chart animation — each write triggers a re-read
       // which grows data.length by 1, re-triggering TrendSparkline's clip reveal.
