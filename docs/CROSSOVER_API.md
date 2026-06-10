@@ -340,6 +340,7 @@ Earnings are computed as `displayedHours × hourlyRate`, **not** `amount / hours
 ```
 
 **Example — productive AI slot (no BrainLift):**
+*(captured with `timeZoneId=408`; without it, `date` is UTC: `"2026-06-09T12:50:00Z"`)*
 ```json
 {
   "date": "2026-06-09T06:50:00-06:00",
@@ -356,6 +357,7 @@ Earnings are computed as `displayedHours × hourlyRate`, **not** `amount / hours
 ```
 
 **Example — BrainLift slot:**
+*(captured with `timeZoneId=408`)*
 ```json
 {
   "date": "2026-06-09T12:20:00-06:00",

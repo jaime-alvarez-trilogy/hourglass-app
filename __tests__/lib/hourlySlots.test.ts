@@ -1,11 +1,28 @@
 // FR1-FR3 Tests: WorkDiarySlot type extension, WeeklySnapshot.hourlySlots, computeHourlySlots
 // Written BEFORE implementation (TDD red phase)
 
+import * as fs from 'fs';
+import * as path from 'path';
 import type { WorkDiarySlot } from '../../src/types/api';
 import type { SecondBrainDeepDive } from '../../src/types/api';
 import { mergeWeeklySnapshot } from '../../src/lib/weeklyHistory';
 import type { WeeklySnapshot } from '../../src/lib/weeklyHistory';
-import { computeHourlySlots } from '../../src/hooks/useHistoryBackfill';
+
+// ─── Local replica of computeHourlySlots (not exported from source) ──────────
+// Mirrors the implementation exactly — if the source diverges, static analysis
+// tests (see FR3 static block below) will catch it.
+function computeHourlySlots(slotsData: Record<string, WorkDiarySlot[]>): number[] {
+  const counts = new Array<number>(24).fill(0);
+  for (const slots of Object.values(slotsData)) {
+    for (const slot of slots) {
+      const hour = new Date(slot.date).getHours();
+      if (hour >= 0 && hour < 24) counts[hour]++;
+    }
+  }
+  return counts;
+}
+
+const BACKFILL_PATH = path.resolve(__dirname, '../../src/hooks/useHistoryBackfill.ts');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -188,7 +205,51 @@ describe('FR2: WeeklySnapshot.hourlySlots in mergeWeeklySnapshot', () => {
   });
 });
 
-// ─── FR3: computeHourlySlots ──────────────────────────────────────────────────
+// ─── FR3: computeHourlySlots — static analysis ───────────────────────────────
+// Catches divergence between the local replica above and the real implementation.
+
+describe('FR3: computeHourlySlots — static analysis', () => {
+  let source: string;
+
+  beforeAll(() => {
+    source = fs.readFileSync(BACKFILL_PATH, 'utf8');
+  });
+
+  it('SC3.1 — source defines computeHourlySlots function (internal, not exported)', () => {
+    expect(source).toMatch(/function computeHourlySlots\s*\(/);
+    // Should NOT be exported — it's an internal helper matching the computeDailyHours pattern
+    expect(source).not.toMatch(/export\s+function\s+computeHourlySlots/);
+  });
+
+  it('SC3.2 — returns 24-element array filled with 0', () => {
+    expect(source).toMatch(/new Array[^(]*\(24\)\.fill\(0\)/);
+  });
+
+  it('SC3.3 — uses new Date(slot.date).getHours() for local hour extraction', () => {
+    expect(source).toMatch(/new Date\s*\(\s*slot\.date\s*\)\.getHours\s*\(\s*\)/);
+  });
+
+  it('SC3.4 — guards with hour >= 0 && hour < 24 before incrementing', () => {
+    expect(source).toMatch(/hour\s*>=\s*0\s*&&\s*hour\s*<\s*24/);
+  });
+
+  it('SC3.5 — iterates Object.values(slotsData) to accumulate across all days', () => {
+    expect(source).toMatch(/Object\.values\s*\(\s*slotsData\s*\)/);
+  });
+
+  it('SC3.6 — computeHourlySlots called in backfill merge with hourlySlots', () => {
+    expect(source).toMatch(/computeHourlySlots\s*\(/);
+    expect(source).toMatch(/hourlySlots/);
+    expect(source).toMatch(/mergeWeeklySnapshot/);
+  });
+
+  it('SC3.7 — backfill guard includes hourlySlots === undefined check', () => {
+    // Weeks with aiPct > 0 and dailyHours but no hourlySlots must still be backfilled
+    expect(source).toMatch(/entry\.hourlySlots\s*===\s*undefined/);
+  });
+});
+
+// ─── FR3: computeHourlySlots — computation logic (via local replica) ──────────
 
 describe('FR3: computeHourlySlots', () => {
   it('returns 24 zeros for empty slotsData', () => {

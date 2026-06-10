@@ -10,6 +10,7 @@ export interface WorkDiaryEvent {
 
 // FR1 (01-hourly-data-layer): BrainLift probability breakdown attached to second_brain slots.
 // Null on all other slots. probability is a float-as-string (e.g. "84.4").
+// Non-exhaustive: API returns additional scoring dimensions not captured here.
 export interface SecondBrainDeepDive {
   probability: string;                      // ← API: float-as-string, e.g. "84.4"
   ai_tool_actively_present: number;         // ← API: 0-100

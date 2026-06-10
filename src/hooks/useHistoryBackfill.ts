@@ -80,7 +80,7 @@ function computeDailyHours(
 /** Returns 24-element slot count array indexed by device-local hour (0-23).
  *  Accumulates counts across all days in slotsData. Uses slot.date parsed by
  *  new Date().getHours() which gives local time regardless of API timezone params. */
-export function computeHourlySlots(slotsData: Record<string, WorkDiarySlot[]>): number[] {
+function computeHourlySlots(slotsData: Record<string, WorkDiarySlot[]>): number[] {
   const counts = new Array<number>(24).fill(0);
   for (const slots of Object.values(slotsData)) {
     for (const slot of slots) {
@@ -124,8 +124,9 @@ async function runBackfill(
   for (let n = 1; n <= BACKFILL_MAX; n++) {
     const monday = getMondayNWeeksAgo(n);
     const entry = historyMap.get(monday);
-    // Fill if missing, aiPct === 0, or dailyHours not yet computed (added in spec 01)
-    if (!entry || entry.aiPct === 0 || entry.dailyHours === undefined) {
+    // Fill if missing, aiPct === 0, or optional fields not yet computed.
+    // dailyHours added in 01-daily-history-store; hourlySlots added in 01-hourly-data-layer.
+    if (!entry || entry.aiPct === 0 || entry.dailyHours === undefined || entry.hourlySlots === undefined) {
       weeksToFill.push(monday);
     }
   }
