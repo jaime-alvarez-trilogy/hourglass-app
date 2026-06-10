@@ -16,6 +16,7 @@ import Animated, {
   useSharedValue,
   withTiming,
   useAnimatedStyle,
+  cancelAnimation,
 } from 'react-native-reanimated';
 import {
   Canvas,
@@ -95,31 +96,31 @@ export function HourlyPatternCard({
   width,
   height = DEFAULT_BAR_AREA_H,
 }: HourlyPatternCardProps): React.JSX.Element | null {
-  // FR2: width=0 guard — parent layout not yet resolved
+  // FR2: Entry animation — hooks unconditionally before any early return (Rules of Hooks)
+  const clipProgress = useSharedValue(0);
+  useEffect(() => {
+    if (width === 0) return;
+    clipProgress.value = withTiming(1, timingChartFill);
+    return () => { cancelAnimation(clipProgress); };
+  }, [width]);
+  const clipStyle = useAnimatedStyle(() => {
+    const p = clipProgress.value;
+    if (p >= 0.99) return { width };
+    return { overflow: 'hidden' as const, width: p * width };
+  });
+
+  // FR2: width=0 guard — parent layout not yet resolved (after hooks)
   if (width === 0) return null;
 
   const [lo, hi] = profile.activeWindow;
   const barCount = hi - lo + 1;
+  if (barCount <= 0) return null;
   const colW = width / barCount;
   const barW = colW * BAR_W_RATIO;
 
   // Normalize bar heights to peak within the active window
   const windowSlots = profile.avgSlots.slice(lo, hi + 1);
   const peakSlots = Math.max(...windowSlots, 1);
-
-  // Entry animation: left-to-right clip reveal matching WeeklyBarChart
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  const clipProgress = useSharedValue(0);
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  useEffect(() => {
-    clipProgress.value = withTiming(1, timingChartFill);
-  }, []);
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  const clipStyle = useAnimatedStyle(() => {
-    const p = clipProgress.value;
-    if (p >= 0.99) return { width };
-    return { overflow: 'hidden' as const, width: p * width };
-  });
 
   // FR3: Detect overlap between focus window and AI hot zone
   const focusOverlapsAI =
@@ -166,7 +167,7 @@ export function HourlyPatternCard({
             {Array.from({ length: barCount }, (_, idx) => {
               const h = lo + idx;
               const slots = profile.avgSlots[h];
-              const barH = Math.max((slots / peakSlots) * height, MIN_BAR_H);
+              const barH = Math.max(((slots || 0) / peakSlots) * height, MIN_BAR_H);
               const barTop = height - barH;
               const barLeft = idx * colW + (colW - barW) / 2;
               const topColor = _barColor(profile.avgAIRate[h]);
