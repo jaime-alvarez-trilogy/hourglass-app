@@ -404,10 +404,18 @@ describe('HourlyPatternCard — FR1: Skia Canvas bar renderer', () => {
   });
 
   it('SC1.1 — source imports Canvas, RoundedRect, LinearGradient, vec from @shopify/react-native-skia', () => {
-    expect(source).toMatch(/Canvas[\s\S]{0,200}@shopify\/react-native-skia/);
-    expect(source).toMatch(/RoundedRect/);
-    expect(source).toMatch(/LinearGradient/);
-    expect(source).toMatch(/\bvec\b/);
+    // Anchor every symbol to the actual import statement, not the header comment
+    // (line 9 mentions "Skia Canvas + RoundedRect + LinearGradient" in prose — a
+    //  bare /RoundedRect/ check passes even if the import is deleted).
+    const importMatch = source.match(
+      /import\s*\{([\s\S]*?)\}\s*from\s*['"]@shopify\/react-native-skia['"]/,
+    );
+    expect(importMatch).not.toBeNull();
+    const imported = importMatch![1];
+    expect(imported).toMatch(/\bCanvas\b/);
+    expect(imported).toMatch(/\bRoundedRect\b/);
+    expect(imported).toMatch(/\bLinearGradient\b/);
+    expect(imported).toMatch(/\bvec\b/);
   });
 
   it('SC1.2 — source uses RoundedRect with Skia geometry props (x, y, width, height)', () => {
@@ -419,14 +427,24 @@ describe('HourlyPatternCard — FR1: Skia Canvas bar renderer', () => {
   it('SC1.3 — LinearGradient colors[0] is _barColor() output, colors[1] is transparent', () => {
     // topColor (or direct call) assigned via _barColor and fed as colors[0]
     expect(source).toMatch(/topColor\s*=\s*_barColor\s*\(/);
-    // colors array: first element is the topColor variable, second is transparent
-    expect(source).toMatch(/colors\s*=\s*\{?\s*\[\s*topColor\s*,\s*['"]transparent['"]/);
+    // The gradient must be a JSX child of the RoundedRect, with colors=[topColor, 'transparent'].
+    // Anchoring to <LinearGradient ...> (the JSX element, not the bare import) ensures the
+    // gradient is actually rendered, not just imported and left dead.
+    expect(source).toMatch(
+      /<LinearGradient[\s\S]{0,200}colors\s*=\s*\{\s*\[\s*topColor\s*,\s*['"]transparent['"]\s*\]\s*\}/,
+    );
+    // Gradient lives inside the RoundedRect element (not a sibling)
+    expect(source).toMatch(/<RoundedRect\b[\s\S]{0,300}<LinearGradient\b[\s\S]{0,200}<\/RoundedRect>/);
     // No bar uses View backgroundColor for fill (Skia migration complete)
     expect(source).not.toMatch(/<View[\s\S]{0,200}backgroundColor\s*:\s*_?barColor/);
   });
 
-  it('SC1.4 — bar corners use r={4} (not borderRadius: 2)', () => {
-    expect(source).toMatch(/r\s*=\s*\{?\s*4\s*\}?/);
+  it('SC1.4 — bar corners use r={4} on the RoundedRect (not borderRadius: 2)', () => {
+    // Anchor r={4} INSIDE the RoundedRect element so a stray `r={4}` elsewhere
+    // (or a plain <View r={4}>) can't satisfy it. Require the JSX brace form.
+    expect(source).toMatch(/<RoundedRect\b[\s\S]{0,200}\br=\{\s*4\s*\}/);
+    // And confirm the old per-bar borderRadius:2 View fill is gone
+    expect(source).not.toMatch(/borderRadius\s*:\s*2\b[\s\S]{0,60}backgroundColor\s*:\s*_?barColor/);
   });
 
   it('SC1.5 — smoke: renders without crash (Skia mock active)', () => {
@@ -461,15 +479,23 @@ describe('HourlyPatternCard — FR2: Entry animation', () => {
   });
 
   it('SC2.1 — source imports Animated, useSharedValue, withTiming, useAnimatedStyle from react-native-reanimated', () => {
-    expect(source).toMatch(/useSharedValue/);
-    expect(source).toMatch(/withTiming/);
-    expect(source).toMatch(/useAnimatedStyle/);
-    expect(source).toMatch(/react-native-reanimated/);
+    // Anchor the named hooks to the reanimated import block, not loose tokens.
+    const importMatch = source.match(
+      /import\s+Animated\s*,\s*\{([\s\S]*?)\}\s*from\s*['"]react-native-reanimated['"]/,
+    );
+    expect(importMatch).not.toBeNull();
+    const imported = importMatch![1];
+    expect(imported).toMatch(/\buseSharedValue\b/);
+    expect(imported).toMatch(/\bwithTiming\b/);
+    expect(imported).toMatch(/\buseAnimatedStyle\b/);
   });
 
   it('SC2.2 — source imports timingChartFill from @/src/lib/reanimated-presets', () => {
-    expect(source).toMatch(/timingChartFill/);
-    expect(source).toMatch(/reanimated-presets/);
+    // Must be the real import — the header comment (line 11) also says
+    // "timingChartFill", so a bare /timingChartFill/ check is comment-polluted.
+    expect(source).toMatch(
+      /import\s*\{[^}]*\btimingChartFill\b[^}]*\}\s*from\s*['"]@\/src\/lib\/reanimated-presets['"]/,
+    );
   });
 
   it('SC2.3 — source uses withTiming(1, timingChartFill) in a useEffect', () => {
