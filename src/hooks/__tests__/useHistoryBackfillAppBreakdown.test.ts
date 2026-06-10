@@ -24,6 +24,13 @@ const BACKFILL_PATH = path.resolve(__dirname, '..', 'useHistoryBackfill.ts');
 
 function makeSlot(tags: string[], appNames: string[]): WorkDiarySlot {
   return {
+    date: '2026-06-09T12:00:00Z',
+    time: '12:00:00',
+    activityLevel: 100,
+    intensityScore: 100,
+    productivityCategory: 'PRODUCTIVE',
+    activities: [],
+    secondBrainDeepDive: null,
     tags,
     autoTracker: true,
     status: 'APPROVED',

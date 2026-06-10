@@ -26,6 +26,13 @@ const MOCK_TOKEN = '1190137:token123';
 
 const MOCK_SLOTS: WorkDiarySlot[] = [
   {
+    date: '2026-03-04T13:00:00Z',
+    time: '13:00:00',
+    activityLevel: 100,
+    intensityScore: 100,
+    productivityCategory: 'PRODUCTIVE',
+    activities: ['AI', 'PURE_AI'],
+    secondBrainDeepDive: null,
     tags: ['ai_usage'],
     autoTracker: true,
     status: 'APPROVED',
@@ -33,6 +40,13 @@ const MOCK_SLOTS: WorkDiarySlot[] = [
     actions: [],
   },
   {
+    date: '2026-03-04T14:00:00Z',
+    time: '14:00:00',
+    activityLevel: 90,
+    intensityScore: 85,
+    productivityCategory: 'PRODUCTIVE',
+    activities: ['AI'],
+    secondBrainDeepDive: null,
     tags: ['second_brain'],
     autoTracker: true,
     status: 'APPROVED',
@@ -40,6 +54,13 @@ const MOCK_SLOTS: WorkDiarySlot[] = [
     actions: [],
   },
   {
+    date: '2026-03-04T15:00:00Z',
+    time: '15:00:00',
+    activityLevel: 0,
+    intensityScore: 0,
+    productivityCategory: 'UNCATEGORIZED',
+    activities: [],
+    secondBrainDeepDive: null,
     tags: [],
     autoTracker: false,
     status: 'PENDING',

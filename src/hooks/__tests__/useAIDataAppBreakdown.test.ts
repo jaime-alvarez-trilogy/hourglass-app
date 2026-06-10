@@ -26,6 +26,13 @@ const USE_AI_DATA_PATH = path.resolve(__dirname, '..', 'useAIData.ts');
 
 function makeSlotWithEvents(tags: string[], appNames: string[]): WorkDiarySlot {
   return {
+    date: '2026-06-09T12:00:00Z',
+    time: '12:00:00',
+    activityLevel: 100,
+    intensityScore: 100,
+    productivityCategory: 'PRODUCTIVE',
+    activities: ['AI'],
+    secondBrainDeepDive: null,
     tags,
     autoTracker: true,
     status: 'APPROVED',
