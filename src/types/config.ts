@@ -22,6 +22,7 @@ export interface CrossoverConfig {
   showApprovals?: boolean; // dev toggle — show Approvals tab regardless of isManager
   devManagerView?: boolean; // dev toggle — preview manager UI with fake data (non-manager accounts)
   devOvertimePreview?: boolean; // dev toggle — force overtime panel state for UI testing
+  orgTierEnabled?: boolean; // rollout toggle — Org scope segment shown undimmed but still non-interactive
   setupComplete: boolean;
   setupDate: string;      // ISO timestamp
 }
