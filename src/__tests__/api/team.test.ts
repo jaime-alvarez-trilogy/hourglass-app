@@ -395,20 +395,52 @@ describe('FR3: fetchTeamRoster', () => {
     expect(result[0].assignmentId).toBe('79996');
   });
 
-  it('throws rather than fabricating an identity when a row has a present candidate object missing its id', async () => {
-    const malformedRow = makeAssignment({
-      candidate: {
-        // @ts-expect-error — intentionally malformed to test defensive guard
-        id: undefined,
-        userId: 1190137,
-        printableName: 'Jane Doe',
+  // Every guarded leaf field must fail loudly when missing — a bare
+  // String(undefined) would otherwise fabricate the literal "undefined" as an
+  // id, and undefined would leak into name/teamName. One case per guard so a
+  // regression in any single assertPresent call site is caught.
+  it.each<[string, Partial<RawTeamAssignment>]>([
+    ['id', { id: undefined as unknown as number }],
+    [
+      'candidate.id',
+      {
+        candidate: {
+          id: undefined as unknown as number,
+          userId: 1190137,
+          printableName: 'Jane Doe',
+        },
       },
-    });
-    mockApiGet.mockResolvedValueOnce({ content: [malformedRow] });
-    await expect(fetchTeamRoster('2374', MOCK_TOKEN, false)).rejects.toThrow(
-      /candidate\.id/,
-    );
-  });
+    ],
+    ['manager.id', { manager: { id: undefined as unknown as number } }],
+    [
+      'team.id',
+      { team: { id: undefined as unknown as number, name: 'Team Alpha' } },
+    ],
+    [
+      'team.name',
+      { team: { id: 2374, name: undefined as unknown as string } },
+    ],
+    [
+      'candidate.printableName',
+      {
+        candidate: {
+          id: 2362707,
+          userId: 1190137,
+          printableName: undefined as unknown as string,
+        },
+      },
+    ],
+  ])(
+    'throws naming the missing field rather than fabricating a value when "%s" is absent',
+    async (field, overrides) => {
+      mockApiGet.mockResolvedValueOnce({
+        content: [makeAssignment(overrides)],
+      });
+      await expect(fetchTeamRoster('2374', MOCK_TOKEN, false)).rejects.toThrow(
+        `missing "${field}"`,
+      );
+    },
+  );
 
   it('propagates the exact AuthError instance thrown by apiGet unchanged', async () => {
     const authError = new AuthError(403);
