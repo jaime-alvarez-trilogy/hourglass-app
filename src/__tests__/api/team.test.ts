@@ -377,6 +377,39 @@ describe('FR3: fetchTeamRoster', () => {
     expect(result).toEqual([]);
   });
 
+  it('filters out a lowercase "active" status using exact, case-sensitive equality (per spec)', async () => {
+    const exactActiveRow = makeAssignment({ id: 79996 });
+    const lowercaseRow = makeAssignment({
+      id: 79999,
+      status: 'active',
+      candidate: {
+        id: 2362710,
+        userId: 1190141,
+        printableName: 'Case Mismatch',
+      },
+    });
+    mockApiGet.mockResolvedValueOnce({ content: [exactActiveRow, lowercaseRow] });
+    const result = await fetchTeamRoster('2374', MOCK_TOKEN, false);
+    expect(result).toHaveLength(1);
+    expect(result.find((m) => m.assignmentId === '79999')).toBeUndefined();
+    expect(result[0].assignmentId).toBe('79996');
+  });
+
+  it('throws rather than fabricating an identity when a row has a present candidate object missing its id', async () => {
+    const malformedRow = makeAssignment({
+      candidate: {
+        // @ts-expect-error — intentionally malformed to test defensive guard
+        id: undefined,
+        userId: 1190137,
+        printableName: 'Jane Doe',
+      },
+    });
+    mockApiGet.mockResolvedValueOnce({ content: [malformedRow] });
+    await expect(fetchTeamRoster('2374', MOCK_TOKEN, false)).rejects.toThrow(
+      /candidate\.id/,
+    );
+  });
+
   it('propagates the exact AuthError instance thrown by apiGet unchanged', async () => {
     const authError = new AuthError(403);
     mockApiGet.mockRejectedValueOnce(authError);
