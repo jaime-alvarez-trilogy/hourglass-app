@@ -71,7 +71,13 @@ or direct Crossover confirmation resolves the ambiguity.
    scopes by ownership. This also sidesteps a real gap: `useRoleRefresh`
    — `src/hooks/useRoleRefresh.ts:30-66` — only backfills a hand-picked field
    subset on existing configs and would NOT have backfilled a new field for
-   already-onboarded users.)
+   already-onboarded users.) **Built during spec 02's implementation, not
+   spec 01's** — spec 01's spec.md explicitly deferred "roster fan-out ... and
+   exposing them through a hook" to the hook layer, and spec 01's own file list
+   never created it; spec 02 needed it as a direct dependency of
+   `useTeamAggregateData()` before that hook could be written, so it was added
+   there instead, with the same test rigor as spec-owned code (see
+   `src/hooks/__tests__/useTeamRoster.test.ts`).
 
 3. **New `useTeamAggregateData()` hook** (`src/hooks/useTeamAggregateData.ts`) —
    client-side fan-out: takes the roster from `useTeamRoster()`, fires one
@@ -139,3 +145,4 @@ the toggle to switch into).
 | 2026-07-28 | [02-team-aggregate-hook](specs/02-team-aggregate-hook/spec.md) | Spec + checklist added: `fetchReportTimesheet()`, `useTeamAggregateData()` slot-weighted aggregation, per-report failure isolation. |
 | 2026-07-28 | [04-team-view-content](specs/04-team-view-content/spec.md) | Spec + checklist added: `useIsManager()` extraction, `TeamViewContent`/`TeamMemberRow` render branch in `overview.tsx`, loading/empty/all-failed state precedence. |
 | 2026-07-28 | [03-scope-toggle-ui](specs/03-scope-toggle-ui/spec.md) | **Complete.** `src/components/OverviewStickyBar.tsx` + `src/types/config.ts` implemented and reviewed. TDD: tests (`6f3861f`, `5c5e205`) → implementation (`e2b4676`, `4c6650c`) → review fixes (`1b9a907`) → docs (this commit). 46/46 component tests + 6/6 config-type tests passing; `tsc --noEmit` clean (zero new errors). |
+| 2026-07-28 | [02-team-aggregate-hook](specs/02-team-aggregate-hook/spec.md) | **Complete.** `src/api/team.ts` (`fetchReportTimesheet`) + `src/hooks/useTeamAggregateData.ts` + prerequisite `src/hooks/useTeamRoster.ts` implemented and reviewed. TDD: tests (`43fff87`, `5f08814`) → implementation (`589b943`, `65f1a20`, `114c13d`) → review fixes (`c7d06a5`, `6a0819f`) → docs (this commit). 92/92 tests passing across the three related suites; `tsc --noEmit` clean (zero new errors). `useTeamRoster.ts` ownership reconciled in "Intended final state" §2 above — built here as a spec 02 dependency, not spec 01's, per spec 01's own deferral. |
