@@ -1,9 +1,14 @@
 // FR2-FR3 (01-team-roster-api): Team roster API — the manager's owned teams
 // and one team's active roster. One request per function; no fan-out or
 // aggregation (that belongs to Spec 02's hook layer).
+//
+// FR1 (02-team-aggregate-hook): fetchReportTimesheet — cross-user timesheet
+// fetch for one direct report. Single request, no fallback strategies (see
+// function doc for why this cannot reuse fetchTimesheet's 3-strategy shape).
 
 import { apiGet } from './client';
 import type { RawTeam, RawTeamAssignment, TeamMember } from '../types/api';
+import type { TimesheetResponse } from '../lib/hours';
 
 // Spring pagination envelope for /api/v2/teams/assignments — a transport
 // detail of this endpoint, not an app-facing contract.
@@ -79,4 +84,34 @@ export async function fetchTeamRoster(
       photoUrl: row.candidate.photoUrl,
       isManager: row.candidate.avatarTypes?.includes('MANAGER') ?? false,
     }));
+}
+
+/**
+ * Fetch one direct report's current-week timesheet using the authenticated
+ * manager's token. Always sends userId (the report's candidateId), managerId,
+ * and teamId together with date/period — cross-user timesheet queries 400
+ * (CROS-0005) without all three, unlike the personal-timesheet path in
+ * fetchTimesheet(), so this makes exactly one request and never falls back
+ * to a reduced parameter set. Returns the first array item, or null when the
+ * API has no timesheet for the report that week.
+ */
+export async function fetchReportTimesheet(
+  member: TeamMember,
+  weekStartDate: string,
+  token: string,
+  useQA: boolean,
+): Promise<TimesheetResponse | null> {
+  const response = await apiGet<TimesheetResponse[]>(
+    '/api/timetracking/timesheets',
+    {
+      date: weekStartDate,
+      period: 'WEEK',
+      userId: member.candidateId,
+      managerId: member.managerId,
+      teamId: member.teamId,
+    },
+    token,
+    useQA,
+  );
+  return Array.isArray(response) && response.length > 0 ? response[0] : null;
 }
