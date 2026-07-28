@@ -34,11 +34,11 @@ Feature: `team-org-view`
 
 ⚠️ **Validate test design BEFORE implementing.** Weak tests lead to weak implementation.
 
-- [ ] Run `red-phase-test-validator` agent
-- [ ] All FR success criteria have test coverage
-- [ ] Assertions are specific (not just "exists" or "doesn't throw")
-- [ ] Mocks return realistic data matching interface contracts (use the confirmed live shape from spec-research.md decision 3)
-- [ ] Fix any issues identified before proceeding
+- [x] Run `red-phase-test-validator` agent
+- [x] All FR success criteria have test coverage
+- [x] Assertions are specific (not just "exists" or "doesn't throw")
+- [x] Mocks return realistic data matching interface contracts (use the confirmed live shape from spec-research.md decision 3)
+- [x] Fix any issues identified before proceeding
 
 ---
 
@@ -69,34 +69,38 @@ Feature: `team-org-view`
 ⚠️ **DO NOT skip this phase.** All four steps are mandatory for every change.
 
 ### Step 0: Spec-Implementation Alignment
-- [ ] Run `spec-implementation-alignment` agent
-- [ ] All FR success criteria verified in code
-- [ ] Interface contracts match implementation
-- [ ] No scope creep or shortfall (no fan-out/aggregation logic leaked into this spec's files — that belongs to Spec 02)
+- [x] Run `spec-implementation-alignment` agent
+- [x] All FR success criteria verified in code
+- [x] Interface contracts match implementation
+- [x] No scope creep or shortfall (no fan-out/aggregation logic leaked into this spec's files — that belongs to Spec 02)
 
 ### Step 1: Comprehensive PR Review
-- [ ] Run `pr-review-toolkit:review-pr` skill (launches 6 specialized agents)
+- [x] Run `pr-review-toolkit:review-pr` skill (launches 6 specialized agents) — adapted for local-only diff (no real GitHub PR exists in this workflow): 5 specialized reviewer roles (code quality, silent-failure-hunter, test-coverage, comment-analyzer, type-design-analyzer) plus Codex CLI as a 6th cross-model reviewer, all against `git diff 53ced1b HEAD`
 
 ### Step 2: Address Feedback
-- [ ] Fix HIGH severity issues (critical)
-- [ ] Fix MEDIUM severity issues (or document why deferred)
-- [ ] Re-run tests after fixes
-- [ ] Commit fixes: `fix(01-team-roster-api): {description}`
+- [x] Fix HIGH severity issues (critical) — none found
+- [x] Fix MEDIUM severity issues (or document why deferred) — fixed: (1) silent-failure-hunter's leaf-field `String(undefined)` coercion via new `assertPresent()` guard; (2) type-design's missing `candidate.userId` vs `candidate.id` distinguishing comment; (3) test-coverage's missing case-sensitive status-filter regression test. Deferred as non-actionable: Codex's pagination point (explicitly deferred by spec.md) and type-erasure point (mitigated by existing `tsc --noEmit` check)
+- [x] Re-run tests after fixes
+- [x] Commit fixes: `fix(01-team-roster-api): {description}` (commits `8eef9b9`, `fa56ad9`)
 
 ### Step 3: Test Quality Optimization
-- [ ] Run `test-optimiser` agent on modified tests
-- [ ] Apply suggested improvements that strengthen confidence
-- [ ] Re-run tests to confirm passing
-- [ ] Commit if changes made: `fix(01-team-roster-api): strengthen test assertions`
+- [x] Run `test-optimiser` agent on modified tests
+- [x] Apply suggested improvements that strengthen confidence — mutation sweep found 5 of 6 `assertPresent` call sites were unguarded by tests; replaced single malformed-candidate-id test with an `it.each` table covering all six guarded fields
+- [x] Re-run tests to confirm passing
+- [x] Commit if changes made: `fix(01-team-roster-api): strengthen test assertions` (commit `9597b68`)
 
 ### Final Verification
-- [ ] All tests passing (`npx jest src/__tests__/api/team.test.ts --runInBand`)
-- [ ] TypeScript check passes with no new errors
-- [ ] No regressions in existing `src/api/auth.ts` tests (shared `apiGet`/envelope-parsing conventions)
-- [ ] Code follows existing `src/api/` patterns (thin wrapper, no error swallowing, module layering per `docs/ARCHITECTURE.md` §6.6)
+- [x] All tests passing (`npx jest src/__tests__/api/team.test.ts --runInBand`) — 35/35 passing
+- [x] TypeScript check passes with no new errors
+- [x] No regressions in existing `src/api/auth.ts` tests (shared `apiGet`/envelope-parsing conventions) — verified alongside work-diary.test.ts and approvals-api.test.ts, 95/95 passing across all four suites
+- [x] Code follows existing `src/api/` patterns (thin wrapper, no error swallowing, module layering per `docs/ARCHITECTURE.md` §6.6)
 
 ---
 
 ## Session Notes
 
-<!-- Add notes as you work -->
+**2026-07-28**: Spec execution complete.
+- Phase 1.0: tests for FR1-FR3 written against `src/__tests__/api/team.test.ts`; `red-phase-test-validator` iteration 1 flagged missing `fetchTeamRoster` nullish/malformed-envelope tests, fixed and re-validated (iteration 2 PASS).
+- Phase 1.1: `src/api/team.ts` (fetchMyTeams, fetchTeamRoster) and `src/types/api.ts` (RawTeam, RawTeamAssignment, TeamMember) implemented per spec.md's Technical Design almost verbatim.
+- Phase 1.2: `spec-implementation-alignment` PASS. 6-agent review round (code quality, silent-failure-hunter, test-coverage, comment-accuracy, type-design, Codex CLI) found 3 legitimate MEDIUM issues, all fixed via `fix(01-team-roster-api)` commits (`8eef9b9`, `fa56ad9`): added `assertPresent()` guard against silent `String(undefined)` identity fabrication, added a clarifying comment on `candidate.userId` vs `candidate.id`, added case-sensitive status-filter regression coverage. `test-optimiser` mutation sweep found 5/6 `assertPresent` sites were untested; strengthened via an `it.each` table (`9597b68`).
+- Final: 35/35 tests passing in `team.test.ts`; 95/95 passing across `team.test.ts` + `auth-api.test.ts` + `work-diary.test.ts` + `approvals-api.test.ts`; `tsc --noEmit` clean for all touched files.
