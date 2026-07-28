@@ -8,25 +8,25 @@ Feature: `team-org-view`
 ## Phase 1.0: Test Foundation
 
 ### FR1: Define team roster API types
-- [ ] Write a TypeScript compile-time check (or type-only test) confirming `RawTeam`, `RawTeamAssignment`, `TeamMember` are exported from `src/types/api.ts` with the specified fields
-- [ ] Write test confirming `TeamMember` shape includes `assignmentId`, `candidateId`, `managerId`, `teamId`, `teamName`, `name`, optional `photoUrl`, `isManager`
+- [x] Write a TypeScript compile-time check (or type-only test) confirming `RawTeam`, `RawTeamAssignment`, `TeamMember` are exported from `src/types/api.ts` with the specified fields
+- [x] Write test confirming `TeamMember` shape includes `assignmentId`, `candidateId`, `managerId`, `teamId`, `teamName`, `name`, optional `photoUrl`, `isManager`
 
 ### FR2: Fetch the current manager's active teams
-- [ ] Write test: `fetchMyTeams` sends `GET /api/v2/teams` with `{ status: 'ACTIVE' }`, correct token, and correct QA/prod base URL
-- [ ] Write test: a populated bare-array response resolves to typed `RawTeam[]`
-- [ ] Write test: an empty array response resolves to `[]` (not an error)
-- [ ] Write test: a nullish/malformed response resolves to `[]`
-- [ ] Write test: `AuthError`/`NetworkError` thrown by the mocked `apiGet` propagate unchanged (not swallowed/wrapped)
+- [x] Write test: `fetchMyTeams` sends `GET /api/v2/teams` with `{ status: 'ACTIVE' }`, correct token, and correct QA/prod base URL
+- [x] Write test: a populated bare-array response resolves to typed `RawTeam[]`
+- [x] Write test: an empty array response resolves to `[]` (not an error)
+- [x] Write test: a nullish/malformed response resolves to `[]`
+- [x] Write test: `AuthError`/`NetworkError` thrown by the mocked `apiGet` propagate unchanged (not swallowed/wrapped)
 
 ### FR3: Fetch and map one team's active roster
-- [ ] Write test: `fetchTeamRoster(teamId, ...)` sends `GET /api/v2/teams/assignments` with `{ teamId, status: 'ACTIVE' }`
-- [ ] Write test: assignments read from Spring `content` envelope map correctly to `TeamMember[]` (exact field mapping: `assignmentId`/`candidateId`/`managerId`/`teamId`/`teamName`/`name`/`photoUrl`/`isManager`, all IDs stringified)
-- [ ] Write test: a bare assignment array (no `content` envelope) is also accepted
-- [ ] Write test: rows with non-`ACTIVE` status are filtered out even if returned by the mocked server
-- [ ] Write test: missing `candidate.photoUrl` maps to `photoUrl: undefined` without throwing
-- [ ] Write test: missing `avatarTypes` or an array without `MANAGER` maps to `isManager: false`; array containing `MANAGER` maps to `isManager: true`
-- [ ] Write test: an empty roster response resolves to `[]`
-- [ ] Write test: `AuthError`/`NetworkError` thrown by the mocked `apiGet` propagate unchanged
+- [x] Write test: `fetchTeamRoster(teamId, ...)` sends `GET /api/v2/teams/assignments` with `{ teamId, status: 'ACTIVE' }`
+- [x] Write test: assignments read from Spring `content` envelope map correctly to `TeamMember[]` (exact field mapping: `assignmentId`/`candidateId`/`managerId`/`teamId`/`teamName`/`name`/`photoUrl`/`isManager`, all IDs stringified)
+- [x] Write test: a bare assignment array (no `content` envelope) is also accepted
+- [x] Write test: rows with non-`ACTIVE` status are filtered out even if returned by the mocked server
+- [x] Write test: missing `candidate.photoUrl` maps to `photoUrl: undefined` without throwing
+- [x] Write test: missing `avatarTypes` or an array without `MANAGER` maps to `isManager: false`; array containing `MANAGER` maps to `isManager: true`
+- [x] Write test: an empty roster response resolves to `[]`
+- [x] Write test: `AuthError`/`NetworkError` thrown by the mocked `apiGet` propagate unchanged
 
 ---
 
