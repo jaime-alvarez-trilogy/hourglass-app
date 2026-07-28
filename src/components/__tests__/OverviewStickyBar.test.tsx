@@ -1,4 +1,4 @@
-// Tests: OverviewStickyBar component — 01-sticky-bar
+// Tests: OverviewStickyBar component — 01-sticky-bar, 03-scope-toggle-ui
 //
 // FR1: Component file, exports (ScrubSnapshot, OverviewStickyBarProps, OverviewStickyBar)
 // FR2: Picker state — 4W/12W/24W toggle pills
@@ -6,13 +6,21 @@
 // FR4: Visibility animation — own SharedValues, withSpring, pointerEvents
 // FR5: overview.tsx integration — scroll tracking, floating placement, no panelStyle
 //
+// 03-scope-toggle-ui FR1: Display the Personal/Team/Org scope selector for eligible users
+// 03-scope-toggle-ui FR2: Personal/Team scope selection + picker/scrub row collapse
+// 03-scope-toggle-ui FR3: Org gating (orgTierEnabled) + backward-compatible props
+//
 // Strategy: source-file static analysis + smoke renders, matching the codebase pattern
-// (DayPatternChart.test.tsx, WeeklyBarChart.test.tsx).
+// (DayPatternChart.test.tsx, WeeklyBarChart.test.tsx). Scope-row interaction tests use
+// react-test-renderer's `act`/`root.findAll` to drive presses, matching
+// ApprovalUrgencyCard.test.tsx's convention for invoking onPress handlers directly.
 
 import React from 'react';
-import renderer from 'react-test-renderer';
+import renderer, { act } from 'react-test-renderer';
+import { Text, TouchableOpacity } from 'react-native';
 import * as fs from 'fs';
 import * as path from 'path';
+import { colors } from '@/src/lib/colors';
 
 // ─── Reanimated mock (required for any file importing react-native-reanimated) ─
 
@@ -21,6 +29,8 @@ jest.mock('react-native-reanimated', () => {
   Reanimated.default.call = jest.fn();
   return Reanimated;
 });
+
+import { OverviewStickyBar, type OverviewStickyBarProps } from '../OverviewStickyBar';
 
 // ─── File paths ───────────────────────────────────────────────────────────────
 
@@ -223,5 +233,226 @@ describe('FR5: overview.tsx — OverviewStickyBar integration', () => {
   it('SC5.6: overview.tsx renders <OverviewStickyBar', () => {
     const src = fs.readFileSync(OVERVIEW_FILE, 'utf8');
     expect(src).toMatch(/<OverviewStickyBar/);
+  });
+});
+
+// ─── 03-scope-toggle-ui: shared helpers ──────────────────────────────────────
+
+function renderBar(props: Partial<OverviewStickyBarProps> = {}) {
+  let tree: renderer.ReactTestRenderer;
+  act(() => {
+    tree = renderer.create(
+      React.createElement(OverviewStickyBar, {
+        window: 4,
+        onWindowChange: jest.fn(),
+        scrubSnapshot: null,
+        visible: true,
+        ...props,
+      } as OverviewStickyBarProps)
+    );
+  });
+  return tree!;
+}
+
+function jsonOf(tree: renderer.ReactTestRenderer): string {
+  return JSON.stringify(tree.toJSON());
+}
+
+/** Depth-first list of testID values in render order, for relative-position assertions. */
+function testIdOrder(tree: renderer.ReactTestRenderer): string[] {
+  const ids: string[] = [];
+  const nodes = tree.root.findAll((node: any) => typeof node.props?.testID === 'string');
+  for (const node of nodes) {
+    ids.push(node.props.testID);
+  }
+  return ids;
+}
+
+// ─── 03-scope-toggle-ui FR1: Display the scope selector for eligible users ──
+
+describe('03-scope-toggle-ui FR1: scope selector visibility and styling', () => {
+  it('SC1: scope=undefined renders none of Personal/Team/Org', () => {
+    const tree = renderBar();
+    const json = jsonOf(tree);
+    expect(json).not.toContain('Personal');
+    expect(json).not.toContain('Team');
+    expect(json).not.toContain('Org');
+  });
+
+  it('SC2: scope="personal" renders all three labels with Personal active', () => {
+    const tree = renderBar({ scope: 'personal' });
+    const json = jsonOf(tree);
+    expect(json).toContain('Personal');
+    expect(json).toContain('Team');
+    expect(json).toContain('Org');
+
+    const personalSegment = tree.root.findByProps({ testID: 'scope-segment-personal' });
+    const personalText = personalSegment.findByType(Text);
+    expect(personalText.props.style).toEqual(
+      expect.objectContaining({ color: colors.violet })
+    );
+
+    const teamSegment = tree.root.findByProps({ testID: 'scope-segment-team' });
+    const teamText = teamSegment.findByType(Text);
+    expect(teamText.props.style).toEqual(
+      expect.objectContaining({ color: colors.textMuted })
+    );
+  });
+
+  it('SC3: scope="team" renders all three labels with Team active', () => {
+    const tree = renderBar({ scope: 'team' });
+    const teamSegment = tree.root.findByProps({ testID: 'scope-segment-team' });
+    const teamText = teamSegment.findByType(Text);
+    expect(teamText.props.style).toEqual(
+      expect.objectContaining({ color: colors.violet })
+    );
+
+    const personalSegment = tree.root.findByProps({ testID: 'scope-segment-personal' });
+    const personalText = personalSegment.findByType(Text);
+    expect(personalText.props.style).toEqual(
+      expect.objectContaining({ color: colors.textMuted })
+    );
+  });
+
+  it('SC4: scope row renders above (before) the picker/scrub row in render order', () => {
+    const tree = renderBar({ scope: 'personal' });
+    const order = testIdOrder(tree);
+    const scopeIdx = order.indexOf('scope-row');
+    const pickerIdx = order.indexOf('picker-scrub-row');
+    expect(scopeIdx).toBeGreaterThanOrEqual(0);
+    expect(pickerIdx).toBeGreaterThanOrEqual(0);
+    expect(scopeIdx).toBeLessThan(pickerIdx);
+  });
+
+  it('SC5: active segment reuses the window-picker active-background token (colors.surfaceElevated)', () => {
+    const tree = renderBar({ scope: 'personal' });
+    const personalSegment = tree.root.findByProps({ testID: 'scope-segment-personal' });
+    const flatStyle = Object.assign({}, ...[personalSegment.props.style].flat().filter(Boolean));
+    expect(flatStyle.backgroundColor).toBe(colors.surfaceElevated);
+  });
+
+  it('SC6: scope row track reuses colors.border for its background', () => {
+    const tree = renderBar({ scope: 'personal' });
+    const track = tree.root.findByProps({ testID: 'scope-track' });
+    const flatStyle = Object.assign({}, ...[track.props.style].flat().filter(Boolean));
+    expect(flatStyle.backgroundColor).toBe(colors.border);
+  });
+});
+
+// ─── 03-scope-toggle-ui FR2: Personal/Team selection + picker/scrub collapse ─
+
+describe('03-scope-toggle-ui FR2: Personal/Team scope selection', () => {
+  it('SC1: tapping Personal invokes onScopeChange("personal") exactly once', () => {
+    const onScopeChange = jest.fn();
+    const tree = renderBar({ scope: 'team', onScopeChange });
+    const personalSegment = tree.root.findByProps({ testID: 'scope-segment-personal' });
+    act(() => {
+      personalSegment.props.onPress();
+    });
+    expect(onScopeChange).toHaveBeenCalledTimes(1);
+    expect(onScopeChange).toHaveBeenCalledWith('personal');
+  });
+
+  it('SC2: tapping Team invokes onScopeChange("team") exactly once', () => {
+    const onScopeChange = jest.fn();
+    const tree = renderBar({ scope: 'personal', onScopeChange });
+    const teamSegment = tree.root.findByProps({ testID: 'scope-segment-team' });
+    act(() => {
+      teamSegment.props.onPress();
+    });
+    expect(onScopeChange).toHaveBeenCalledTimes(1);
+    expect(onScopeChange).toHaveBeenCalledWith('team');
+  });
+
+  it('SC3: scope="personal" keeps the picker/scrub row visible and interactive (pointerEvents="auto")', () => {
+    const tree = renderBar({ scope: 'personal' });
+    const pickerRow = tree.root.findByProps({ testID: 'picker-scrub-row' });
+    expect(pickerRow.props.pointerEvents).toBe('auto');
+  });
+
+  it('SC4: scope="team" collapses the picker/scrub row (pointerEvents="none")', () => {
+    const tree = renderBar({ scope: 'team' });
+    const pickerRow = tree.root.findByProps({ testID: 'picker-scrub-row' });
+    expect(pickerRow.props.pointerEvents).toBe('none');
+  });
+
+  it('SC5: scope="org" also collapses the picker/scrub row (pointerEvents="none")', () => {
+    const tree = renderBar({ scope: 'org', orgTierEnabled: true });
+    const pickerRow = tree.root.findByProps({ testID: 'picker-scrub-row' });
+    expect(pickerRow.props.pointerEvents).toBe('none');
+  });
+
+  it('SC6: window-picker 4W/12W/24W callback is unchanged regardless of scope', () => {
+    const onWindowChange = jest.fn();
+    const tree = renderBar({ scope: 'personal', window: 4, onWindowChange });
+    const allTouchables = tree.root.findAll(
+      (node: any) => node.type === TouchableOpacity,
+      { deep: true }
+    );
+    const twelveWPill = allTouchables.find((n: any) => {
+      const text = JSON.stringify(n.findAllByType(Text).map((t: any) => t.props.children));
+      return text.includes('12W');
+    });
+    expect(twelveWPill).toBeDefined();
+    act(() => {
+      twelveWPill!.props.onPress();
+    });
+    expect(onWindowChange).toHaveBeenCalledWith(12);
+  });
+});
+
+// ─── 03-scope-toggle-ui FR3: Org gating + backward compatibility ────────────
+
+describe('03-scope-toggle-ui FR3: Org gating and backward compatibility', () => {
+  it('SC1: existing OverviewStickyBar call sites compile/render without any new props', () => {
+    expect(() => renderBar()).not.toThrow();
+  });
+
+  it('SC2: orgTierEnabled omitted renders Org dimmed and does not invoke onScopeChange on press', () => {
+    const onScopeChange = jest.fn();
+    const tree = renderBar({ scope: 'personal', onScopeChange });
+    const orgSegment = tree.root.findByProps({ testID: 'scope-segment-org' });
+    expect(orgSegment.props.disabled).toBe(true);
+    const flatStyle = Object.assign({}, ...[orgSegment.props.style].flat().filter(Boolean));
+    expect(flatStyle.opacity).toBeLessThan(1);
+    expect(() => orgSegment.props.onPress?.()).not.toThrow();
+    expect(onScopeChange).not.toHaveBeenCalled();
+  });
+
+  it('SC3: orgTierEnabled=false renders Org dimmed and does not invoke onScopeChange on press', () => {
+    const onScopeChange = jest.fn();
+    const tree = renderBar({ scope: 'personal', orgTierEnabled: false, onScopeChange });
+    const orgSegment = tree.root.findByProps({ testID: 'scope-segment-org' });
+    const flatStyle = Object.assign({}, ...[orgSegment.props.style].flat().filter(Boolean));
+    expect(flatStyle.opacity).toBeLessThan(1);
+    expect(() => orgSegment.props.onPress?.()).not.toThrow();
+    expect(onScopeChange).not.toHaveBeenCalled();
+  });
+
+  it('SC4: orgTierEnabled=true renders Org undimmed but still does not invoke onScopeChange', () => {
+    const onScopeChange = jest.fn();
+    const tree = renderBar({ scope: 'personal', orgTierEnabled: true, onScopeChange });
+    const orgSegment = tree.root.findByProps({ testID: 'scope-segment-org' });
+    const flatStyle = Object.assign({}, ...[orgSegment.props.style].flat().filter(Boolean));
+    expect(flatStyle.opacity === undefined || flatStyle.opacity === 1).toBe(true);
+    expect(() => orgSegment.props.onPress?.()).not.toThrow();
+    expect(onScopeChange).not.toHaveBeenCalled();
+  });
+
+  it('SC5: onScopeChange type signature only accepts personal|team (org press is always a no-op prop)', () => {
+    const tree = renderBar({ scope: 'personal', orgTierEnabled: true });
+    const orgSegment = tree.root.findByProps({ testID: 'scope-segment-org' });
+    // The Org segment's onPress must be undefined/no-op at the prop level —
+    // not merely gated by a runtime `disabled` flag — so even a direct,
+    // RN-internals-bypassing invocation (as done here) cannot reach onScopeChange.
+    expect(orgSegment.props.onPress).toBeUndefined();
+  });
+
+  it('SC6: existing window-picker and scrub cross-fade smoke tests pass unchanged with no scope props', () => {
+    expect(() =>
+      renderBar({ window: 12, scrubSnapshot: FULL_SCRUB_SNAPSHOT, visible: true })
+    ).not.toThrow();
+    const tree = renderBar({ window: 12, scrubSnapshot: null, visible: true });
+    expect(jsonOf(tree)).not.toContain('Personal');
   });
 });
