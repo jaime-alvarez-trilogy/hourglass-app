@@ -44,3 +44,48 @@ export interface WorkDiarySlot {
   activities: string[];      // ← API: e.g. ["AI","PURE_AI","Chat","Meeting","Office","Development","Uncategorized"]
   secondBrainDeepDive: SecondBrainDeepDive | null; // ← API: null on most slots; present on second_brain slots
 }
+
+// FR1 (01-team-roster-api): One of the manager's owned teams, returned by
+// GET /api/v2/teams?status=ACTIVE as a bare array (no Spring page envelope).
+export interface RawTeam {
+  id: number;
+  name: string;
+}
+
+// FR1 (01-team-roster-api): One team-assignment row returned by
+// GET /api/v2/teams/assignments?teamId={id}&status=ACTIVE (Spring `content`
+// envelope, or a bare array as a defensive fallback — see src/api/team.ts).
+export interface RawTeamAssignment {
+  id: number;
+  // Kept as string rather than an 'ACTIVE'-only literal because the client
+  // deliberately filters unexpected inactive values itself.
+  status: string;
+  candidate: {
+    id: number;
+    userId: number;
+    printableName: string;
+    photoUrl?: string;
+    avatarTypes?: string[];
+  };
+  manager: {
+    id: number;
+  };
+  team: {
+    id: number;
+    name: string;
+  };
+}
+
+// FR1 (01-team-roster-api): App-facing roster row normalized from
+// RawTeamAssignment by fetchTeamRoster (src/api/team.ts). All identifiers
+// are stringified at the transport boundary.
+export interface TeamMember {
+  assignmentId: string;
+  candidateId: string;
+  managerId: string;
+  teamId: string;
+  teamName: string;
+  name: string;
+  photoUrl?: string;
+  isManager: boolean;
+}
