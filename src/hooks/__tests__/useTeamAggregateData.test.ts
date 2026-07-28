@@ -202,6 +202,11 @@ describe('useTeamAggregateData — buildTeamAggregateQueryFn (query logic)', () 
       expect(mockFetchWorkDiary).toHaveBeenCalledTimes(3);
       const dates = mockFetchWorkDiary.mock.calls.map((c) => c[1]);
       expect(dates.sort()).toEqual(['2026-07-27', '2026-07-28', '2026-07-29']);
+
+      // Timesheet must be anchored to the week's Monday, not "today" — on a
+      // non-Monday today these differ, so this catches a bug that passes
+      // `today` straight through instead of the computed weekStartDate.
+      expect(mockFetchReportTimesheet).toHaveBeenCalledWith(member, '2026-07-27', TOKEN, false);
     });
 
     it('fetches multiple reports concurrently, not serially', async () => {
@@ -254,9 +259,11 @@ describe('useTeamAggregateData — buildTeamAggregateQueryFn (query logic)', () 
       const queryFn = buildTeamAggregateQueryFn(CONFIG, [memberA, memberB], '2026-07-27');
       const result = await queryFn();
 
-      // Naive average would be 55%; slot-weighted must be far from that.
-      expect(result.weekAiPct).toBeLessThan(30);
-      expect(result.weekAiPct).not.toBe(55);
+      // Slot-weighted: 4 AI-tagged of 22 total => ~18.2%, +-2 band (16..20),
+      // midpoint 18. A "last member wins" or non-summing aggregation bug
+      // would produce a different, non-18 value (e.g. naive average 55, or
+      // memberB-only weighting ~10) — pin the exact value, not just a range.
+      expect(result.weekAiPct).toBe(18);
     });
 
     it('weekHours equals the sum of paid hours across successfully fetched reports', async () => {
@@ -302,6 +309,23 @@ describe('useTeamAggregateData — buildTeamAggregateQueryFn (query logic)', () 
       expect(result.reportCount).toBe(2);
     });
 
+    it('excludes untagged slots from the weekAiPct denominator (tagged slots only, not all slots)', async () => {
+      // 2 ai_usage + 3 'other' + 5 untagged => 2/5 tagged = 40%, not 2/10 = 20%.
+      // Catches a bug that divides by totalSlots instead of taggedSlots.
+      const member = makeMember();
+      const slots = [
+        ...makeDaySlots(5, 2),
+        ...Array.from({ length: 5 }, () => makeSlot({ tags: [] })),
+      ];
+      mockFetchWorkDiary.mockResolvedValue(slots);
+      mockFetchReportTimesheet.mockResolvedValue(null);
+
+      const queryFn = buildTeamAggregateQueryFn(CONFIG, [member], '2026-07-27');
+      const result = await queryFn();
+
+      expect(result.weekAiPct).toBe(40);
+    });
+
     it('breakdown contains one row per roster member with member, hours, aiPct, brainliftHours, fetchFailed: false for successes', async () => {
       const member = makeMember({ assignmentId: 'solo' });
       mockFetchWorkDiary.mockResolvedValue(makeDaySlots(4, 2));
@@ -311,13 +335,16 @@ describe('useTeamAggregateData — buildTeamAggregateQueryFn (query logic)', () 
       const result = await queryFn();
 
       expect(result.breakdown).toHaveLength(1);
+      // 2 of 4 slots AI-tagged => 50%, +-2 band (48..52) midpoint 50; no
+      // second_brain tags => 0 BrainLift hours. Exact values, not just
+      // `typeof === 'number'` (which would also pass for NaN).
       expect(result.breakdown[0]).toMatchObject({
         member,
         hours: 38,
+        aiPct: 50,
+        brainliftHours: 0,
         fetchFailed: false,
       });
-      expect(typeof result.breakdown[0].aiPct).toBe('number');
-      expect(typeof result.breakdown[0].brainliftHours).toBe('number');
     });
   });
 
@@ -359,7 +386,7 @@ describe('useTeamAggregateData — buildTeamAggregateQueryFn (query logic)', () 
       expect(badRow).toMatchObject({ fetchFailed: true, hours: 0 });
     });
 
-    it('keeps other reports usable — hook-level data is not null, isLoading resolves normally (no rethrow)', async () => {
+    it('does not rethrow a per-member failure — the overall queryFn promise resolves', async () => {
       const goodMember = makeMember({ assignmentId: 'good' });
       const badMember = makeMember({ assignmentId: 'bad' });
       mockFetchWorkDiary.mockImplementation(async (assignmentId) => {
@@ -373,18 +400,22 @@ describe('useTeamAggregateData — buildTeamAggregateQueryFn (query logic)', () 
       await expect(queryFn()).resolves.toBeDefined();
     });
 
-    it('logs each per-report failure via the application error-logging convention', async () => {
-      const badMember = makeMember({ assignmentId: 'bad' });
+    it('logs each per-report failure via the application error-logging convention, with distinguishing member context', async () => {
+      const badMemberA = makeMember({ assignmentId: 'bad-a' });
+      const badMemberB = makeMember({ assignmentId: 'bad-b' });
       mockFetchWorkDiary.mockRejectedValue(new Error('boom'));
       mockFetchReportTimesheet.mockResolvedValue(null);
 
-      const queryFn = buildTeamAggregateQueryFn(CONFIG, [badMember], '2026-07-27');
+      const queryFn = buildTeamAggregateQueryFn(CONFIG, [badMemberA, badMemberB], '2026-07-27');
       await queryFn();
 
-      expect(mockLogError).toHaveBeenCalledTimes(1);
-      const [category, errArg] = mockLogError.mock.calls[0];
-      expect(category).toMatch(/team/i);
-      expect(errArg).toBeInstanceOf(Error);
+      expect(mockLogError).toHaveBeenCalledTimes(2);
+      const loggedAssignmentIds = mockLogError.mock.calls.map(([, , meta]) => meta?.assignmentId);
+      expect(loggedAssignmentIds.sort()).toEqual(['bad-a', 'bad-b']);
+      for (const [category, errArg] of mockLogError.mock.calls) {
+        expect(category).toMatch(/team/i);
+        expect(errArg).toBeInstanceOf(Error);
+      }
     });
 
     it('resolves an empty roster to the zero-valued aggregate without an error', async () => {
