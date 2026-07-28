@@ -29,6 +29,18 @@ export async function fetchMyTeams(
   return Array.isArray(response) ? response : [];
 }
 
+// Guards against silently fabricating an identity: if a nested object is
+// present but a specific leaf field is missing, bare String(undefined)
+// would coerce to the literal string "undefined" instead of failing. Per
+// spec.md's edge cases, malformed rows must fail loudly, not produce a
+// plausible-but-bogus id/name that could propagate into downstream calls.
+function assertPresent<T>(value: T | null | undefined, field: string): T {
+  if (value === null || value === undefined) {
+    throw new Error(`fetchTeamRoster: malformed assignment row — missing "${field}"`);
+  }
+  return value;
+}
+
 /**
  * Fetch one team's active roster and map it to TeamMember[]. Filters out
  * any non-ACTIVE rows defensively, even though ACTIVE is also requested
@@ -58,12 +70,12 @@ export async function fetchTeamRoster(
   return rows
     .filter((row) => row.status === 'ACTIVE')
     .map((row) => ({
-      assignmentId: String(row.id),
-      candidateId: String(row.candidate.id),
-      managerId: String(row.manager.id),
-      teamId: String(row.team.id),
-      teamName: row.team.name,
-      name: row.candidate.printableName,
+      assignmentId: String(assertPresent(row.id, 'id')),
+      candidateId: String(assertPresent(row.candidate?.id, 'candidate.id')),
+      managerId: String(assertPresent(row.manager?.id, 'manager.id')),
+      teamId: String(assertPresent(row.team?.id, 'team.id')),
+      teamName: assertPresent(row.team?.name, 'team.name'),
+      name: assertPresent(row.candidate?.printableName, 'candidate.printableName'),
       photoUrl: row.candidate.photoUrl,
       isManager: row.candidate.avatarTypes?.includes('MANAGER') ?? false,
     }));

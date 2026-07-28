@@ -62,6 +62,9 @@ export interface RawTeamAssignment {
   status: string;
   candidate: {
     id: number;
+    // Login/profile identifier — NOT the same as `id` above. TeamMember's
+    // candidateId is derived from `id`, not `userId`; see CLAUDE.md's
+    // documented assignmentId/userId/candidateId gotcha before using this.
     userId: number;
     printableName: string;
     photoUrl?: string;
