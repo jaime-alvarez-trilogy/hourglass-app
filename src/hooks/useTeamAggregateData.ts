@@ -229,6 +229,37 @@ export function buildTeamAggregateQueryFn(
   };
 }
 
+// ─── State mapping (exported for testing) ────────────────────────────────────
+
+interface RosterState {
+  isLoading: boolean;
+  error: string | null;
+}
+
+interface QueryState {
+  data: TeamAggregateData | undefined;
+  isLoading: boolean;
+  error: Error | null;
+}
+
+/**
+ * Merges useTeamRoster's and the aggregate query's independent loading/error
+ * states into UseTeamAggregateDataResult. Roster problems take precedence —
+ * fan-out cannot start without a roster — and either source's error message
+ * surfaces before falling back to `null`. Exported separately so this merge
+ * logic is directly testable without renderHook.
+ */
+export function mapTeamAggregateState(
+  roster: RosterState,
+  query: QueryState,
+): UseTeamAggregateDataResult {
+  return {
+    data: query.data ?? null,
+    isLoading: roster.isLoading || query.isLoading,
+    error: roster.error ?? (query.error ? query.error.message : null),
+  };
+}
+
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -252,9 +283,8 @@ export function useTeamAggregateData(): UseTeamAggregateDataResult {
     retry: 1,
   });
 
-  return {
-    data: query.data ?? null,
-    isLoading: rosterLoading || query.isLoading,
-    error: rosterError ?? (query.error ? query.error.message : null),
-  };
+  return mapTeamAggregateState(
+    { isLoading: rosterLoading, error: rosterError },
+    { data: query.data, isLoading: query.isLoading, error: query.error },
+  );
 }

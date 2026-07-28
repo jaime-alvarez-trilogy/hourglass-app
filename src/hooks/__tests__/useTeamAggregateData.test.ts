@@ -34,7 +34,8 @@ import { getAuthToken } from '../../api/client';
 import { fetchWorkDiary } from '../../api/workDiary';
 import { fetchReportTimesheet } from '../../api/team';
 import { log } from '../../lib/log';
-import { buildTeamAggregateQueryFn } from '../../hooks/useTeamAggregateData';
+import { buildTeamAggregateQueryFn, mapTeamAggregateState } from '../../hooks/useTeamAggregateData';
+import { getWeekStartDate } from '../../lib/hours';
 import type { TeamMember, WorkDiarySlot } from '../../types/api';
 import type { CrossoverConfig } from '../../types/config';
 import type { TimesheetResponse } from '../../lib/hours';
@@ -505,5 +506,98 @@ describe('useTeamAggregateData — buildTeamAggregateQueryFn (query logic)', () 
       const queryFn = buildTeamAggregateQueryFn(null, [makeMember()], '2026-07-27');
       await expect(queryFn()).rejects.toThrow(/config/i);
     });
+  });
+});
+
+// ─── FR5: query-key rollover (real getWeekStartDate, no renderHook needed) ───
+
+describe('useTeamAggregateData — FR5 query key uses getWeekStartDate(true), which rolls over on Monday', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('produces a distinct weekStartDate (the query key third element) when the mocked date crosses a Monday boundary', () => {
+    // The hook builds its queryKey as ['teamAggregate', config?.primaryTeamId, weekStartDate]
+    // using getWeekStartDate(true) — see useTeamAggregateData.ts. Driving that same real
+    // (unmocked) helper across a Monday boundary proves the key's third element changes,
+    // without needing renderHook.
+    jest.useFakeTimers();
+
+    jest.setSystemTime(new Date('2026-07-24T12:00:00.000Z')); // Friday, week of 2026-07-20
+    const beforeRollover = getWeekStartDate(true);
+
+    jest.setSystemTime(new Date('2026-07-27T12:00:00.000Z')); // Monday, next week
+    const afterRollover = getWeekStartDate(true);
+
+    expect(beforeRollover).toBe('2026-07-20');
+    expect(afterRollover).toBe('2026-07-27');
+    expect(afterRollover).not.toBe(beforeRollover);
+
+    const keyBefore = ['teamAggregate', CONFIG.primaryTeamId, beforeRollover];
+    const keyAfter = ['teamAggregate', CONFIG.primaryTeamId, afterRollover];
+    expect(keyAfter).not.toEqual(keyBefore);
+  });
+
+  it('produces the same weekStartDate for two moments within the same week', () => {
+    jest.useFakeTimers();
+
+    jest.setSystemTime(new Date('2026-07-27T02:00:00.000Z')); // Monday
+    const monday = getWeekStartDate(true);
+
+    jest.setSystemTime(new Date('2026-07-30T23:00:00.000Z')); // Thursday, same week
+    const thursday = getWeekStartDate(true);
+
+    expect(thursday).toBe(monday);
+  });
+});
+
+// ─── FR5: mapTeamAggregateState (isLoading/error merge, exercises the exact
+// logic useTeamAggregateData() runs after useQuery/useTeamRoster resolve) ────
+
+describe('useTeamAggregateData — mapTeamAggregateState (hook state merge)', () => {
+  it('returns data: null while either roster or the query is still loading', () => {
+    const result = mapTeamAggregateState(
+      { isLoading: true, error: null },
+      { data: undefined, isLoading: false, error: null },
+    );
+    expect(result).toEqual({ data: null, isLoading: true, error: null });
+  });
+
+  it('returns the query data once both roster and query have resolved', () => {
+    const data = { weekHours: 10, weekAiPct: 20, weekBrainliftHours: 1, reportCount: 1, breakdown: [] };
+    const result = mapTeamAggregateState(
+      { isLoading: false, error: null },
+      { data, isLoading: false, error: null },
+    );
+    expect(result).toEqual({ data, isLoading: false, error: null });
+  });
+
+  it('surfaces a roster error even if the query has not run', () => {
+    const result = mapTeamAggregateState(
+      { isLoading: false, error: 'Missing credentials or config' },
+      { data: undefined, isLoading: false, error: null },
+    );
+    expect(result).toEqual({
+      data: null,
+      isLoading: false,
+      error: 'Missing credentials or config',
+    });
+  });
+
+  it('surfaces the query error message when only the query failed', () => {
+    const result = mapTeamAggregateState(
+      { isLoading: false, error: null },
+      { data: undefined, isLoading: false, error: new Error('Missing config — cannot fetch team aggregate data') },
+    );
+    expect(result.error).toBe('Missing config — cannot fetch team aggregate data');
+    expect(result.data).toBeNull();
+  });
+
+  it('prefers the roster error over the query error when both are present', () => {
+    const result = mapTeamAggregateState(
+      { isLoading: false, error: 'roster failed' },
+      { data: undefined, isLoading: false, error: new Error('query failed') },
+    );
+    expect(result.error).toBe('roster failed');
   });
 });
