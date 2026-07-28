@@ -135,3 +135,4 @@ the toggle to switch into).
 | 2026-07-28 | — | Feature created. Research confirmed Team-tier data access (roster, work-diary, timesheet) works with existing auth; Org tier flagged off pending unverifiable skip-level roster access. |
 | 2026-07-28 | [01-team-roster-api](specs/01-team-roster-api/spec.md) | Spec + checklist added: `fetchMyTeams()`/`fetchTeamRoster()` API functions, `RawTeam`/`RawTeamAssignment`/`TeamMember` types. |
 | 2026-07-28 | [03-scope-toggle-ui](specs/03-scope-toggle-ui/spec.md) | Spec + checklist added: `OverviewStickyBar` Personal/Team/Org scope row, `CrossoverConfig.orgTierEnabled` flag. |
+| 2026-07-28 | [02-team-aggregate-hook](specs/02-team-aggregate-hook/spec.md) | Spec + checklist added: `fetchReportTimesheet()`, `useTeamAggregateData()` slot-weighted aggregation, per-report failure isolation. |
