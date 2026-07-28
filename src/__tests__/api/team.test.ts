@@ -365,6 +365,18 @@ describe('FR3: fetchTeamRoster', () => {
     expect(result).toEqual([]);
   });
 
+  it('resolves a nullish response to [] rather than throwing', async () => {
+    mockApiGet.mockResolvedValueOnce(null);
+    const result = await fetchTeamRoster('2374', MOCK_TOKEN, false);
+    expect(result).toEqual([]);
+  });
+
+  it('resolves an unrecognized envelope shape (non-array content) to [] rather than throwing', async () => {
+    mockApiGet.mockResolvedValueOnce({ content: {} });
+    const result = await fetchTeamRoster('2374', MOCK_TOKEN, false);
+    expect(result).toEqual([]);
+  });
+
   it('propagates the exact AuthError instance thrown by apiGet unchanged', async () => {
     const authError = new AuthError(403);
     mockApiGet.mockRejectedValueOnce(authError);
