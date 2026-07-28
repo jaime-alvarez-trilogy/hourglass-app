@@ -386,6 +386,8 @@ describe('03-scope-toggle-ui FR2: Personal/Team scope selection', () => {
     expect(pickerRow.props.pointerEvents).toBe('auto');
     const style = flattenStyle(pickerRow.props.style);
     expect(style.opacity === undefined || style.opacity === 1).toBe(true);
+    // Height must not be collapsed: either unset (natural layout) or a positive value.
+    expect(style.height === undefined || style.height > 0).toBe(true);
   });
 
   it('SC4: scope="team" collapses the picker/scrub row from both interaction (pointerEvents="none") and view (opacity 0, zero height)', () => {
@@ -421,6 +423,7 @@ describe('03-scope-toggle-ui FR2: Personal/Team scope selection', () => {
     act(() => {
       twelveWPill!.props.onPress();
     });
+    expect(onWindowChange).toHaveBeenCalledTimes(1);
     expect(onWindowChange).toHaveBeenCalledWith(12);
   });
 });
@@ -447,6 +450,7 @@ describe('03-scope-toggle-ui FR3: Org gating and backward compatibility', () => 
     const onScopeChange = jest.fn();
     const tree = renderBar({ scope: 'personal', orgTierEnabled: false, onScopeChange });
     const orgSegment = tree.root.findByProps({ testID: 'scope-segment-org' });
+    expect(orgSegment.props.disabled).toBe(true);
     const flatStyle = flattenStyle(orgSegment.props.style);
     expect(flatStyle.opacity).toBeLessThan(1);
     expect(() => orgSegment.props.onPress?.()).not.toThrow();
@@ -457,6 +461,8 @@ describe('03-scope-toggle-ui FR3: Org gating and backward compatibility', () => 
     const onScopeChange = jest.fn();
     const tree = renderBar({ scope: 'personal', orgTierEnabled: true, onScopeChange });
     const orgSegment = tree.root.findByProps({ testID: 'scope-segment-org' });
+    // orgTierEnabled controls only the dimmed preview — Org stays disabled even when enabled.
+    expect(orgSegment.props.disabled).toBe(true);
     const flatStyle = flattenStyle(orgSegment.props.style);
     expect(flatStyle.opacity === undefined || flatStyle.opacity === 1).toBe(true);
     expect(() => orgSegment.props.onPress?.()).not.toThrow();
