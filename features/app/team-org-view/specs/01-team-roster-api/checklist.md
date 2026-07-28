@@ -45,22 +45,22 @@ Feature: `team-org-view`
 ## Phase 1.1: Implementation
 
 ### FR1: Define team roster API types
-- [ ] Add `RawTeam` to `src/types/api.ts` (`{ id: number; name: string }`, API-source comments)
-- [ ] Add `RawTeamAssignment` to `src/types/api.ts` (nested `candidate`/`manager`/`team`, optional `photoUrl`/`avatarTypes`, API-source comments)
-- [ ] Add `TeamMember` to `src/types/api.ts` (app-facing shape, string IDs, `isManager: boolean`)
+- [x] Add `RawTeam` to `src/types/api.ts` (`{ id: number; name: string }`, API-source comments)
+- [x] Add `RawTeamAssignment` to `src/types/api.ts` (nested `candidate`/`manager`/`team`, optional `photoUrl`/`avatarTypes`, API-source comments)
+- [x] Add `TeamMember` to `src/types/api.ts` (app-facing shape, string IDs, `isManager: boolean`)
 
 ### FR2: Fetch the current manager's active teams
-- [ ] Create `src/api/team.ts`
-- [ ] Implement `fetchMyTeams(token, useQA)` per Technical Design: `apiGet<RawTeam[] | null>('/api/v2/teams', { status: 'ACTIVE' }, token, useQA)`, return `[]` for non-array responses
-- [ ] Add short JSDoc per module convention (`hourglassws/CLAUDE.md` comments rule — exported `src/api/` functions get 2-3 line JSDoc)
+- [x] Create `src/api/team.ts`
+- [x] Implement `fetchMyTeams(token, useQA)` per Technical Design: `apiGet<RawTeam[] | null>('/api/v2/teams', { status: 'ACTIVE' }, token, useQA)`, return `[]` for non-array responses
+- [x] Add short JSDoc per module convention (`hourglassws/CLAUDE.md` comments rule — exported `src/api/` functions get 2-3 line JSDoc)
 
 ### FR3: Fetch and map one team's active roster
-- [ ] Implement private `AssignmentsPage` structural type in `team.ts`
-- [ ] Implement `fetchTeamRoster(teamId, token, useQA)`: call `apiGet` for `/api/v2/teams/assignments` with `{ teamId, status: 'ACTIVE' }`
-- [ ] Implement envelope handling: read `response.content` when array, else accept bare array, else `[]`
-- [ ] Implement defensive `status === 'ACTIVE'` filter
-- [ ] Implement `RawTeamAssignment` → `TeamMember` mapping exactly per Technical Design
-- [ ] Add JSDoc per module convention
+- [x] Implement private `AssignmentsPage` structural type in `team.ts`
+- [x] Implement `fetchTeamRoster(teamId, token, useQA)`: call `apiGet` for `/api/v2/teams/assignments` with `{ teamId, status: 'ACTIVE' }`
+- [x] Implement envelope handling: read `response.content` when array, else accept bare array, else `[]`
+- [x] Implement defensive `status === 'ACTIVE'` filter
+- [x] Implement `RawTeamAssignment` → `TeamMember` mapping exactly per Technical Design
+- [x] Add JSDoc per module convention
 
 ---
 
