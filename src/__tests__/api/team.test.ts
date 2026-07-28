@@ -1,9 +1,14 @@
 // FR1-FR3 (01-team-roster-api): Tests for fetchMyTeams and fetchTeamRoster
 // Written BEFORE implementation (TDD red phase) — src/api/team.ts does not exist yet.
+//
+// FR1 (02-team-aggregate-hook): Tests for fetchReportTimesheet, extending this
+// file per spec.md's "Files to Create/Modify" table — written BEFORE
+// fetchReportTimesheet exists in src/api/team.ts.
 
-import { fetchMyTeams, fetchTeamRoster } from '../../api/team';
+import { fetchMyTeams, fetchTeamRoster, fetchReportTimesheet } from '../../api/team';
 import { AuthError, NetworkError } from '../../api/errors';
 import type { RawTeam, RawTeamAssignment, TeamMember } from '../../types/api';
+import type { TimesheetResponse } from '../../lib/hours';
 
 // Mock the API client module so we can intercept calls, matching the
 // convention in __tests__/api/work-diary.test.ts.
@@ -456,5 +461,107 @@ describe('FR3: fetchTeamRoster', () => {
     await expect(fetchTeamRoster('2374', MOCK_TOKEN, false)).rejects.toThrow(NetworkError);
     mockApiGet.mockRejectedValueOnce(networkError);
     await expect(fetchTeamRoster('2374', MOCK_TOKEN, false)).rejects.toBe(networkError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FR1 (02-team-aggregate-hook): fetchReportTimesheet(member, weekStartDate, token, useQA)
+// ---------------------------------------------------------------------------
+
+const MEMBER: TeamMember = {
+  assignmentId: '79996',
+  candidateId: '2362707',
+  managerId: '2372227',
+  teamId: '2374',
+  teamName: 'Team Alpha',
+  name: 'Jane Doe',
+  photoUrl: undefined,
+  isManager: false,
+};
+
+const WEEK_START = '2026-07-27';
+
+describe('FR1 (02-team-aggregate-hook): fetchReportTimesheet', () => {
+  it('sends userId, managerId, teamId, date, and period: WEEK together in a single request', async () => {
+    mockApiGet.mockResolvedValueOnce([]);
+    await fetchReportTimesheet(MEMBER, WEEK_START, MOCK_TOKEN, false);
+    expect(mockApiGet).toHaveBeenCalledTimes(1);
+    expect(mockApiGet).toHaveBeenCalledWith(
+      '/api/timetracking/timesheets',
+      {
+        date: WEEK_START,
+        period: 'WEEK',
+        userId: MEMBER.candidateId,
+        managerId: MEMBER.managerId,
+        teamId: MEMBER.teamId,
+      },
+      MOCK_TOKEN,
+      false,
+    );
+  });
+
+  it('uses the authenticated manager token and the environment selected by useQA (false)', async () => {
+    mockApiGet.mockResolvedValueOnce([]);
+    await fetchReportTimesheet(MEMBER, WEEK_START, MOCK_TOKEN, false);
+    expect(mockApiGet).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      MOCK_TOKEN,
+      false,
+    );
+  });
+
+  it('uses the authenticated manager token and the environment selected by useQA (true)', async () => {
+    mockApiGet.mockResolvedValueOnce([]);
+    await fetchReportTimesheet(MEMBER, WEEK_START, MOCK_TOKEN, true);
+    expect(mockApiGet).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      MOCK_TOKEN,
+      true,
+    );
+  });
+
+  it('returns the first array item when the API responds with a populated array', async () => {
+    const timesheet: TimesheetResponse = {
+      totalHours: 32.5,
+      averageHoursPerDay: 6.5,
+      stats: [{ date: '2026-07-27', hours: 8 }],
+    };
+    mockApiGet.mockResolvedValueOnce([timesheet]);
+    const result = await fetchReportTimesheet(MEMBER, WEEK_START, MOCK_TOKEN, false);
+    expect(result).toEqual(timesheet);
+  });
+
+  it('returns null when the API returns an empty array (no timesheet)', async () => {
+    mockApiGet.mockResolvedValueOnce([]);
+    const result = await fetchReportTimesheet(MEMBER, WEEK_START, MOCK_TOKEN, false);
+    expect(result).toBeNull();
+  });
+
+  it('returns null when the API returns a nullish response', async () => {
+    mockApiGet.mockResolvedValueOnce(null);
+    const result = await fetchReportTimesheet(MEMBER, WEEK_START, MOCK_TOKEN, false);
+    expect(result).toBeNull();
+  });
+
+  it('never attempts a two-parameter or one-parameter fallback request (regression guard against fetchTimesheet strategy shape)', async () => {
+    // Simulate the underlying HTTP layer rejecting (e.g. 400) — a fallback-based
+    // implementation like fetchTimesheet would retry with fewer params; this
+    // function must not: exactly one apiGet call, and the thrown error propagates.
+    const apiError = new Error('CROS-0005: missing required parameter');
+    mockApiGet.mockRejectedValueOnce(apiError);
+    await expect(
+      fetchReportTimesheet(MEMBER, WEEK_START, MOCK_TOKEN, false),
+    ).rejects.toBe(apiError);
+    expect(mockApiGet).toHaveBeenCalledTimes(1);
+  });
+
+  it('propagates the exact AuthError instance thrown by apiGet unchanged', async () => {
+    const authError = new AuthError(401);
+    mockApiGet.mockRejectedValueOnce(authError);
+    await expect(
+      fetchReportTimesheet(MEMBER, WEEK_START, MOCK_TOKEN, false),
+    ).rejects.toBe(authError);
   });
 });
