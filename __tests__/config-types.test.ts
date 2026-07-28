@@ -59,3 +59,47 @@ describe('FR6: Config Types', () => {
     expect(config.teams[0].id).toBe('1');
   });
 });
+
+// FR3 (03-scope-toggle-ui): orgTierEnabled rollout flag — additive, optional
+describe('FR3: CrossoverConfig.orgTierEnabled', () => {
+  it('accepts a config without orgTierEnabled (existing configs still compile/validate)', () => {
+    const config: CrossoverConfig = {
+      userId: '1',
+      fullName: 'Test',
+      managerId: '2',
+      primaryTeamId: '1',
+      teams: [],
+      hourlyRate: 10,
+      weeklyLimit: 40,
+      useQA: false,
+      isManager: true,
+      assignmentId: '3',
+      lastRoleCheck: '',
+      debugMode: false,
+      setupComplete: false,
+      setupDate: '',
+    };
+    expect(config.orgTierEnabled).toBeUndefined();
+  });
+
+  it('accepts orgTierEnabled=true without changing other required fields', () => {
+    const config: CrossoverConfig = {
+      userId: '1',
+      fullName: 'Test',
+      managerId: '2',
+      primaryTeamId: '1',
+      teams: [],
+      hourlyRate: 10,
+      weeklyLimit: 40,
+      useQA: false,
+      isManager: true,
+      assignmentId: '3',
+      lastRoleCheck: '',
+      debugMode: false,
+      setupComplete: false,
+      setupDate: '',
+      orgTierEnabled: true,
+    };
+    expect(config.orgTierEnabled).toBe(true);
+  });
+});
