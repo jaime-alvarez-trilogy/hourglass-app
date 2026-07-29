@@ -188,3 +188,96 @@ describe('useInsightChips — SC2.7 — result never > 3', () => {
     expect(result.length).toBeLessThanOrEqual(3);
   });
 });
+
+// ─── FR4 — SC4 schedule chip integration (02-schedule-insights) ───────────────
+//
+// SC4.1 — useWorkSchedule returns null → no schedule chip added
+// SC4.2 — useWorkSchedule returns WorkSchedule + chips already 3 → schedule NOT in result
+// SC4.3 — useWorkSchedule returns WorkSchedule + chips = 0 → schedule is only chip
+// SC4.4 — useWorkSchedule returns WorkSchedule + chips = 2 → schedule is 3rd chip
+// SC4.5 — schedule chip key is "schedule" when present
+// SC4.6 — hook source imports useWorkSchedule and formatScheduleChip
+// SC4.7 — chips.slice(0, 3) still applied after all four pushes
+
+import type { WorkSchedule } from '../../lib/scheduleInsights';
+import { formatScheduleChip } from '../../lib/insightFormatting';
+
+/** Simulate the updated hook body with schedule as 4th candidate. */
+function assembleChipsWithSchedule(
+  p: typeof ACTIVE_PRESCRIPTION | null,
+  ai: typeof NULL_AI,
+  schedule: WorkSchedule | null,
+) {
+  const chips = [];
+  if (p) chips.push(formatPrescriptionChip(p));
+  const t = formatTrendChip(ai.trend, ai.best);
+  if (t) chips.push(t);
+  if (ai.brainliftCorrelation) chips.push(formatCorrelationChip(ai.brainliftCorrelation));
+  if (schedule) chips.push(formatScheduleChip(schedule));
+  return chips.slice(0, 3);
+}
+
+const SAMPLE_SCHEDULE: WorkSchedule = {
+  peakRange: [7, 11],
+  peakHour: 9,
+  windowStart: 7,
+  windowEnd: 17,
+  weeksCovered: 6,
+};
+
+describe('useInsightChips — SC4.1 — schedule null → no schedule chip', () => {
+  it('does not add schedule chip when useWorkSchedule returns null', () => {
+    const result = assembleChipsWithSchedule(null, NULL_AI, null);
+    expect(result.every(c => c.key !== 'schedule')).toBe(true);
+  });
+});
+
+describe('useInsightChips — SC4.2 — chips already 3, schedule returns data → schedule excluded', () => {
+  it('slice(0,3) drops schedule when 3 higher-priority chips fill the slots', () => {
+    const result = assembleChipsWithSchedule(ACTIVE_PRESCRIPTION, FULL_AI, SAMPLE_SCHEDULE);
+    expect(result).toHaveLength(3);
+    expect(result.every(c => c.key !== 'schedule')).toBe(true);
+  });
+});
+
+describe('useInsightChips — SC4.3 — chips = 0, schedule data → schedule is only chip', () => {
+  it('returns 1 chip with key "schedule" when no other chips exist', () => {
+    const result = assembleChipsWithSchedule(null, NULL_AI, SAMPLE_SCHEDULE);
+    expect(result).toHaveLength(1);
+    expect(result[0].key).toBe('schedule');
+  });
+});
+
+describe('useInsightChips — SC4.4 — chips = 2, schedule data → schedule is 3rd', () => {
+  it('schedule fills the 3rd slot when 2 higher-priority chips exist', () => {
+    const result = assembleChipsWithSchedule(ACTIVE_PRESCRIPTION, TREND_AI, SAMPLE_SCHEDULE);
+    expect(result).toHaveLength(3);
+    expect(result[2].key).toBe('schedule');
+  });
+});
+
+describe('useInsightChips — SC4.5 — schedule chip key is "schedule"', () => {
+  it('chip key equals "schedule" when schedule data is available', () => {
+    const result = assembleChipsWithSchedule(null, NULL_AI, SAMPLE_SCHEDULE);
+    expect(result[0].key).toBe('schedule');
+  });
+});
+
+describe('useInsightChips — SC4.6 — hook imports useWorkSchedule and formatScheduleChip', () => {
+  it('source imports useWorkSchedule', () => {
+    const src = fs.readFileSync(HOOK_FILE, 'utf8');
+    expect(src).toMatch(/useWorkSchedule/);
+  });
+
+  it('source imports formatScheduleChip', () => {
+    const src = fs.readFileSync(HOOK_FILE, 'utf8');
+    expect(src).toMatch(/formatScheduleChip/);
+  });
+});
+
+describe('useInsightChips — SC4.7 — slice(0, 3) still applied after 4th push', () => {
+  it('result never exceeds 3 even when all four chips are available', () => {
+    const result = assembleChipsWithSchedule(ACTIVE_PRESCRIPTION, FULL_AI, SAMPLE_SCHEDULE);
+    expect(result.length).toBeLessThanOrEqual(3);
+  });
+});

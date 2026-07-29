@@ -9,6 +9,7 @@ import type {
   AIBestInsight,
   BrainLiftCorrelationInsight,
 } from './aiInsights';
+import type { WorkSchedule } from './scheduleInsights';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -129,5 +130,27 @@ export function formatCorrelationChip(c: BrainLiftCorrelationInsight): InsightCh
     boldLine: `BrainLift weeks → +${delta}pts AI next week`,
     mutedLine: `5h+ BL: ${high}% avg · other weeks: ${low}%`,
     dotColor: colors.violet,
+  };
+}
+
+// ─── formatScheduleChip ───────────────────────────────────────────────────────
+
+/**
+ * Converts a WorkSchedule into an InsightChipData for the schedule chip.
+ * boldLine: "Peak hours: {startFmt}–{endFmt}" using 12-hour am/pm notation.
+ * mutedLine: "Across {N} week(s)" with singular/plural agreement.
+ * dotColor is always colors.cyan (mirrors AI% — both describe performance timing).
+ */
+export function formatScheduleChip(s: WorkSchedule): InsightChipData {
+  function fmt(h: number): string {
+    if (h === 0) return '12am';
+    if (h === 12) return '12pm';
+    return h < 12 ? `${h}am` : `${h - 12}pm`;
+  }
+  return {
+    key: 'schedule',
+    boldLine: `Peak hours: ${fmt(s.peakRange[0])}–${fmt(s.peakRange[1])}`,
+    mutedLine: `Across ${s.weeksCovered} week${s.weeksCovered === 1 ? '' : 's'}`,
+    dotColor: colors.cyan,
   };
 }

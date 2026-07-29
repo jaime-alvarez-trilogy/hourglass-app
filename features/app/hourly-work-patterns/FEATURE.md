@@ -1,6 +1,6 @@
 # Hourly Work Patterns
 
-**Status:** Research complete, ready for spec → implement
+**Status:** Complete (both specs implemented)
 **Owner:** @jaime-alvarez-trilogy
 **Created:** 2026-06-09
 
@@ -52,3 +52,4 @@ Follows the Smart Insights design system:
 |---|---|---|
 | 2026-06-09 | — | Feature created. API confirmed: `slot.date` gives local hour via `new Date(slot.date).getHours()`. Live prod response validated all slot fields. |
 | 2026-06-10 | [01-hourly-data-layer](specs/01-hourly-data-layer/spec.md) | **Complete.** Extended `WorkDiarySlot` type (7 new fields + `SecondBrainDeepDive`), added `hourlySlots[24]` to `WeeklySnapshot`, computed in backfill hook, updated API docs. 30 tests, all passing. |
+| 2026-06-10 | [02-schedule-insights](specs/02-schedule-insights/spec.md) | **Complete.** `inferWorkSchedule()` pure fn + `useWorkSchedule()` hook + `formatScheduleChip()` + integration into `useInsightChips`. 4 FRs, 57 tests, all passing. Commits: test(FR1-FR4), feat(FR1), feat(FR3), feat(FR2), feat(FR4). |
