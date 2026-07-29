@@ -91,6 +91,38 @@ function computeHourlySlots(slotsData: Record<string, WorkDiarySlot[]>): number[
   return counts;
 }
 
+interface HourlyEnrichment {
+  hourlySlots: number[];
+  hourlyIntensity: number[];        // sum-of-intensityScore per hour (divide by hourlySlots[h] for avg)
+  hourlyAISlots: number[];          // count of ai_usage|second_brain slots per hour
+  hourlyProductiveSlots: number[];  // count of PRODUCTIVE slots per hour
+}
+
+/** Fused single-pass helper: computes all four 24-element hourly arrays in one loop.
+ *  Replaces separate computeHourlySlots call at the backfill call site.
+ *  hourlyIntensity stores sums (not averages) — divide by hourlySlots[h] at read time. */
+function computeHourlyEnrichment(slotsData: Record<string, WorkDiarySlot[]>): HourlyEnrichment {
+  const hourlySlots = new Array<number>(24).fill(0);
+  const hourlyIntensity = new Array<number>(24).fill(0);
+  const hourlyAISlots = new Array<number>(24).fill(0);
+  const hourlyProductiveSlots = new Array<number>(24).fill(0);
+  for (const slots of Object.values(slotsData)) {
+    for (const slot of slots) {
+      const hour = new Date(slot.date).getHours();
+      if (!Number.isFinite(hour) || hour < 0 || hour >= 24) continue;
+      hourlySlots[hour]++;
+      hourlyIntensity[hour] += (slot.intensityScore ?? 0);
+      if (slot.tags.includes('ai_usage') || slot.tags.includes('second_brain')) {
+        hourlyAISlots[hour]++;
+      }
+      if (slot.productivityCategory === 'PRODUCTIVE') {
+        hourlyProductiveSlots[hour]++;
+      }
+    }
+  }
+  return { hourlySlots, hourlyIntensity, hourlyAISlots, hourlyProductiveSlots };
+}
+
 /** Computes AI% midpoint and BrainLift hours from a map of per-day TagData. */
 function computeWeekAI(dayData: Record<string, TagData>): { aiPct: number; brainliftHours: number } {
   let totalSlots = 0, aiUsage = 0, secondBrain = 0, noTags = 0;
@@ -126,7 +158,16 @@ async function runBackfill(
     const entry = historyMap.get(monday);
     // Fill if missing, aiPct === 0, or optional fields not yet computed.
     // dailyHours added in 01-daily-history-store; hourlySlots added in 01-hourly-data-layer.
-    if (!entry || entry.aiPct === 0 || entry.dailyHours === undefined || entry.hourlySlots === undefined) {
+    // hourlyIntensity/hourlyAISlots/hourlyProductiveSlots added in 01-enriched-hourly-aggregation.
+    if (
+      !entry ||
+      entry.aiPct === 0 ||
+      entry.dailyHours === undefined ||
+      entry.hourlySlots === undefined ||
+      entry.hourlyIntensity === undefined ||
+      entry.hourlyAISlots === undefined ||
+      entry.hourlyProductiveSlots === undefined
+    ) {
       weeksToFill.push(monday);
     }
   }
@@ -175,8 +216,8 @@ async function runBackfill(
     if (Object.keys(dayData).length > 0) {
       const { aiPct, brainliftHours } = computeWeekAI(dayData);
       const dailyHours = computeDailyHours(monday, slotsData);
-      const hourlySlots = computeHourlySlots(slotsData);
-      updated = mergeWeeklySnapshot(updated, { weekStart: monday, aiPct, brainliftHours, dailyHours, hourlySlots });
+      const enrichment = computeHourlyEnrichment(slotsData);
+      updated = mergeWeeklySnapshot(updated, { weekStart: monday, aiPct, brainliftHours, dailyHours, ...enrichment });
       // Save + notify after each week so useWeeklyHistory re-reads incrementally.
       // This drives the progressive chart animation — each write triggers a re-read
       // which grows data.length by 1, re-triggering TrendSparkline's clip reveal.

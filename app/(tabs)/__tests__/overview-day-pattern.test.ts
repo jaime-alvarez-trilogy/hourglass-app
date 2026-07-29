@@ -89,11 +89,12 @@ describe('FR3: overview.tsx — WORK PATTERN section rendered correctly', () => 
 });
 
 // ─── FR4: Stagger count update ────────────────────────────────────────────────
+// Updated by 04-overview-integration: count 7→8 (Hourly Patterns at index 7)
 
-describe('FR4: overview.tsx — stagger count updated to 7', () => {
-  it('SC4.1: calls useStaggeredEntry with count: 7', () => {
+describe('FR4: overview.tsx — stagger count updated to 8 (04-overview-integration)', () => {
+  it('SC4.1: calls useStaggeredEntry with count: 8', () => {
     const source = fs.readFileSync(OVERVIEW_FILE, 'utf8');
-    expect(source).toMatch(/useStaggeredEntry\s*\(\s*\{\s*count\s*:\s*7/);
+    expect(source).toMatch(/useStaggeredEntry\s*\(\s*\{\s*count\s*:\s*8/);
   });
 
   it('SC4.2: getEntryStyle(6) appears exactly once', () => {

@@ -378,7 +378,8 @@ describe('FR4: Approvals screen — useStaggeredEntry integration', () => {
 
 // ─── FR5: Overview screen (overview.tsx) ──────────────────────────────────────
 // Updated by 03-overview-integration: count 6→7, adds getEntryStyle(6) for Work Pattern.
-// Re-ordered: InsightChips at i (dynamic, 0–2), charts at 3/4/5, Work Pattern at 6.
+// Updated by 04-overview-integration: count 7→8, adds getEntryStyle(7) for Hourly Patterns.
+// Re-ordered: InsightChips at i (dynamic, 0–2), charts at 3/4/5, Work Pattern 6, Hourly Patterns 7.
 
 describe('FR5: Overview screen — useStaggeredEntry integration', () => {
   it('imports useStaggeredEntry from @/src/hooks/useStaggeredEntry', () => {
@@ -386,10 +387,10 @@ describe('FR5: Overview screen — useStaggeredEntry integration', () => {
     expect(source).toMatch(/useStaggeredEntry.*from.*@\/src\/hooks\/useStaggeredEntry/);
   });
 
-  // SC5.1: count 7 (InsightChips 0–2, charts 3/4/5, Work Pattern 6)
-  it('SC5.1: calls useStaggeredEntry with count: 7', () => {
+  // SC5.1: count 8 (InsightChips 0–2, charts 3/4/5, Work Pattern 6, Hourly Patterns 7)
+  it('SC5.1: calls useStaggeredEntry with count: 8', () => {
     const source = fs.readFileSync(OVERVIEW_FILE, 'utf8');
-    expect(source).toMatch(/useStaggeredEntry\s*\(\s*\{\s*count\s*:\s*7/);
+    expect(source).toMatch(/useStaggeredEntry\s*\(\s*\{\s*count\s*:\s*8/);
   });
 
   // Slots 0–2 are used by InsightChips (dynamic: getEntryStyle(i) in .map()).
@@ -420,11 +421,12 @@ describe('FR5: Overview screen — useStaggeredEntry integration', () => {
     expect(source).toMatch(/getEntryStyle\(6\)/);
   });
 
-  // SC5.3: total literal getEntryStyle calls is 4 (indices 3, 4, 5, 6; InsightChips use i)
-  it('SC5.3: uses exactly 4 literal getEntryStyle calls (indices 3, 4, 5, 6; InsightChips use i)', () => {
+  // SC5.3: total literal getEntryStyle calls is 5 (indices 3, 4, 5, 6, 7; InsightChips use i)
+  // Updated by 04-overview-integration: 4→5 (added getEntryStyle(7) for Hourly Patterns)
+  it('SC5.3: uses exactly 5 literal getEntryStyle calls (indices 3, 4, 5, 6, 7; InsightChips use i)', () => {
     const source = fs.readFileSync(OVERVIEW_FILE, 'utf8');
     const calls = (source.match(/getEntryStyle\(\d+\)/g) || []).length;
-    expect(calls).toBe(4);
+    expect(calls).toBe(5);
   });
 
   it('overview.tsx renders OverviewStickyBar for floating scrub display', () => {
@@ -435,7 +437,8 @@ describe('FR5: Overview screen — useStaggeredEntry integration', () => {
   it('4W/12W/24W toggle header row is NOT wrapped with getEntryStyle', () => {
     const source = fs.readFileSync(OVERVIEW_FILE, 'utf8');
     // The toggle is inside OverviewHeroCard — literal getEntryStyle calls only for chart wrappers
+    // 04-overview-integration adds getEntryStyle(7) — max is now 5
     const calls = (source.match(/getEntryStyle\(\d+\)/g) || []).length;
-    expect(calls).toBeLessThanOrEqual(4);
+    expect(calls).toBeLessThanOrEqual(5);
   });
 });

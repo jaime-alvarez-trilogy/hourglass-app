@@ -29,6 +29,25 @@ export interface WeeklySnapshot {
    * Consumers treat missing as all-zeros; inferWorkSchedule returns null for < 4 valid weeks.
    */
   hourlySlots?: number[];
+  /**
+   * Sum of intensityScore per local hour of day (all Mon–Sun days combined).
+   * Length 24. Divide by hourlySlots[h] to get avg intensity per hour.
+   * Absent on snapshots processed before this field was added.
+   * Consumers treat missing as all-zeros.
+   */
+  hourlyIntensity?: number[];
+  /**
+   * Count of ai_usage or second_brain tagged slots per local hour of day.
+   * Length 24. Absent on snapshots processed before this field was added.
+   * Consumers treat missing as all-zeros.
+   */
+  hourlyAISlots?: number[];
+  /**
+   * Count of PRODUCTIVE productivityCategory slots per local hour of day.
+   * Length 24. Absent on snapshots processed before this field was added.
+   * Consumers treat missing as all-zeros.
+   */
+  hourlyProductiveSlots?: number[];
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -61,7 +80,8 @@ export function mergeWeeklySnapshot(
     );
   } else {
     // Append new entry with defaults for missing required fields; optional fields
-    // (overtime, dailyHours, hourlySlots) are included only when present in partial.
+    // (overtime, dailyHours, hourlySlots, hourlyIntensity, hourlyAISlots, hourlyProductiveSlots)
+    // are included only when present in partial.
     const entry: WeeklySnapshot = {
       weekStart: partial.weekStart,
       hours: partial.hours ?? 0,
@@ -71,6 +91,9 @@ export function mergeWeeklySnapshot(
       ...(partial.overtime !== undefined && { overtime: partial.overtime }),
       ...(partial.dailyHours !== undefined && { dailyHours: partial.dailyHours }),
       ...(partial.hourlySlots !== undefined && { hourlySlots: partial.hourlySlots }),
+      ...(partial.hourlyIntensity !== undefined && { hourlyIntensity: partial.hourlyIntensity }),
+      ...(partial.hourlyAISlots !== undefined && { hourlyAISlots: partial.hourlyAISlots }),
+      ...(partial.hourlyProductiveSlots !== undefined && { hourlyProductiveSlots: partial.hourlyProductiveSlots }),
     };
     updated = [...history, entry];
   }
