@@ -18,7 +18,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { View, Text, ScrollView } from 'react-native';
+import { View, Text, ScrollView, Image } from 'react-native';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
@@ -26,6 +26,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import Animated from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { useConfig } from '@/src/hooks/useConfig';
+import { useIsManager } from '@/src/hooks/useIsManager';
 import { useOverviewData } from '@/src/hooks/useOverviewData';
 import { useFocusKey } from '@/src/hooks/useFocusKey';
 import { useEarningsHistory } from '@/src/hooks/useEarningsHistory';
@@ -35,6 +36,7 @@ import AmbientBackground, { getAmbientColor } from '@/src/components/AmbientBack
 import AnimatedMeshBackground from '@/src/components/AnimatedMeshBackground';
 import Card from '@/src/components/Card';
 import SectionLabel from '@/src/components/SectionLabel';
+import SkeletonLoader from '@/src/components/SkeletonLoader';
 import TrendSparkline from '@/src/components/TrendSparkline';
 import FadeInScreen from '@/src/components/FadeInScreen';
 import OverviewHeroCard from '@/src/components/OverviewHeroCard';
@@ -52,6 +54,11 @@ import { OverviewStickyBar } from '@/src/components/OverviewStickyBar';
 import { useWeeklyHistory } from '@/src/hooks/useWeeklyHistory';
 import { computeDayWindowAvgs } from '@/src/lib/dayPatternUtils';
 import { DayPatternChart } from '@/src/components/DayPatternChart';
+import { HourlyPatternCard } from '@/src/components/HourlyPatternCard';
+import { useHourlyInsights } from '@/src/hooks/useHourlyInsights';
+import { useTeamAggregateData } from '@/src/hooks/useTeamAggregateData';
+import type { TeamMemberBreakdown } from '@/src/hooks/useTeamAggregateData';
+import { log } from '@/src/lib/log';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -219,13 +226,17 @@ export default function OverviewScreen() {
 
   // Approval urgency card (01-approval-urgency-card)
   const { items: approvalItems } = useApprovalItems();
-  const isManager = config?.isManager === true || config?.devManagerView === true;
+  const isManager = useIsManager();
+  // 04-team-view-content FR1: manager-only Personal/Team scope toggle. Local,
+  // non-persisted — resets to 'personal' on every mount.
+  const [scope, setScope] = useState<'personal' | 'team'>('personal');
   // Approval mesh signal: amber (behind) Mon-Wed, coral (critical) Thu-Sun UTC.
   // When non-null, overrides earningsPace for Node C and adds floor glow at Requests tab.
   const approvalMeshState = getApprovalMeshState(approvalItems.length);
   // 05-insights-ui: count 3→6 — chips occupy indices 3, 4, 5 in the same cascade
   // 03-overview-integration: count 6→7 — Work Pattern at index 6
-  const { getEntryStyle } = useStaggeredEntry({ count: 7 });
+  // 04-overview-integration: count 7→8 — Hourly Patterns at index 7
+  const { getEntryStyle } = useStaggeredEntry({ count: 8 });
 
   // Ensure earnings/hours history is populated even if home tab hasn't run yet
   useEarningsHistory(24);
@@ -313,6 +324,9 @@ export default function OverviewScreen() {
 
   // ── Insight chips (05-insights-ui) ─────────────────────────────────────────
   const insightChips = useInsightChips();
+
+  // ── Hourly pattern insights (04-overview-integration) ─────────────────────
+  const { profile: hourlyProfile, focusWindow, aiHotZone } = useHourlyInsights();
 
   // ── Day-pattern chart (03-overview-integration) ────────────────────────────
   const { snapshots } = useWeeklyHistory();
@@ -415,6 +429,8 @@ export default function OverviewScreen() {
             </View>
           )}
 
+          {scope === 'personal' && (
+            <>
           {/* 08-dark-glass-polish FR1: Bento grid layout */}
           {/* Earnings — full width (primary importance) */}
           <Animated.View style={getEntryStyle(3)}>
@@ -520,6 +536,24 @@ export default function OverviewScreen() {
               </View>
             </Card>
           </Animated.View>
+
+          {/* Hourly Patterns — 24-bar histogram (04-overview-integration) */}
+          {hourlyProfile && (
+            <Animated.View style={[getEntryStyle(7)]}>
+              <HourlyPatternCard
+                profile={hourlyProfile}
+                focusWindow={focusWindow}
+                aiHotZone={aiHotZone}
+                width={patternCardWidth}
+              />
+            </Animated.View>
+          )}
+            </>
+          )}
+
+          {/* 04-team-view-content FR2: manager-only Team scope replaces the
+              personal chart block above with current-week team aggregates. */}
+          {isManager && scope === 'team' && <TeamViewContent />}
         </ScrollView>
 
         {/* Floating sticky bar — outside ScrollView, overlays chart content */}
@@ -529,8 +563,198 @@ export default function OverviewScreen() {
           scrubSnapshot={stickyBarScrubData}
           visible={stickyBarVisible}
           style={{ position: 'absolute', top: safeTop + 8, left: 16, right: 16, zIndex: 10 }}
+          scope={isManager ? scope : undefined}
+          onScopeChange={isManager ? setScope : undefined}
+          orgTierEnabled={config?.orgTierEnabled}
         />
       </SafeAreaView>
     </FadeInScreen>
+  );
+}
+
+// ─── Team view (04-team-view-content) ────────────────────────────────────────
+
+const TEAM_SCRUB_NOOP: ScrubChangeCallback = () => {};
+
+function getInitials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return '?';
+  return words.slice(0, 2).map((w) => w[0].toUpperCase()).join('');
+}
+
+function TeamMemberRow({ entry }: { entry: TeamMemberBreakdown }) {
+  const { member, hours, aiPct, brainliftHours, fetchFailed } = entry;
+  const [photoFailed, setPhotoFailed] = useState(false);
+  const showPhoto = !!member.photoUrl && !photoFailed;
+
+  return (
+    <Card style={fetchFailed ? { opacity: 0.5 } : undefined}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        {showPhoto ? (
+          <Image
+            source={{ uri: member.photoUrl }}
+            style={{ width: 36, height: 36, borderRadius: 18 }}
+            onError={() => setPhotoFailed(true)}
+          />
+        ) : (
+          <View
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              backgroundColor: colors.border,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Text style={{ color: colors.textSecondary, fontSize: 13, fontWeight: '600' }}>
+              {getInitials(member.name)}
+            </Text>
+          </View>
+        )}
+
+        <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text
+              className="text-textPrimary text-sm font-sans-semibold"
+              numberOfLines={1}
+              style={{ flexShrink: 1 }}
+            >
+              {member.name}
+            </Text>
+            {member.isManager && (
+              <View style={{ backgroundColor: colors.violet + '22', borderRadius: 6, paddingHorizontal: 5, paddingVertical: 1 }}>
+                <Text style={{ color: colors.violet, fontSize: 10, fontWeight: '700' }}>MGR</Text>
+              </View>
+            )}
+          </View>
+
+          {fetchFailed ? (
+            <Text className="text-textMuted text-xs font-sans" style={{ marginTop: 2 }}>
+              Couldn't load
+            </Text>
+          ) : (
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 2, flexWrap: 'wrap' }}>
+              <Text style={{ color: colors.gold, fontSize: 12, fontVariant: ['tabular-nums'] }}>
+                {hours.toFixed(1)}h
+              </Text>
+              <Text style={{ color: colors.cyan, fontSize: 12, fontVariant: ['tabular-nums'] }}>
+                {Math.round(aiPct)}%
+              </Text>
+              <Text style={{ color: colors.violet, fontSize: 12, fontVariant: ['tabular-nums'] }}>
+                {brainliftHours.toFixed(1)}h
+              </Text>
+            </View>
+          )}
+        </View>
+      </View>
+    </Card>
+  );
+}
+
+function TeamViewContent() {
+  const { data, isLoading, error } = useTeamAggregateData();
+
+  // FR3: non-null error is always logged, independent of which render branch
+  // below is active — including a background refetch failing alongside
+  // still-valid cached `data`.
+  useEffect(() => {
+    if (error) {
+      log.error('overview.team-aggregate-error', error, {});
+    }
+  }, [error]);
+
+  if (isLoading && data === null) {
+    return (
+      <View style={{ gap: 12 }}>
+        <SkeletonLoader height={96} className="rounded-2xl" />
+        <SkeletonLoader height={96} className="rounded-2xl" />
+        <SkeletonLoader height={72} className="rounded-2xl" />
+      </View>
+    );
+  }
+
+  if (data === null) {
+    return (
+      <Card>
+        <Text className="text-textSecondary text-sm text-center">
+          {error ?? 'Unable to load team data'}
+        </Text>
+      </Card>
+    );
+  }
+
+  if (data.breakdown.length === 0) {
+    return (
+      <Card>
+        <Text className="text-textSecondary text-sm text-center">
+          No direct reports found
+        </Text>
+      </Card>
+    );
+  }
+
+  const { weekHours, weekAiPct, weekBrainliftHours, reportCount, breakdown } = data;
+
+  if (reportCount === 0 && breakdown.length > 0) {
+    return (
+      <View style={{ gap: 12 }}>
+        <Card>
+          <Text className="text-textSecondary text-sm text-center">
+            Unable to load team metrics
+          </Text>
+        </Card>
+        {breakdown.map((entry) => (
+          <TeamMemberRow key={entry.member.assignmentId} entry={entry} />
+        ))}
+      </View>
+    );
+  }
+
+  return (
+    <View style={{ gap: 12 }}>
+      <ChartSection
+        label="TEAM HOURS"
+        heroValue={`${weekHours.toFixed(1)}h`}
+        data={[weekHours]}
+        color={colors.gold}
+        borderAccentColor={colors.gold}
+        weekLabels={['This week']}
+        onScrubChange={TEAM_SCRUB_NOOP}
+        externalCursorIndex={null}
+        chartKey="team-hours"
+      />
+      <ChartSection
+        label="TEAM AI USAGE"
+        heroValue={`${Math.round(weekAiPct)}%`}
+        data={[weekAiPct]}
+        color={colors.cyan}
+        borderAccentColor={colors.cyan}
+        maxValue={100}
+        targetValue={75}
+        showGuide
+        capLabel="75%"
+        weekLabels={['This week']}
+        onScrubChange={TEAM_SCRUB_NOOP}
+        externalCursorIndex={null}
+        chartKey="team-ai"
+      />
+      <ChartSection
+        label="TEAM BRAINLIFT"
+        heroValue={`${weekBrainliftHours.toFixed(1)}h`}
+        data={[weekBrainliftHours]}
+        color={colors.violet}
+        borderAccentColor={colors.violet}
+        weekLabels={['This week']}
+        onScrubChange={TEAM_SCRUB_NOOP}
+        externalCursorIndex={null}
+        chartKey="team-brainlift"
+      />
+
+      <SectionLabel>BY PERSON</SectionLabel>
+      {breakdown.map((entry) => (
+        <TeamMemberRow key={entry.member.assignmentId} entry={entry} />
+      ))}
+    </View>
   );
 }

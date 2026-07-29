@@ -27,6 +27,7 @@ import { timingSmooth } from '@/src/lib/reanimated-presets';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useConfig } from '@/src/hooks/useConfig';
+import { useIsManager } from '@/src/hooks/useIsManager';
 import { useHoursData } from '@/src/hooks/useHoursData';
 import { useEarningsHistory } from '@/src/hooks/useEarningsHistory';
 import { useAIData } from '@/src/hooks/useAIData';
@@ -171,7 +172,7 @@ export default function HoursDashboard() {
 
   // Approval urgency card (01-approval-urgency-card)
   const { items: approvalItems } = useApprovalItems();
-  const isManager = config?.isManager === true || config?.devManagerView === true;
+  const isManager = useIsManager();
 
   const weeklyLimit = config?.weeklyLimit ?? 40;
 

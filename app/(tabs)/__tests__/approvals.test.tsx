@@ -546,8 +546,7 @@ describe('ApprovalsScreen — manager-gated behavior unchanged after useIsManage
   });
 
   it('manager (useIsManager → true): TEAM REQUESTS section renders', () => {
-    (useIsManagerMock as jest.Mock).mockReturnValue(true);
-    setupMocks({ items: [MOCK_APPROVAL_ITEM], entries: [] });
+    setupMocks({ isManager: true, items: [MOCK_APPROVAL_ITEM], entries: [] });
     let tree: any;
     act(() => { tree = create(React.createElement(ApprovalsScreen)); });
     const text = JSON.stringify(tree.toJSON());
@@ -555,8 +554,7 @@ describe('ApprovalsScreen — manager-gated behavior unchanged after useIsManage
   });
 
   it('manager (useIsManager → true) with pending items: Approve All button renders', () => {
-    (useIsManagerMock as jest.Mock).mockReturnValue(true);
-    setupMocks({ items: [MOCK_APPROVAL_ITEM], entries: [] });
+    setupMocks({ isManager: true, items: [MOCK_APPROVAL_ITEM], entries: [] });
     let tree: any;
     act(() => { tree = create(React.createElement(ApprovalsScreen)); });
     const text = JSON.stringify(tree.toJSON());

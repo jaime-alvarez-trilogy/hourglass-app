@@ -19,7 +19,7 @@ import {
   RefreshControl,
 } from 'react-native'
 import Animated from 'react-native-reanimated'
-import { useConfig } from '@/src/hooks/useConfig'
+import { useIsManager } from '@/src/hooks/useIsManager'
 import { useApprovalItems } from '@/src/hooks/useApprovalItems'
 import { useMyRequests } from '@/src/hooks/useMyRequests'
 import { ApprovalCard } from '@/src/components/ApprovalCard'
@@ -115,8 +115,7 @@ function buildMyRequestRows(
 }
 
 export default function ApprovalsScreen() {
-  const { config } = useConfig()
-  const isManager = config?.isManager === true || config?.devManagerView === true
+  const isManager = useIsManager()
 
   // My requests — all users
   const { entries, isLoading: myLoading, error: myError, refetch: myRefetch } = useMyRequests()

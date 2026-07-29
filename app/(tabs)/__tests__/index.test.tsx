@@ -66,6 +66,15 @@ jest.mock('expo-router', () => ({
   useRouter: () => ({ push: jest.fn() }),
 }));
 
+// @expo/vector-icons — ApprovalUrgencyCard renders an Ionicons glyph whose real
+// implementation calls Font.loadAsync on mount; that hits expo-font/expo-asset's
+// asset registry, which isn't populated under jest-expo/node and crashes the
+// process. Stub with the string tag, matching ApprovalUrgencyCard.test.tsx and
+// ApprovalUrgencyCardScreenIntegration.test.tsx's existing convention.
+jest.mock('@expo/vector-icons', () => ({
+  Ionicons: 'Ionicons',
+}));
+
 // SafeAreaView passthrough (must be top-level, not in beforeEach)
 jest.mock('react-native-safe-area-context', () => {
   const mockReact = require('react');
