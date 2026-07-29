@@ -77,10 +77,8 @@ Default to writing no comments. The exception is exported functions in `src/api/
 ## QA credentials (for local testing)
 
 - URL: `app-qa.crossover.com`
-- Username: `***REMOVED***`
-- Password: `***REMOVED***`
 - Role: Manager
-- Stored locally in `.env.local` (gitignored)
+- See `QA_EMAIL` / `QA_PASSWORD` in `.env.local` (gitignored) — not committed here. Ask a teammate or check the password manager if you need them.
 
 ## Open TODOs for engineering hygiene
 
