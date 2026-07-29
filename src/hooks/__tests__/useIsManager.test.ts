@@ -7,14 +7,23 @@
 //   SC1.2 — returns true when config.devManagerView === true
 //   SC1.3 — returns false for all other config states, including absent config
 //
-// Strategy: static source analysis (hook file does not exist yet — red phase)
-// plus logic unit tests mirroring the hook's boolean expression. renderHook is
-// not used per project convention (jest-expo/node null-dispatcher issue); this
-// follows the useInsightChips.test.ts pattern of testing the composed logic
-// directly against fixtures.
+// Strategy: static source analysis for the file contract, plus real-hook
+// execution: useConfig is jest-mocked and the actual useIsManager() is called
+// inside a probe component rendered with react-test-renderer. renderHook is
+// not used per project convention (jest-expo/node null-dispatcher issue), but
+// plain component rendering works fine (see approvals.test.tsx/index.test.tsx),
+// so these tests exercise the real hook implementation rather than a copy of
+// its boolean expression.
 
 import * as path from 'path';
 import * as fs from 'fs';
+import * as React from 'react';
+import { create, act } from 'react-test-renderer';
+
+jest.mock('../useConfig');
+
+import { useConfig } from '../useConfig';
+import { useIsManager } from '../useIsManager';
 
 const SRC_ROOT = path.resolve(__dirname, '../..');
 const HOOK_FILE = path.resolve(SRC_ROOT, 'hooks', 'useIsManager.ts');
@@ -55,52 +64,63 @@ describe('useIsManager — file contract (FR1)', () => {
   });
 });
 
-// ─── Logic tests (mirrors the hook's exact expression) ───────────────────────
+// ─── Real-hook execution (SC1.1–SC1.3) ────────────────────────────────────────
 
-describe('useIsManager — logic (SC1.1–SC1.3)', () => {
-  type PartialConfig = { isManager?: unknown; devManagerView?: unknown } | null | undefined;
+function Probe(): React.ReactElement {
+  const value = useIsManager();
+  return React.createElement('probe' as any, { value });
+}
 
-  function isManagerLogic(config: PartialConfig): boolean {
-    return config?.isManager === true || config?.devManagerView === true;
-  }
+/** Renders the real useIsManager() against a mocked useConfig() return. */
+function runIsManager(config: unknown): boolean {
+  (useConfig as jest.Mock).mockReturnValue({ config, isLoading: false });
+  let tree: any;
+  act(() => {
+    tree = create(React.createElement(Probe));
+  });
+  const value = tree.root.findByType('probe' as any).props.value;
+  tree.unmount();
+  return value;
+}
 
+describe('useIsManager — real hook behavior (SC1.1–SC1.3)', () => {
   it('SC1.1 — returns true when config.isManager === true', () => {
-    expect(isManagerLogic({ isManager: true })).toBe(true);
+    expect(runIsManager({ isManager: true })).toBe(true);
   });
 
   it('SC1.2 — returns true when config.devManagerView === true', () => {
-    expect(isManagerLogic({ devManagerView: true })).toBe(true);
+    expect(runIsManager({ devManagerView: true })).toBe(true);
   });
 
   it('returns true when both isManager and devManagerView are true', () => {
-    expect(isManagerLogic({ isManager: true, devManagerView: true })).toBe(true);
+    expect(runIsManager({ isManager: true, devManagerView: true })).toBe(true);
   });
 
   it('SC1.3 — returns false when isManager === false and devManagerView is absent', () => {
-    expect(isManagerLogic({ isManager: false })).toBe(false);
+    expect(runIsManager({ isManager: false })).toBe(false);
   });
 
   it('SC1.3 — returns false when both isManager and devManagerView are false', () => {
-    expect(isManagerLogic({ isManager: false, devManagerView: false })).toBe(false);
+    expect(runIsManager({ isManager: false, devManagerView: false })).toBe(false);
   });
 
   it('SC1.3 — returns false for an empty config object', () => {
-    expect(isManagerLogic({})).toBe(false);
+    expect(runIsManager({})).toBe(false);
   });
 
-  it('SC1.3 — returns false when config is null (matches useConfig()\'s absent-config shape)', () => {
-    expect(isManagerLogic(null)).toBe(false);
+  it("SC1.3 — returns false when config is null (matches useConfig()'s absent-config shape)", () => {
+    expect(runIsManager(null)).toBe(false);
   });
 
   it('SC1.3 — returns false when config is undefined (config still loading)', () => {
-    expect(isManagerLogic(undefined)).toBe(false);
+    expect(runIsManager(undefined)).toBe(false);
   });
 
   it('SC1.3 — returns false when isManager is truthy but not strictly true', () => {
-    expect(isManagerLogic({ isManager: 'true' })).toBe(false);
+    expect(runIsManager({ isManager: 'true' })).toBe(false);
   });
 
   it('SC1.3 — returns false when devManagerView is truthy but not strictly true', () => {
-    expect(isManagerLogic({ devManagerView: 1 })).toBe(false);
+    expect(runIsManager({ devManagerView: 1 })).toBe(false);
   });
 });

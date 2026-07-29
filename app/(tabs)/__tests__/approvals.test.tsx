@@ -390,50 +390,22 @@ describe('ApprovalsScreen — loading skeletons (FR5)', () => {
 // ─── Runtime render: Pull-to-refresh (FR3 SC3.5) ─────────────────────────────
 
 describe('ApprovalsScreen — pull-to-refresh (SC3.5)', () => {
-  it('SC3.5 — useMyRequests refetch is called when pull-to-refresh fires', () => {
-    const myRefetch = jest.fn();
-    (useConfig as jest.Mock).mockReturnValue({ config: MOCK_CONFIG_CONTRIBUTOR, isLoading: false });
-    (useIsManagerMock as jest.Mock).mockReturnValue(false);
-    (useMyRequests as jest.Mock).mockReturnValue({
-      entries: [MOCK_ENTRY_PENDING],
-      isLoading: false,
-      error: null,
-      refetch: myRefetch,
-    });
-    (useApprovalItems as jest.Mock).mockReturnValue({
-      items: [],
-      isLoading: false,
-      error: null,
-      refetch: jest.fn(),
-      approveItem: jest.fn(),
-      rejectItem: jest.fn(),
-      approveAll: jest.fn(),
-    });
+  // Finds the rendered RefreshControl (the node carrying both `refreshing`
+  // and an `onRefresh` function) and fires the real handler.
+  function fireRefresh(tree: any) {
+    const nodes = tree.root.findAll(
+      (n: any) => typeof n.props?.onRefresh === 'function' && 'refreshing' in (n.props ?? {}),
+    );
+    expect(nodes.length).toBeGreaterThan(0);
+    act(() => { nodes[0].props.onRefresh(); });
+  }
 
-    let tree: any;
-    act(() => { tree = create(React.createElement(ApprovalsScreen)); });
-
-    // Find RefreshControl and simulate onRefresh
-    const json = tree.toJSON();
-    const serialised = JSON.stringify(json);
-
-    // The screen should render a ScrollView/FlatList; verify refetch is wired
-    // We can't easily simulate pull-to-refresh in test-renderer but we can check
-    // the screen renders and the refetch function is accessible
-    expect(myRefetch).toBeDefined();
-    expect(typeof myRefetch).toBe('function');
-
-    // Verify the screen is rendered (not crashed)
-    expect(json).not.toBeNull();
-  });
-
-  it('SC3.5 — both refetch functions are called on pull-to-refresh for manager', () => {
+  function setupRefetchMocks(isManager: boolean) {
     const myRefetch = jest.fn();
     const teamRefetch = jest.fn();
-    (useConfig as jest.Mock).mockReturnValue({ config: MOCK_CONFIG_MANAGER, isLoading: false });
-    (useIsManagerMock as jest.Mock).mockReturnValue(true);
+    (useIsManagerMock as jest.Mock).mockReturnValue(isManager);
     (useMyRequests as jest.Mock).mockReturnValue({
-      entries: [],
+      entries: [MOCK_ENTRY_PENDING],
       isLoading: false,
       error: null,
       refetch: myRefetch,
@@ -447,14 +419,25 @@ describe('ApprovalsScreen — pull-to-refresh (SC3.5)', () => {
       rejectItem: jest.fn(),
       approveAll: jest.fn(),
     });
+    return { myRefetch, teamRefetch };
+  }
 
+  it('SC3.5 — contributor pull-to-refresh calls my-requests refetch but NOT team refetch', () => {
+    const { myRefetch, teamRefetch } = setupRefetchMocks(false);
     let tree: any;
     act(() => { tree = create(React.createElement(ApprovalsScreen)); });
+    fireRefresh(tree);
+    expect(myRefetch).toHaveBeenCalledTimes(1);
+    expect(teamRefetch).not.toHaveBeenCalled();
+  });
 
-    // Both mock functions must have been provided to the component
-    expect(myRefetch).toBeDefined();
-    expect(teamRefetch).toBeDefined();
-    expect(tree.toJSON()).not.toBeNull();
+  it('SC3.5 — manager pull-to-refresh calls BOTH refetch functions', () => {
+    const { myRefetch, teamRefetch } = setupRefetchMocks(true);
+    let tree: any;
+    act(() => { tree = create(React.createElement(ApprovalsScreen)); });
+    fireRefresh(tree);
+    expect(myRefetch).toHaveBeenCalledTimes(1);
+    expect(teamRefetch).toHaveBeenCalledTimes(1);
   });
 });
 

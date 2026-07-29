@@ -24,13 +24,145 @@
 //   SC5.10 — brainliftHours formatted with "h" suffix
 //
 // Strategy:
-// - Source-level static analysis for all screen-level contracts (no render needed)
+// - Source-level static analysis for screen-level structural contracts
 // - Logic unit tests for hero value resolution and formatting functions
-// - Source analysis is sufficient: tests will FAIL (red) until implementation rewrites
-//   overview.tsx to include the required patterns.
+// - Runtime render tests (04-team-view-content) — the real OverviewScreen is
+//   rendered with chart/gesture/animation leaf components stubbed (same mock
+//   harness as approvals.test.tsx / index.test.tsx), so the real
+//   TeamViewContent / TeamMemberRow / getInitials / scope-state code paths
+//   execute rather than being pattern-matched or reimplemented.
 
 import * as path from 'path';
 import * as fs from 'fs';
+import React from 'react';
+import { create, act } from 'react-test-renderer';
+
+// ─── Runtime render mock harness (04-team-view-content) ─────────────────────
+//
+// overview.tsx pulls in Skia charts, Reanimated shared values, and gesture
+// handlers that crash or hang under jest-expo/node. Stub the leaf components
+// and data hooks; keep OverviewScreen, TeamViewContent, TeamMemberRow, and
+// getInitials real.
+
+jest.mock('react-native-reanimated', () => {
+  const mock = require('react-native-reanimated/mock');
+  return { ...mock, useReducedMotion: () => false };
+});
+jest.mock('react-native-gesture-handler');
+jest.mock('expo-haptics', () => ({ selectionAsync: jest.fn() }));
+jest.mock('expo-router', () => ({
+  useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
+}));
+jest.mock('react-native-safe-area-context', () => {
+  const mockReact = require('react');
+  return {
+    SafeAreaView: ({ children, ...props }: any) =>
+      mockReact.createElement('View', props, children),
+    useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+  };
+});
+
+jest.mock('@/src/components/FadeInScreen', () => {
+  const mockReact = require('react');
+  return {
+    __esModule: true,
+    default: ({ children }: any) => mockReact.createElement(mockReact.Fragment, null, children),
+  };
+});
+jest.mock('@/src/components/Card', () => {
+  const mockReact = require('react');
+  return {
+    __esModule: true,
+    default: ({ children, ...props }: any) => mockReact.createElement('View', props, children),
+  };
+});
+jest.mock('@/src/components/SkeletonLoader', () => {
+  const mockReact = require('react');
+  return {
+    __esModule: true,
+    default: (props: any) => mockReact.createElement('View', { testID: 'skeleton-loader', ...props }),
+  };
+});
+jest.mock('@/src/components/AmbientBackground', () => ({
+  __esModule: true,
+  default: () => null,
+  getAmbientColor: jest.fn(() => '#000000'),
+}));
+jest.mock('@/src/components/AnimatedMeshBackground', () => ({
+  __esModule: true,
+  default: () => null,
+}));
+jest.mock('@/src/components/TrendSparkline', () => ({
+  __esModule: true,
+  default: jest.fn(() => null),
+}));
+jest.mock('@/src/components/OverviewHeroCard', () => ({
+  __esModule: true,
+  default: () => null,
+}));
+jest.mock('@/src/components/EarningsPaceCard', () => ({
+  __esModule: true,
+  default: () => null,
+}));
+jest.mock('@/src/components/ApprovalUrgencyCard', () => ({
+  ApprovalUrgencyCard: () => null,
+}));
+jest.mock('@/src/components/InsightChip', () => ({
+  InsightChip: () => null,
+}));
+jest.mock('@/src/components/OverviewStickyBar', () => ({
+  OverviewStickyBar: jest.fn(() => null),
+}));
+jest.mock('@/src/components/DayPatternChart', () => ({
+  DayPatternChart: () => null,
+}));
+jest.mock('@/src/components/HourlyPatternCard', () => ({
+  HourlyPatternCard: () => null,
+}));
+jest.mock('@/src/lib/sharedTransitions', () => ({
+  setTag: () => ({}),
+}));
+// react-native-web's Image kicks off ImageLoader.load(uri) in a mount effect,
+// which touches `window` and crashes under jest-expo/node. Stub with an inert
+// element that preserves source/onError so tests can inspect and drive them.
+jest.mock('react-native-web/dist/exports/Image/index.js', () => {
+  const mockReact = require('react');
+  return {
+    __esModule: true,
+    default: (props: any) => mockReact.createElement('Image', props),
+  };
+});
+jest.mock('@/src/lib/log', () => ({
+  log: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+}));
+
+jest.mock('@/src/hooks/useConfig');
+jest.mock('@/src/hooks/useIsManager');
+jest.mock('@/src/hooks/useOverviewData');
+jest.mock('@/src/hooks/useTeamAggregateData');
+jest.mock('@/src/hooks/useApprovalItems');
+jest.mock('@/src/hooks/useFocusKey', () => ({ useFocusKey: () => 'focus-key-0' }));
+jest.mock('@/src/hooks/useEarningsHistory', () => ({ useEarningsHistory: jest.fn() }));
+jest.mock('@/src/hooks/useStaggeredEntry', () => ({
+  useStaggeredEntry: () => ({ getEntryStyle: () => ({}), isReady: true }),
+}));
+jest.mock('@/src/hooks/useInsightChips', () => ({ useInsightChips: () => [] }));
+jest.mock('@/src/hooks/useWeeklyHistory', () => ({
+  useWeeklyHistory: () => ({ snapshots: [] }),
+}));
+jest.mock('@/src/hooks/useHourlyInsights', () => ({
+  useHourlyInsights: () => ({ profile: null, focusWindow: null, aiHotZone: null }),
+}));
+
+import { useConfig } from '@/src/hooks/useConfig';
+import { useIsManager } from '@/src/hooks/useIsManager';
+import { useOverviewData } from '@/src/hooks/useOverviewData';
+import { useTeamAggregateData } from '@/src/hooks/useTeamAggregateData';
+import type { TeamMemberBreakdown } from '@/src/hooks/useTeamAggregateData';
+import { useApprovalItems } from '@/src/hooks/useApprovalItems';
+import { OverviewStickyBar } from '@/src/components/OverviewStickyBar';
+import { log } from '@/src/lib/log';
+import OverviewScreen, { getInitials } from '../overview';
 
 // ─── File paths ───────────────────────────────────────────────────────────────
 
@@ -866,20 +998,14 @@ describe('OverviewScreen FR3 (04-team-view-content) — TeamMemberRow component'
   });
 });
 
-// ─── FR3: Logic unit tests — initials-avatar fallback (mirrors spec.md Edge Cases) ──
+// ─── FR3: initials-avatar fallback — REAL exported getInitials ────────────────
 //
 // Spec's Edge Cases section: "Missing, blank, or single-word name: initials
 // fallback uses up to the first two non-empty words; if no initial can be
-// derived, render `?`." Tested as pure logic, matching the established
-// pattern of reimplementing the intended algorithm for direct verification.
+// derived, render `?`." Tests import the real implementation from overview.tsx
+// (exported for direct testability) — a bug in the shipped function fails here.
 
-describe('OverviewScreen FR3 (04-team-view-content) — initials fallback logic', () => {
-  function getInitials(name: string): string {
-    const words = name.trim().split(/\s+/).filter(Boolean);
-    if (words.length === 0) return '?';
-    return words.slice(0, 2).map((w) => w[0].toUpperCase()).join('');
-  }
-
+describe('OverviewScreen FR3 (04-team-view-content) — initials fallback logic (real implementation)', () => {
   it('returns two-letter initials for a normal two-word name', () => {
     expect(getInitials('Jane Doe')).toBe('JD');
   });
@@ -969,63 +1095,351 @@ describe('OverviewScreen FR3 (04-team-view-content) — state precedence', () =>
   });
 });
 
-// ─── FR3: Logic unit tests — state precedence order (mirrors spec.md) ────────
+// ─── FR2+FR3: Runtime render tests — REAL OverviewScreen/TeamViewContent ─────
 //
-// Pure re-implementation of the five-branch precedence described in spec.md's
-// "State Rendering Order" section, tested independently of React rendering.
+// These render the actual component tree (charts/animations stubbed via the
+// mock harness at the top of this file). Unlike the source-analysis suites
+// above, a behavioral bug — branches in the wrong precedence order, a wrong
+// useEffect dependency, a broken scope gate — fails these tests.
 
-describe('OverviewScreen FR3 (04-team-view-content) — precedence logic', () => {
-  type Breakdown = { fetchFailed: boolean };
-  type TeamData = { reportCount: number; breakdown: Breakdown[] } | null;
+function makeMember(overrides: Partial<TeamMemberBreakdown['member']> = {}): TeamMemberBreakdown['member'] {
+  return {
+    assignmentId: 'a-1',
+    candidateId: 'c-1',
+    managerId: 'm-1',
+    teamId: 't-1',
+    teamName: 'Team',
+    name: 'Jane Doe',
+    isManager: false,
+    ...overrides,
+  };
+}
 
-  type RenderState =
-    | 'skeleton'
-    | 'error'
-    | 'empty'
-    | 'all-failed'
-    | 'loaded';
+function makeEntry(overrides: Partial<TeamMemberBreakdown> = {}): TeamMemberBreakdown {
+  return {
+    member: makeMember(overrides.member as any),
+    hours: 32.5,
+    aiPct: 71.6,
+    brainliftHours: 4.25,
+    fetchFailed: false,
+    ...overrides,
+  };
+}
 
-  function resolveState(isLoading: boolean, data: TeamData): RenderState {
-    if (isLoading && data === null) return 'skeleton';
-    if (data === null) return 'error';
-    if (data.breakdown.length === 0) return 'empty';
-    if (data.reportCount === 0 && data.breakdown.length > 0) return 'all-failed';
-    return 'loaded';
+const MOCK_OVERVIEW_DATA = {
+  earnings: [1800, 1950, 2000, 1840],
+  hours: [38, 40, 41, 39.5],
+  aiPct: [70, 72, 75, 74],
+  brainliftHours: [4, 5, 5.5, 4.2],
+  overtimeHours: [0, 0, 1, 0],
+  weekLabels: ['Feb 23', 'Mar 2', 'Mar 9', 'Mar 16'],
+};
+
+function setupScreenMocks(opts: {
+  isManager?: boolean;
+  teamData?: { weekHours: number; weekAiPct: number; weekBrainliftHours: number; reportCount: number; breakdown: TeamMemberBreakdown[] } | null;
+  teamLoading?: boolean;
+  teamError?: string | null;
+} = {}) {
+  (useConfig as jest.Mock).mockReturnValue({
+    config: { weeklyLimit: 40, hourlyRate: 25, orgTierEnabled: false },
+    isLoading: false,
+  });
+  (useIsManager as jest.Mock).mockReturnValue(opts.isManager ?? false);
+  (useOverviewData as jest.Mock).mockReturnValue({ data: MOCK_OVERVIEW_DATA });
+  (useApprovalItems as jest.Mock).mockReturnValue({ items: [], isLoading: false, error: null });
+  (useTeamAggregateData as jest.Mock).mockReturnValue({
+    data: opts.teamData !== undefined ? opts.teamData : null,
+    isLoading: opts.teamLoading ?? false,
+    error: opts.teamError ?? null,
+  });
+}
+
+function renderScreen(): any {
+  let tree: any;
+  act(() => { tree = create(React.createElement(OverviewScreen)); });
+  return tree;
+}
+
+/** The scope/onScopeChange/orgTierEnabled props from the latest OverviewStickyBar render. */
+function lastStickyBarProps(): any {
+  const calls = (OverviewStickyBar as unknown as jest.Mock).mock.calls;
+  return calls[calls.length - 1][0];
+}
+
+/** Switch the real scope state to 'team' via the onScopeChange the screen passed down. */
+function switchToTeamScope(tree: any) {
+  const { onScopeChange } = lastStickyBarProps();
+  expect(typeof onScopeChange).toBe('function');
+  act(() => { onScopeChange('team'); });
+  return tree;
+}
+
+beforeEach(() => {
+  jest.clearAllMocks();
+});
+
+describe('OverviewScreen (04-team-view-content) — runtime: scope gate (FR1/FR2)', () => {
+  it('contributor: scope and onScopeChange are undefined on OverviewStickyBar', () => {
+    setupScreenMocks({ isManager: false });
+    renderScreen();
+    const props = lastStickyBarProps();
+    expect(props.scope).toBeUndefined();
+    expect(props.onScopeChange).toBeUndefined();
+  });
+
+  it('manager: scope defaults to personal and onScopeChange is the real setter', () => {
+    setupScreenMocks({ isManager: true });
+    renderScreen();
+    const props = lastStickyBarProps();
+    expect(props.scope).toBe('personal');
+    expect(typeof props.onScopeChange).toBe('function');
+    expect(props.orgTierEnabled).toBe(false); // wired from config.orgTierEnabled
+  });
+
+  it('manager in personal scope: personal charts render, team content absent', () => {
+    setupScreenMocks({ isManager: true, teamData: null, teamLoading: true });
+    const tree = renderScreen();
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).toContain('WEEKLY EARNINGS');
+    expect(text).not.toContain('TEAM HOURS');
+  });
+
+  it('manager switching to team scope: TeamViewContent replaces personal charts', () => {
+    setupScreenMocks({
+      isManager: true,
+      teamData: { weekHours: 72.5, weekAiPct: 68.2, weekBrainliftHours: 9.5, reportCount: 2, breakdown: [makeEntry()] },
+    });
+    const tree = switchToTeamScope(renderScreen());
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).not.toContain('WEEKLY EARNINGS');
+    expect(text).toContain('TEAM HOURS');
+    expect(text).toContain('TEAM AI USAGE');
+    expect(text).toContain('TEAM BRAINLIFT');
+    // sticky bar now reflects the team scope
+    expect(lastStickyBarProps().scope).toBe('team');
+  });
+
+  it('manager in team scope: aggregate hero values are formatted from real data (72.5h, 68%, 9.5h)', () => {
+    setupScreenMocks({
+      isManager: true,
+      teamData: { weekHours: 72.5, weekAiPct: 68.2, weekBrainliftHours: 9.5, reportCount: 2, breakdown: [makeEntry()] },
+    });
+    const tree = switchToTeamScope(renderScreen());
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).toContain('72.5h');
+    expect(text).toContain('68%');
+    expect(text).toContain('9.5h');
+  });
+
+  it('contributor never renders TeamViewContent even if scope could be team (manager access revoked mid-session)', () => {
+    // Render as manager, switch to team, then simulate manager access disappearing.
+    setupScreenMocks({
+      isManager: true,
+      teamData: { weekHours: 10, weekAiPct: 50, weekBrainliftHours: 1, reportCount: 1, breakdown: [makeEntry()] },
+    });
+    const tree = switchToTeamScope(renderScreen());
+    expect(JSON.stringify(tree.toJSON())).toContain('TEAM HOURS');
+
+    (useIsManager as jest.Mock).mockReturnValue(false);
+    act(() => { tree.update(React.createElement(OverviewScreen)); });
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).not.toContain('TEAM HOURS');
+    expect(text).toContain('WEEKLY EARNINGS'); // falls back to personal content
+  });
+});
+
+describe('OverviewScreen (04-team-view-content) — runtime: state precedence (FR3)', () => {
+  function renderTeamScope(opts: Parameters<typeof setupScreenMocks>[0]) {
+    setupScreenMocks({ isManager: true, ...opts });
+    return switchToTeamScope(renderScreen());
   }
 
-  it('isLoading=true, data=null → skeleton', () => {
-    expect(resolveState(true, null)).toBe('skeleton');
+  it('isLoading && data=null → skeleton loaders, no error/empty text', () => {
+    const tree = renderTeamScope({ teamData: null, teamLoading: true });
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).toContain('"skeleton-loader"');
+    expect(text).not.toContain('Unable to load team data');
+    expect(text).not.toContain('No direct reports found');
   });
 
-  it('isLoading=false, data=null → error', () => {
-    expect(resolveState(false, null)).toBe('error');
+  it('data=null, not loading → error card with the hook error message', () => {
+    const tree = renderTeamScope({ teamData: null, teamError: 'Roster fetch failed' });
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).toContain('Roster fetch failed');
+    expect(text).not.toContain('"skeleton-loader"');
   });
 
-  it('data.breakdown=[] → empty (even if isLoading is stale-true from background refetch)', () => {
-    expect(resolveState(false, { reportCount: 0, breakdown: [] })).toBe('empty');
+  it('data=null, not loading, error=null → generic "Unable to load team data" fallback', () => {
+    const tree = renderTeamScope({ teamData: null, teamError: null });
+    expect(JSON.stringify(tree.toJSON())).toContain('Unable to load team data');
   });
 
-  it('reportCount=0 with non-empty breakdown → all-failed', () => {
-    expect(
-      resolveState(false, { reportCount: 0, breakdown: [{ fetchFailed: true }, { fetchFailed: true }] }),
-    ).toBe('all-failed');
+  it('breakdown=[] → "No direct reports found", no charts', () => {
+    const tree = renderTeamScope({
+      teamData: { weekHours: 0, weekAiPct: 0, weekBrainliftHours: 0, reportCount: 0, breakdown: [] },
+    });
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).toContain('No direct reports found');
+    expect(text).not.toContain('TEAM HOURS');
   });
 
-  it('reportCount>0 with mixed breakdown → loaded (partial failure still renders normally)', () => {
-    expect(
-      resolveState(false, { reportCount: 1, breakdown: [{ fetchFailed: true }, { fetchFailed: false }] }),
-    ).toBe('loaded');
+  it('reportCount=0 with non-empty breakdown → "Unable to load team metrics" plus rows, no charts', () => {
+    const tree = renderTeamScope({
+      teamData: {
+        weekHours: 0, weekAiPct: 0, weekBrainliftHours: 0, reportCount: 0,
+        breakdown: [
+          makeEntry({ fetchFailed: true, member: makeMember({ assignmentId: 'a-1', name: 'Jane Doe' }) }),
+          makeEntry({ fetchFailed: true, member: makeMember({ assignmentId: 'a-2', name: 'Bob Ray' }) }),
+        ],
+      },
+    });
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).toContain('Unable to load team metrics');
+    expect(text).toContain('Jane Doe');
+    expect(text).toContain('Bob Ray');
+    expect(text).not.toContain('TEAM HOURS');
   });
 
-  it('reportCount>0 with all-success breakdown → loaded', () => {
-    expect(
-      resolveState(false, { reportCount: 2, breakdown: [{ fetchFailed: false }, { fetchFailed: false }] }),
-    ).toBe('loaded');
+  it('isLoading=true with cached non-null data → loaded content, NOT skeleton (background refetch)', () => {
+    const tree = renderTeamScope({
+      teamLoading: true,
+      teamData: { weekHours: 40, weekAiPct: 70, weekBrainliftHours: 5, reportCount: 1, breakdown: [makeEntry()] },
+    });
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).not.toContain('"skeleton-loader"');
+    expect(text).toContain('TEAM HOURS');
   });
 
-  it('isLoading=true with cached non-null data → loaded, not skeleton (background refetch)', () => {
-    expect(
-      resolveState(true, { reportCount: 1, breakdown: [{ fetchFailed: false }] }),
-    ).toBe('loaded');
+  it('non-null error is logged via log.error even when cached data still renders', () => {
+    renderTeamScope({
+      teamError: 'Background refetch failed',
+      teamData: { weekHours: 40, weekAiPct: 70, weekBrainliftHours: 5, reportCount: 1, breakdown: [makeEntry()] },
+    });
+    expect(log.error).toHaveBeenCalledWith('overview.team-aggregate-error', 'TeamAggregateError');
+    // Privacy contract: the human-readable message must never reach the logger.
+    for (const call of (log.error as jest.Mock).mock.calls) {
+      expect(JSON.stringify(call)).not.toContain('Background refetch failed');
+    }
+  });
+
+  it('error arriving AFTER mount (background refetch) is still logged — effect keyed on error, not mount-only', () => {
+    // Mount in team scope with no error, then deliver an error alongside
+    // still-valid cached data. A mount-only effect ([] deps) would miss this.
+    const teamData = { weekHours: 40, weekAiPct: 70, weekBrainliftHours: 5, reportCount: 1, breakdown: [makeEntry()] };
+    setupScreenMocks({ isManager: true, teamData, teamError: null });
+    const tree = switchToTeamScope(renderScreen());
+    expect(log.error).not.toHaveBeenCalled();
+
+    (useTeamAggregateData as jest.Mock).mockReturnValue({
+      data: teamData,
+      isLoading: false,
+      error: 'Background refetch failed',
+    });
+    act(() => { tree.update(React.createElement(OverviewScreen)); });
+
+    expect(log.error).toHaveBeenCalledWith('overview.team-aggregate-error', 'TeamAggregateError');
+    // Loaded content still renders — the error never hijacks the render branch.
+    expect(JSON.stringify(tree.toJSON())).toContain('TEAM HOURS');
+  });
+
+  it('error=null → log.error is never called', () => {
+    renderTeamScope({
+      teamData: { weekHours: 40, weekAiPct: 70, weekBrainliftHours: 5, reportCount: 1, breakdown: [makeEntry()] },
+    });
+    expect(log.error).not.toHaveBeenCalled();
+  });
+});
+
+describe('OverviewScreen (04-team-view-content) — runtime: TeamMemberRow (FR3)', () => {
+  function renderTeamRows(breakdown: TeamMemberBreakdown[]) {
+    setupScreenMocks({
+      isManager: true,
+      teamData: {
+        weekHours: 40, weekAiPct: 70, weekBrainliftHours: 5,
+        reportCount: breakdown.filter(e => !e.fetchFailed).length || 1,
+        breakdown,
+      },
+    });
+    return switchToTeamScope(renderScreen());
+  }
+
+  it('renders name, formatted stats (one decimal hours/BrainLift, rounded AI%)', () => {
+    const tree = renderTeamRows([
+      makeEntry({ hours: 32.55, aiPct: 71.6, brainliftHours: 4.249, member: makeMember({ name: 'Jane Doe' }) }),
+    ]);
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).toContain('Jane Doe');
+    expect(text).toContain('32.5h'); // toFixed(1) — the 32.55 → "32.5" JS rounding is acceptable/expected
+    expect(text).toContain('72%');   // Math.round(71.6)
+    expect(text).toContain('4.2h');  // toFixed(1)
+  });
+
+  it('MGR badge renders only for manager members', () => {
+    const tree = renderTeamRows([
+      makeEntry({ member: makeMember({ assignmentId: 'a-1', name: 'Jane Doe', isManager: true }) }),
+    ]);
+    expect(JSON.stringify(tree.toJSON())).toContain('MGR');
+
+    const tree2 = renderTeamRows([
+      makeEntry({ member: makeMember({ assignmentId: 'a-1', name: 'Jane Doe', isManager: false }) }),
+    ]);
+    expect(JSON.stringify(tree2.toJSON())).not.toContain('MGR');
+  });
+
+  it('fetchFailed row shows em-dashes and "Couldn\'t load" instead of stats', () => {
+    const tree = renderTeamRows([
+      makeEntry({ fetchFailed: true, hours: 32.5, aiPct: 71.6, brainliftHours: 4.2 }),
+    ]);
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).toContain("Couldn't load");
+    expect(text).toContain('—');
+    expect(text).not.toContain('32.5h');
+    expect(text).not.toContain('72%');
+  });
+
+  it('photoUrl present → <Image> with that uri; absent → initials fallback', () => {
+    const withPhoto = renderTeamRows([
+      makeEntry({ member: makeMember({ name: 'Jane Doe', photoUrl: 'https://x.test/jane.png' }) }),
+    ]);
+    const withPhotoText = JSON.stringify(withPhoto.toJSON());
+    expect(withPhotoText).toContain('https://x.test/jane.png');
+    expect(withPhotoText).not.toContain('"JD"');
+
+    const noPhoto = renderTeamRows([
+      makeEntry({ member: makeMember({ name: 'Jane Doe', photoUrl: undefined }) }),
+    ]);
+    const noPhotoText = JSON.stringify(noPhoto.toJSON());
+    expect(noPhotoText).toContain('JD');
+    expect(noPhotoText).not.toContain('https://x.test/jane.png');
+  });
+
+  it('Image onError flips the row to the initials fallback (real state transition)', () => {
+    const tree = renderTeamRows([
+      makeEntry({ member: makeMember({ name: 'Jane Doe', photoUrl: 'https://x.test/broken.png' }) }),
+    ]);
+    expect(JSON.stringify(tree.toJSON())).toContain('https://x.test/broken.png');
+
+    const image = tree.root.findAll(
+      (node: any) => node.props?.source?.uri === 'https://x.test/broken.png' && typeof node.props.onError === 'function',
+    )[0];
+    expect(image).toBeDefined();
+    act(() => { image.props.onError(); });
+
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).not.toContain('https://x.test/broken.png');
+    expect(text).toContain('JD');
+  });
+
+  it('one row per breakdown entry, in order', () => {
+    const tree = renderTeamRows([
+      makeEntry({ member: makeMember({ assignmentId: 'a-1', name: 'Jane Doe' }) }),
+      makeEntry({ member: makeMember({ assignmentId: 'a-2', name: 'Bob Ray' }) }),
+      makeEntry({ member: makeMember({ assignmentId: 'a-3', name: 'Ana Liu' }) }),
+    ]);
+    const text = JSON.stringify(tree.toJSON());
+    expect(text.indexOf('Jane Doe')).toBeGreaterThan(-1);
+    expect(text.indexOf('Bob Ray')).toBeGreaterThan(text.indexOf('Jane Doe'));
+    expect(text.indexOf('Ana Liu')).toBeGreaterThan(text.indexOf('Bob Ray'));
   });
 });
