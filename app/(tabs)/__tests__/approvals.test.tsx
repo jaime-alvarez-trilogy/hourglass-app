@@ -95,6 +95,7 @@ jest.mock('@/src/components/MyRequestCard', () => {
 // ─── Typed mock imports ───────────────────────────────────────────────────────
 
 import { useConfig } from '@/src/hooks/useConfig';
+import { useIsManager as useIsManagerMock } from '@/src/hooks/useIsManager';
 import { useMyRequests } from '@/src/hooks/useMyRequests';
 import { useApprovalItems } from '@/src/hooks/useApprovalItems';
 import ApprovalsScreen from '../approvals';
@@ -180,6 +181,11 @@ function setupMocks(opts: {
     config,
     isLoading: opts.configNull ?? false,
   });
+
+  // 04-team-view-content FR1: approvals.tsx derives isManager from useIsManager(),
+  // not useConfig() directly. Mirror the same tri-state resolution so existing
+  // isManager-driven fixtures keep working after the hook-extraction swap.
+  (useIsManagerMock as jest.Mock).mockReturnValue(opts.isManager === true);
 
   (useMyRequests as jest.Mock).mockReturnValue({
     entries: opts.entries ?? [],
@@ -387,6 +393,7 @@ describe('ApprovalsScreen — pull-to-refresh (SC3.5)', () => {
   it('SC3.5 — useMyRequests refetch is called when pull-to-refresh fires', () => {
     const myRefetch = jest.fn();
     (useConfig as jest.Mock).mockReturnValue({ config: MOCK_CONFIG_CONTRIBUTOR, isLoading: false });
+    (useIsManagerMock as jest.Mock).mockReturnValue(false);
     (useMyRequests as jest.Mock).mockReturnValue({
       entries: [MOCK_ENTRY_PENDING],
       isLoading: false,
@@ -424,6 +431,7 @@ describe('ApprovalsScreen — pull-to-refresh (SC3.5)', () => {
     const myRefetch = jest.fn();
     const teamRefetch = jest.fn();
     (useConfig as jest.Mock).mockReturnValue({ config: MOCK_CONFIG_MANAGER, isLoading: false });
+    (useIsManagerMock as jest.Mock).mockReturnValue(true);
     (useMyRequests as jest.Mock).mockReturnValue({
       entries: [],
       isLoading: false,
@@ -488,5 +496,70 @@ describe('ApprovalsScreen — empty states (FR4)', () => {
     const text = JSON.stringify(tree.toJSON());
     expect(text).toContain('All caught up');
     expect(text).toContain('No requests yet');
+  });
+});
+
+// ─── 04-team-view-content FR1: useIsManager() adoption regression guard ──────
+//
+// approvals.tsx's only use of `config` is the manager-detection expression, so
+// FR1 requires it to drop `useConfig` entirely and call `useIsManager()`
+// instead. These tests guard that (a) the swap actually happened in source,
+// and (b) manager-gated rendering behavior is unchanged after the swap.
+
+jest.mock('@/src/hooks/useIsManager');
+
+describe('ApprovalsScreen — source file checks (04-team-view-content FR1)', () => {
+  let source: string;
+  let code: string;
+
+  beforeAll(() => {
+    source = fs.readFileSync(APPROVALS_FILE, 'utf8');
+    code = source
+      .replace(/\/\/.*$/gm, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '');
+  });
+
+  it('imports useIsManager from @/src/hooks/useIsManager', () => {
+    expect(source).toMatch(/import\s*\{\s*useIsManager\s*\}\s*from\s*['"]@\/src\/hooks\/useIsManager['"]/);
+  });
+
+  it('does not import useConfig (its only use was the manager expression)', () => {
+    expect(code).not.toMatch(/useConfig/);
+  });
+
+  it('isManager is derived from useIsManager(), not the inline expression', () => {
+    expect(source).toMatch(/isManager\s*=\s*useIsManager\s*\(\s*\)/);
+    expect(source).not.toMatch(
+      /config\?\.isManager\s*===\s*true\s*\|\|\s*config\?\.devManagerView\s*===\s*true/,
+    );
+  });
+});
+
+describe('ApprovalsScreen — manager-gated behavior unchanged after useIsManager() adoption', () => {
+  it('non-manager (useIsManager → false): no TEAM REQUESTS section', () => {
+    (useIsManagerMock as jest.Mock).mockReturnValue(false);
+    setupMocks({ entries: [MOCK_ENTRY_PENDING] });
+    let tree: any;
+    act(() => { tree = create(React.createElement(ApprovalsScreen)); });
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).not.toMatch(/TEAM REQUESTS/i);
+  });
+
+  it('manager (useIsManager → true): TEAM REQUESTS section renders', () => {
+    (useIsManagerMock as jest.Mock).mockReturnValue(true);
+    setupMocks({ items: [MOCK_APPROVAL_ITEM], entries: [] });
+    let tree: any;
+    act(() => { tree = create(React.createElement(ApprovalsScreen)); });
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).toMatch(/TEAM REQUESTS/i);
+  });
+
+  it('manager (useIsManager → true) with pending items: Approve All button renders', () => {
+    (useIsManagerMock as jest.Mock).mockReturnValue(true);
+    setupMocks({ items: [MOCK_APPROVAL_ITEM], entries: [] });
+    let tree: any;
+    act(() => { tree = create(React.createElement(ApprovalsScreen)); });
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).toContain('Approve All');
   });
 });

@@ -28,6 +28,7 @@ jest.mock('react-native-reanimated', () => {
 jest.mock('@/src/hooks/useHoursData');
 jest.mock('@/src/hooks/usePaymentHistory');
 jest.mock('@/src/hooks/useConfig');
+jest.mock('@/src/hooks/useIsManager');
 jest.mock('@/src/hooks/useEarningsHistory', () => ({
   useEarningsHistory: () => ({ trend: [], isLoading: false }),
 }));
@@ -42,9 +43,7 @@ jest.mock('@/src/hooks/useAIData', () => ({
 jest.mock('@/src/hooks/useFocusKey', () => ({
   useFocusKey: () => 'focus-key-0',
 }));
-jest.mock('@/src/hooks/useApprovalItems', () => ({
-  useApprovalItems: () => ({ items: [], isLoading: false, error: null }),
-}));
+jest.mock('@/src/hooks/useApprovalItems');
 jest.mock('@/src/components/FadeInScreen', () => {
   const mockReact = require('react');
   return {
@@ -106,6 +105,8 @@ jest.mock('react-native-web/dist/exports/TextInput/index.js', () => {
 import { useHoursData } from '@/src/hooks/useHoursData';
 import { usePaymentHistory } from '@/src/hooks/usePaymentHistory';
 import { useConfig } from '@/src/hooks/useConfig';
+import { useIsManager as useIsManagerMock } from '@/src/hooks/useIsManager';
+import { useApprovalItems } from '@/src/hooks/useApprovalItems';
 import HoursDashboard from '../index';
 
 // ─── Test data ────────────────────────────────────────────────────────────────
@@ -155,7 +156,9 @@ function setupMocks(opts: {
   error?: string | null;
   config?: typeof MOCK_CONFIG | null;
   paymentHistory?: any[] | null;
+  approvalItems?: any[];
 } = {}) {
+  const resolvedConfig = opts.config !== undefined ? opts.config : MOCK_CONFIG;
   (useHoursData as jest.Mock).mockReturnValue({
     data: opts.data !== undefined ? opts.data : MOCK_HOURS_DATA,
     isLoading: opts.isLoading ?? false,
@@ -165,13 +168,22 @@ function setupMocks(opts: {
     refetch: jest.fn(),
   });
   (useConfig as jest.Mock).mockReturnValue({
-    config: opts.config !== undefined ? opts.config : MOCK_CONFIG,
+    config: resolvedConfig,
     isLoading: false,
     refetch: jest.fn(),
   });
+  // 04-team-view-content FR1: index.tsx derives isManager from useIsManager(),
+  // not useConfig() directly. Mirror config.isManager here by default so
+  // pre-existing manager/contributor fixtures keep working after the swap.
+  (useIsManagerMock as jest.Mock).mockReturnValue(resolvedConfig?.isManager === true);
   (usePaymentHistory as jest.Mock).mockReturnValue({
     data: opts.paymentHistory !== undefined ? opts.paymentHistory : [],
     isLoading: false,
+  });
+  (useApprovalItems as jest.Mock).mockReturnValue({
+    items: opts.approvalItems ?? [],
+    isLoading: false,
+    error: null,
   });
 }
 
@@ -503,6 +515,12 @@ describe('HoursDashboard — FR4 (01-overtime-display): render in overtime state
       data: [],
       isLoading: false,
     });
+    (useApprovalItems as jest.Mock).mockReturnValue({
+      items: [],
+      isLoading: false,
+      error: null,
+    });
+    (useIsManagerMock as jest.Mock).mockReturnValue(false);
   });
 
   it('FR4.8 — renders without crash when panelState is overtime (total > weeklyLimit)', () => {
@@ -586,6 +604,12 @@ describe('HoursDashboard — FR4 (01-overtime-display): normal state preserved',
       refetch: jest.fn(),
     });
     (usePaymentHistory as jest.Mock).mockReturnValue({ data: [], isLoading: false });
+    (useApprovalItems as jest.Mock).mockReturnValue({
+      items: [],
+      isLoading: false,
+      error: null,
+    });
+    (useIsManagerMock as jest.Mock).mockReturnValue(false);
   });
 
   it('FR4.13 — non-overtime state renders "of Xh goal" label (existing display preserved)', () => {
@@ -722,5 +746,53 @@ describe('HoursDashboard — 09FR3: AnimatedMeshBackground replaces AmbientBackg
 
   it('SC-09FR3.4 — AnimatedMeshBackground rendered with earningsPace prop', () => {
     expect(source).toMatch(/<AnimatedMeshBackground[\s\S]{0,100}earningsPace/);
+  });
+});
+
+// ─── 04-team-view-content FR1: useIsManager() adoption regression guard ──────
+//
+// index.tsx keeps useConfig() (weeklyLimit, devOvertimePreview, useQA,
+// hourlyRate are all still read from it) but must swap its manager-detection
+// expression for the shared useIsManager() hook.
+
+describe('HoursDashboard — source checks (04-team-view-content FR1)', () => {
+  let source: string;
+
+  beforeAll(() => {
+    source = fs.readFileSync(INDEX_FILE, 'utf8');
+  });
+
+  it('imports useIsManager from @/src/hooks/useIsManager', () => {
+    expect(source).toMatch(/import\s*\{\s*useIsManager\s*\}\s*from\s*['"]@\/src\/hooks\/useIsManager['"]/);
+  });
+
+  it('still imports and calls useConfig() (other config fields still needed)', () => {
+    expect(source).toMatch(/import\s*\{\s*useConfig\s*\}\s*from\s*['"]@\/src\/hooks\/useConfig['"]/);
+    expect(source).toMatch(/const\s*\{\s*config\s*\}\s*=\s*useConfig\s*\(\s*\)/);
+  });
+
+  it('isManager is derived from useIsManager(), not the inline expression', () => {
+    expect(source).toMatch(/isManager\s*=\s*useIsManager\s*\(\s*\)/);
+    expect(source).not.toMatch(
+      /config\?\.isManager\s*===\s*true\s*\|\|\s*config\?\.devManagerView\s*===\s*true/,
+    );
+  });
+});
+
+describe('HoursDashboard — manager-gated behavior unchanged after useIsManager() adoption', () => {
+  it('non-manager (useIsManager → false): ApprovalUrgencyCard not rendered even with pending items', () => {
+    setupMocks({ config: { ...MOCK_CONFIG, isManager: false }, approvalItems: [{ id: '1' }] });
+    let tree: any;
+    act(() => { tree = create(React.createElement(HoursDashboard)); });
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).not.toMatch(/Pending Team Request/);
+  });
+
+  it('manager (useIsManager → true) with pending items: ApprovalUrgencyCard renders', () => {
+    setupMocks({ config: { ...MOCK_CONFIG, isManager: true }, approvalItems: [{ id: '1' }] });
+    let tree: any;
+    act(() => { tree = create(React.createElement(HoursDashboard)); });
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).toMatch(/Pending Team Request/);
   });
 });
