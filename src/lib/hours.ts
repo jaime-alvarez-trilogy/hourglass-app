@@ -209,9 +209,12 @@ export function getWeekLabels(count: number): string[] {
  * Pure function — no side effects, fully testable.
  *
  * Priority rules:
- * - total: payments.workedHours when > 0 (includes auto-tracked + manual/logbook hours);
- *          falls back to timesheet.totalHours/hourWorked (auto-tracked only)
- * - weeklyEarnings: total * hourlyRate (derived from displayed hours for consistency)
+ * - total (hours worked/displayed): max(payments.paidHours, payments.workedHours), so
+ *   overtime that's been worked but not yet approved in payroll still shows up;
+ *   falls back to timesheet.totalHours/hourWorked when payments data is unavailable
+ * - weeklyEarnings: derived from paidHours specifically (approved/compensated hours
+ *   only), NOT from the displayed total — working overtime doesn't guarantee it's
+ *   paid, so earnings must never inflate off hours Crossover hasn't approved yet
  * - today: matched by local YYYY-MM-DD date string from stats array
  */
 export function calculateHours(
@@ -251,17 +254,17 @@ export function calculateHours(
   const averageHours = parseFloat(String(timesheetData.averageHoursPerDay ?? 0));
   const stats = timesheetData.stats ?? [];
 
-  // Crossover's "payment hours" on the earnings page = paidHours.
-  // It includes auto-tracked + approved manual time, and matches what the user
-  // expects to see as their hours for the week.
-  // workedHours is auto-tracked only (lower number, doesn't include approved manual).
-  // Fall back chain: paidHours → workedHours → timesheetTotal (auto-tracked only)
+  // paidHours = approved/compensated hours (regular + approved OT) — this is what
+  // Crossover will actually pay out. workedHours = raw tracked time, uncapped, and
+  // can exceed paidHours when overtime has been worked but not yet approved in
+  // payroll. Displayed hours must reflect what was actually worked (so real OT
+  // isn't hidden behind an unapproved-hours ceiling); take the higher of the two.
+  const paidHours = paymentsData?.paidHours ?? 0;
+  const workedHoursRaw = paymentsData?.workedHours ?? 0;
   const total =
-    paymentsData && paymentsData.paidHours > 0
-      ? paymentsData.paidHours
-      : paymentsData && paymentsData.workedHours > 0
-        ? paymentsData.workedHours
-        : timesheetTotal;
+    paidHours > 0 || workedHoursRaw > 0
+      ? Math.max(paidHours, workedHoursRaw)
+      : timesheetTotal;
 
   // Today's hours by local date string match
   const todayLocal = (() => {
@@ -283,11 +286,13 @@ export function calculateHours(
     isToday: s.date.startsWith(todayLocal),
   }));
 
-  // Earnings always derived from displayed hours × rate for internal consistency.
-  // The payments API amount (paidHours × rate) is finalized data used in the historical
-  // sparkline (useEarningsHistory), not here. Using total × hourlyRate ensures
-  // the hero number and earnings card are always mathematically consistent.
-  const weeklyEarnings = total * hourlyRate;
+  // Earnings are tied to paidHours specifically, NOT the displayed `total` — working
+  // overtime doesn't guarantee it's compensated, so weeklyEarnings must never inflate
+  // off hours Crossover hasn't approved yet. Falls back to `total` only when payments
+  // data is missing entirely (paidHours and workedHours both 0), matching the
+  // timesheetTotal fallback above.
+  const earningsBasis = paidHours > 0 ? paidHours : total;
+  const weeklyEarnings = earningsBasis * hourlyRate;
   const todayEarnings = todayHours * hourlyRate;
 
   // Remaining / overtime

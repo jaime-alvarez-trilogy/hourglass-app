@@ -66,6 +66,24 @@ describe('calculateHours', () => {
     expect(result.total).toBe(35);
   });
 
+  it('uses workedHours when it exceeds paidHours (unapproved overtime still shows as worked)', () => {
+    // Regression: hero was stuck at exactly the weekly limit because paidHours (capped
+    // at what's approved in payroll) was preferred outright over workedHours (uncapped).
+    const ts = makeTimesheet({ totalHours: 40 });
+    const pay = makePayments({ paidHours: 40, workedHours: 45 });
+    const result = calculateHours(ts, pay, HOURLY_RATE, WEEKLY_LIMIT);
+    expect(result.total).toBe(45);
+    expect(result.overtimeHours).toBe(5);
+    expect(result.hoursRemaining).toBe(0);
+  });
+
+  it('keeps weeklyEarnings tied to paidHours even when workedHours is higher (unapproved OT is not guaranteed pay)', () => {
+    const ts = makeTimesheet({ totalHours: 40 });
+    const pay = makePayments({ paidHours: 40, workedHours: 45 });
+    const result = calculateHours(ts, pay, HOURLY_RATE, WEEKLY_LIMIT);
+    expect(result.weeklyEarnings).toBe(40 * HOURLY_RATE);
+  });
+
   it('falls back to timesheet.totalHours when both paidHours and workedHours === 0', () => {
     const ts = makeTimesheet({ totalHours: 28 });
     const pay = makePayments({ paidHours: 0, workedHours: 0 });
