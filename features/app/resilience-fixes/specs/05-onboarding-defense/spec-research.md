@@ -200,7 +200,7 @@ If we ever get a contributor QA account, extend to verify the contributor `/deta
 
 ### TestFlight scenario
 
-- [ ] Sign in with the QA manager account (`***REMOVED***`). Verify: `not-contributor.tsx` screen renders with `["MANAGER", "COMPANY_ADMIN"]` listed. Sign-out button works.
+- [ ] Sign in with the QA manager account (see `.env.local`). Verify: `not-contributor.tsx` screen renders with `["MANAGER", "COMPANY_ADMIN"]` listed. Sign-out button works.
 - [ ] Sign in with a real contributor account. Verify: skips the not-contributor screen, lands on the dashboard.
 
 ### Error log
