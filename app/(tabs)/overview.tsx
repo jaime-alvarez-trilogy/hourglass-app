@@ -429,7 +429,9 @@ export default function OverviewScreen() {
             </View>
           )}
 
-          {scope === 'personal' && (
+          {/* Manager access can disappear mid-session (e.g. config refetch); fall
+              back to personal content even if local `scope` is still 'team'. */}
+          {(scope === 'personal' || !isManager) && (
             <>
           {/* 08-dark-glass-polish FR1: Bento grid layout */}
           {/* Earnings — full width (primary importance) */}
@@ -584,8 +586,10 @@ function getInitials(name: string): string {
 
 function TeamMemberRow({ entry }: { entry: TeamMemberBreakdown }) {
   const { member, hours, aiPct, brainliftHours, fetchFailed } = entry;
-  const [photoFailed, setPhotoFailed] = useState(false);
-  const showPhoto = !!member.photoUrl && !photoFailed;
+  // Tracks the specific URL that failed, not just a boolean — so a refetch
+  // that supplies a new/valid photoUrl isn't permanently stuck on initials.
+  const [failedPhotoUrl, setFailedPhotoUrl] = useState<string | undefined>(undefined);
+  const showPhoto = !!member.photoUrl && member.photoUrl !== failedPhotoUrl;
 
   return (
     <Card style={fetchFailed ? { opacity: 0.5 } : undefined}>
@@ -594,7 +598,7 @@ function TeamMemberRow({ entry }: { entry: TeamMemberBreakdown }) {
           <Image
             source={{ uri: member.photoUrl }}
             style={{ width: 36, height: 36, borderRadius: 18 }}
-            onError={() => setPhotoFailed(true)}
+            onError={() => setFailedPhotoUrl(member.photoUrl)}
           />
         ) : (
           <View
@@ -629,22 +633,21 @@ function TeamMemberRow({ entry }: { entry: TeamMemberBreakdown }) {
             )}
           </View>
 
-          {fetchFailed ? (
+          <View style={{ flexDirection: 'row', gap: 12, marginTop: 2, flexWrap: 'wrap' }}>
+            <Text style={{ color: fetchFailed ? colors.textMuted : colors.gold, fontSize: 12, fontVariant: ['tabular-nums'] }}>
+              {fetchFailed ? '—' : `${hours.toFixed(1)}h`}
+            </Text>
+            <Text style={{ color: fetchFailed ? colors.textMuted : colors.cyan, fontSize: 12, fontVariant: ['tabular-nums'] }}>
+              {fetchFailed ? '—' : `${Math.round(aiPct)}%`}
+            </Text>
+            <Text style={{ color: fetchFailed ? colors.textMuted : colors.violet, fontSize: 12, fontVariant: ['tabular-nums'] }}>
+              {fetchFailed ? '—' : `${brainliftHours.toFixed(1)}h`}
+            </Text>
+          </View>
+          {fetchFailed && (
             <Text className="text-textMuted text-xs font-sans" style={{ marginTop: 2 }}>
               Couldn't load
             </Text>
-          ) : (
-            <View style={{ flexDirection: 'row', gap: 12, marginTop: 2, flexWrap: 'wrap' }}>
-              <Text style={{ color: colors.gold, fontSize: 12, fontVariant: ['tabular-nums'] }}>
-                {hours.toFixed(1)}h
-              </Text>
-              <Text style={{ color: colors.cyan, fontSize: 12, fontVariant: ['tabular-nums'] }}>
-                {Math.round(aiPct)}%
-              </Text>
-              <Text style={{ color: colors.violet, fontSize: 12, fontVariant: ['tabular-nums'] }}>
-                {brainliftHours.toFixed(1)}h
-              </Text>
-            </View>
           )}
         </View>
       </View>
@@ -657,10 +660,13 @@ function TeamViewContent() {
 
   // FR3: non-null error is always logged, independent of which render branch
   // below is active — including a background refetch failing alongside
-  // still-valid cached `data`.
+  // still-valid cached `data`. `error` here is already a human-readable
+  // .message string (see useTeamAggregateData/useTeamRoster) — never pass it
+  // as errOrClass, since the logger's privacy contract forbids persisting
+  // message text (src/lib/log.ts).
   useEffect(() => {
     if (error) {
-      log.error('overview.team-aggregate-error', error, {});
+      log.error('overview.team-aggregate-error', 'TeamAggregateError');
     }
   }, [error]);
 
