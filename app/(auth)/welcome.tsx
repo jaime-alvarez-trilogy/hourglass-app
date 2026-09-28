@@ -151,11 +151,11 @@ const styles = StyleSheet.create({
     // Subtle border handled by edge layer
   },
   ctaGlass: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#1F1E29',
   },
   ctaEdge: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
