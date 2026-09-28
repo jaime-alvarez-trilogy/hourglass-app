@@ -446,7 +446,7 @@ WidgetData {
 
 ### 7.2 iOS timeline
 
-`buildTimelineEntries()` (`src/widgets/bridge.ts:389-418`) emits **96 entries** — 15-minute intervals across a 24-hour window. Each entry is `{ date, props: WidgetData }` with `urgency` recomputed for that timestamp vs `deadline`. This lets the widget visually transition through `low → high → critical → expired` without the extension having to wake.
+`buildTimelineEntries()` (`src/widgets/bridge.ts:389-418`) emits **96 entries** — 15-minute intervals across a 24-hour window. Each entry is `{ date, props: WidgetData }` with `urgency` recomputed for that timestamp vs `deadline`. This lets the widget visually transition through `low → high → critical → expired` without the extension having to wake. The extension's own reload policy is `.after(60 min)` (set in `patches/expo-widgets+55.0.5.patch`; upstream is `.atEnd`). A reload only re-reads this timeline, so hourly keeps it inside WidgetKit's ~40–70/day budget; fresh data arrives via `updateTimeline` from the app and the silent-push task. `package.json` `expo.autolinking.ios.buildFromSource` keeps `expo-widgets` compiled from source so EAS precompiled modules can't silently drop the patch's Swift changes.
 
 ### 7.3 iOS layout function
 

@@ -133,7 +133,7 @@ index eef4ad7..d541151 100644
      let entries = parseTimeline(identifier: groupIdentifier, name: name, family: context.family)
  
 -    let timeline = Timeline<WidgetsTimelineEntry>(entries: entries, policy: .atEnd)
-+    let nextRefresh = Date().addingTimeInterval(15 * 60) // refresh every 15 minutes
++    let nextRefresh = Date().addingTimeInterval(60 * 60) // hourly: stays inside the WidgetKit reload budget
 +    let timeline = Timeline<WidgetsTimelineEntry>(entries: entries, policy: .after(nextRefresh))
      completion(timeline)
    }
