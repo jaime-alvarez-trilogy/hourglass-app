@@ -104,6 +104,7 @@ Silent push wakes the app, which fetches fresh data and updates the widget witho
 ### 2.1 Server side (Railway)
 
 - **Sender** — `server/push.ts:34-83`. `sendPushBatch()` chunks tokens into batches of ≤100, posts to `https://exp.host/--/api/v2/push/send` with `data: { type: 'bg_refresh' }`, `contentAvailable: true` and `priority: 'normal'` (APNs priority 5, required for background pushes). Returns sent/failed counts plus `DeviceNotRegistered` tokens for cleanup.
+- **Runtime** — Node 22 (`server/package.json` `engines`, `server/.nvmrc`), Railpack builder, built-in `fetch`, better-sqlite3 13 (N-API prebuilds).
 - **Dispatcher** — `server/cron.ts:14-47`. `runCron()` runs on `*/30 * * * *` via `node-cron`. Fetches registered tokens from DB, calls `sendPushBatch`, deletes stale tokens.
 
 ### 2.2 On-device flow

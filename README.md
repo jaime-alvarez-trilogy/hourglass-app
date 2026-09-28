@@ -194,7 +194,7 @@ Upload the resulting `.aab` manually to Google Play Console on first submission.
 
 ### Ping Server (Railway)
 
-The server deploys automatically from the `server/` directory via Railway. See `server/railway.json` for configuration. No build step needed — nixpacks compiles TypeScript during the Railway build phase.
+The server deploys automatically from the `server/` directory via Railway, built with Railpack on Node 22 (pinned by `server/package.json` `engines`); Railpack runs `npm run build` to compile TypeScript. `server/railway.json` (Config as Code) stops being read on **2026-12-01**: before then run `railway config migrate --apply` from the repo root, review with `railway config plan`, apply, and delete `server/railway.json`. Keep the SQLite DB on a Railway volume (`DB_PATH`), or registered tokens are lost on redeploy.
 
 ---
 

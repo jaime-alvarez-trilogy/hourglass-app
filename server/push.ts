@@ -4,8 +4,6 @@
  * Returns { sent, failed, staleTokens[] } for cron cleanup.
  */
 
-import fetch from 'node-fetch';
-
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 const CHUNK_SIZE = 100;
 

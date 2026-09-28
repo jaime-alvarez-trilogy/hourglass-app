@@ -3,16 +3,6 @@
  * Tests for server/push.ts (sendPushBatch) and server/cron.ts (runCron)
  */
 
-// Mock node-fetch for push.ts
-// node-fetch v2 is CJS; when transpiled with Babel esModuleInterop,
-// `import fetch from 'node-fetch'` becomes `_nodeFetch.default`, so the
-// factory must expose the mock as `.default`.
-// Use jest.fn() inside factory (hoisting safe — factory runs before variable declarations).
-jest.mock('node-fetch', () => ({
-  __esModule: true,
-  default: jest.fn(),
-}));
-
 // Mock db module for cron.ts — use jest.fn() inside factory (hoisting safe)
 jest.mock('../db', () => ({
   getAllTokens: jest.fn(),
@@ -21,11 +11,12 @@ jest.mock('../db', () => ({
 
 import { sendPushBatch } from '../push';
 import { runCron } from '../cron';
-import nodeFetch from 'node-fetch';
 import * as db from '../db';
 
 // Convenience references to mocks (safe to assign after hoisted jest.mock factories run)
-const mockFetch = nodeFetch as jest.Mock;
+// push.ts uses Node's built-in fetch.
+const mockFetch = jest.fn();
+global.fetch = mockFetch as unknown as typeof fetch;
 const mockGetAllTokens = db.getAllTokens as jest.Mock;
 const mockDeleteTokens = db.deleteTokens as jest.Mock;
 
