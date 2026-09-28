@@ -103,7 +103,6 @@ jest.mock('expo-status-bar', () => ({
 
 jest.mock('@react-navigation/native', () => ({
   DarkTheme: {},
-  DefaultTheme: {},
   ThemeProvider: ({ children }: any) => {
     const mockReact = require('react');
     return mockReact.createElement('ThemeProvider', null, children);

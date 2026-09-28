@@ -3,7 +3,7 @@ import '../global.css';
 import { useEffect, useRef } from 'react';
 import { ActivityIndicator, AppState, View } from 'react-native';
 import * as Notifications from 'expo-notifications';
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import { DarkTheme, ThemeProvider } from '@react-navigation/native';
 import { focusManager, QueryClient } from '@tanstack/react-query';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
@@ -36,7 +36,6 @@ import {
   SpaceMono_700Bold,
 } from '@expo-google-fonts/space-mono';
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useConfig } from '@/src/hooks/useConfig';
 import { useRoleRefresh } from '@/src/hooks/useRoleRefresh';
 import { useScheduledNotifications } from '@/src/hooks/useScheduledNotifications';
@@ -85,7 +84,6 @@ const asyncStoragePersister = createAsyncStoragePersister({
 });
 
 function RootLayout() {
-  const colorScheme = useColorScheme();
   const { config, isLoading } = useConfig();
   const router = useRouter();
   const segments = useSegments();
@@ -158,14 +156,14 @@ function RootLayout() {
   }
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+    <ThemeProvider value={DarkTheme}>
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="(auth)" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
         <Stack.Screen name="+not-found" />
       </Stack>
-      <StatusBar style="auto" />
+      <StatusBar style="light" />
     </ThemeProvider>
   );
 }
