@@ -2,6 +2,10 @@
 // Exports match the real module: named exports used via `import * as SecureStore`
 const store: Record<string, string> = {};
 
+export const AFTER_FIRST_UNLOCK = 0;
+export const AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY = 1;
+export const WHEN_UNLOCKED = 5;
+
 export const getItemAsync = jest.fn(async (key: string): Promise<string | null> => {
   return store[key] ?? null;
 });
@@ -29,5 +33,13 @@ export const _reset = () => {
   });
 };
 
-const SecureStore = { getItemAsync, setItemAsync, deleteItemAsync, _reset };
+const SecureStore = {
+  getItemAsync,
+  setItemAsync,
+  deleteItemAsync,
+  _reset,
+  AFTER_FIRST_UNLOCK,
+  AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
+  WHEN_UNLOCKED,
+};
 export default SecureStore;

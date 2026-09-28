@@ -64,7 +64,23 @@ export async function handleBackgroundPush(
   if (dataType !== 'bg_refresh') {
     return;
   }
+  await runBgRefresh();
+}
 
+let inFlight: Promise<void> | null = null;
+
+// The headless task and the foreground listener can both see the same push;
+// coalesce concurrent runs so the dedup state is not raced.
+function runBgRefresh(): Promise<void> {
+  if (!inFlight) {
+    inFlight = refresh().finally(() => {
+      inFlight = null;
+    });
+  }
+  return inFlight;
+}
+
+async function refresh(): Promise<void> {
   try {
     const freshData = await fetchFreshData();
     await updateWidgetData(freshData);
@@ -109,9 +125,58 @@ export async function scheduleLocalNotification(count: number): Promise<void> {
   });
 }
 
+export const BG_PUSH_TASK = 'hourglass-bg-push';
+
+function typeFrom(value: unknown): unknown {
+  if (typeof value === 'string') {
+    try {
+      return typeFrom(JSON.parse(value));
+    } catch {
+      return undefined;
+    }
+  }
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    if (typeof obj.type === 'string') return obj.type;
+    return typeFrom(obj.body);
+  }
+  return undefined;
+}
+
+/**
+ * Extract the Expo push `data.type` from a TaskManager notification payload.
+ * iOS delivers the Expo `data` object under `body` (or JSON in `dataString`);
+ * Android delivers it in `dataString`. Returns undefined when absent.
+ */
+export function getPushTypeFromTaskPayload(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const p = payload as Record<string, any>;
+  const fromResponse = p.notification?.request?.content?.data;
+  const type =
+    typeFrom(p.data) ??
+    typeFrom(p.data?.dataString) ??
+    typeFrom(fromResponse);
+  return typeof type === 'string' ? type : undefined;
+}
+
+/**
+ * TaskManager executor for headless background notifications. Runs the bg_refresh
+ * pipeline (fetch → widget → approval dedup) and reports the fetch result to iOS.
+ */
+export async function handleBackgroundTask(
+  payload: unknown
+): Promise<Notifications.BackgroundNotificationTaskResult> {
+  if (getPushTypeFromTaskPayload(payload) !== 'bg_refresh') {
+    return Notifications.BackgroundNotificationTaskResult.NoData;
+  }
+  await runBgRefresh();
+  return Notifications.BackgroundNotificationTaskResult.NewData;
+}
+
 /**
  * Register the background push handler with expo-notifications.
- * Call this from the app entry point.
+ * The foreground listener covers pushes delivered while the app is running;
+ * headless delivery is handled by BG_PUSH_TASK (see backgroundTask.ts).
  */
 export function registerBackgroundPushHandler(): Notifications.Subscription {
   return Notifications.addNotificationReceivedListener(handleBackgroundPush);

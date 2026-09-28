@@ -11,9 +11,17 @@ async function secureGet(key: string): Promise<string | null> {
   if (!hasSecureStore) return AsyncStorage.getItem(key);
   return SecureStore.getItemAsync(key);
 }
+// Silent-push refresh runs while the device may be locked, so credentials must be
+// readable after first unlock. The iOS keychain keeps an item's original
+// accessibility class on update, so existing items are deleted before re-writing.
+const SECURE_OPTIONS: SecureStore.SecureStoreOptions = {
+  keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
+};
+
 async function secureSet(key: string, value: string): Promise<void> {
   if (!hasSecureStore) { await AsyncStorage.setItem(key, value); return; }
-  await SecureStore.setItemAsync(key, value);
+  await SecureStore.deleteItemAsync(key);
+  await SecureStore.setItemAsync(key, value, SECURE_OPTIONS);
 }
 async function secureDelete(key: string): Promise<void> {
   if (!hasSecureStore) { await AsyncStorage.removeItem(key); return; }
@@ -63,6 +71,26 @@ export async function saveCredentials(username: string, password: string): Promi
     secureSet(USERNAME_KEY, username),
     secureSet(PASSWORD_KEY, password),
   ]);
+}
+
+const CREDENTIAL_ACCESS_MIGRATION_KEY = 'credential_access_afu_v1';
+
+/**
+ * One-time rewrite of stored credentials with AFTER_FIRST_UNLOCK accessibility, so
+ * installs from before this change can refresh from a silent push while locked.
+ * Must run in the foreground (items written as WHEN_UNLOCKED are unreadable when locked).
+ * Idempotent: records a flag in AsyncStorage and never throws.
+ */
+export async function migrateCredentialAccessibility(): Promise<void> {
+  if (!hasSecureStore) return;
+  try {
+    if (await AsyncStorage.getItem(CREDENTIAL_ACCESS_MIGRATION_KEY)) return;
+    const creds = await loadCredentials();
+    if (creds) await saveCredentials(creds.username, creds.password);
+    await AsyncStorage.setItem(CREDENTIAL_ACCESS_MIGRATION_KEY, '1');
+  } catch {
+    // Retried on next launch.
+  }
 }
 
 // FR9 + 05-cache-hygiene FR1: Clear all stored data.

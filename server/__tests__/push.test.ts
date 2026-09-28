@@ -107,7 +107,8 @@ describe('FR3: sendPushBatch', () => {
       expect(body[0]).toEqual({
         to: makeToken(0),
         data: { type: 'bg_refresh' },
-        _contentAvailable: true,
+        contentAvailable: true,
+        priority: 'normal',
       });
     });
   });

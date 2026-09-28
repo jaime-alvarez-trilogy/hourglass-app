@@ -7,6 +7,7 @@ import {
   loadCredentials,
   saveCredentials,
   clearAll,
+  migrateCredentialAccessibility,
 } from '../src/store/config';
 import type { CrossoverConfig } from '../src/types/config';
 
@@ -79,11 +80,26 @@ describe('FR7: Config Layer — AsyncStorage', () => {
 describe('FR8: Credentials Layer — SecureStore', () => {
   it('saveCredentials writes both SecureStore keys', async () => {
     await saveCredentials('user@example.com', 'pass123');
+    const afu = { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK };
     expect(mockSecureStore.setItemAsync).toHaveBeenCalledWith(
       'crossover_username',
-      'user@example.com'
+      'user@example.com',
+      afu
     );
-    expect(mockSecureStore.setItemAsync).toHaveBeenCalledWith('crossover_password', 'pass123');
+    expect(mockSecureStore.setItemAsync).toHaveBeenCalledWith('crossover_password', 'pass123', afu);
+  });
+
+  it('saveCredentials deletes each key before writing so the new accessibility class applies', async () => {
+    await saveCredentials('user@example.com', 'pass123');
+    for (const key of ['crossover_username', 'crossover_password']) {
+      const delOrder = mockSecureStore.deleteItemAsync.mock.invocationCallOrder[
+        mockSecureStore.deleteItemAsync.mock.calls.findIndex((c) => c[0] === key)
+      ];
+      const setOrder = mockSecureStore.setItemAsync.mock.invocationCallOrder[
+        mockSecureStore.setItemAsync.mock.calls.findIndex((c) => c[0] === key)
+      ];
+      expect(delOrder).toBeLessThan(setOrder);
+    }
   });
 
   it('loadCredentials returns null when username key is absent', async () => {
@@ -159,5 +175,44 @@ describe('FR9: clearAll', () => {
     const error = new Error('AsyncStorage multiRemove failed');
     (mockAsyncStorage.multiRemove as jest.Mock).mockRejectedValueOnce(error);
     await expect(clearAll()).rejects.toThrow('AsyncStorage multiRemove failed');
+  });
+});
+
+describe('migrateCredentialAccessibility', () => {
+  it('rewrites existing credentials with AFTER_FIRST_UNLOCK and sets the flag', async () => {
+    await SecureStore.setItemAsync('crossover_username', 'user@example.com');
+    await SecureStore.setItemAsync('crossover_password', 'pass123');
+    mockSecureStore.setItemAsync.mockClear();
+
+    await migrateCredentialAccessibility();
+
+    const afu = { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK };
+    expect(mockSecureStore.setItemAsync).toHaveBeenCalledWith('crossover_username', 'user@example.com', afu);
+    expect(mockSecureStore.setItemAsync).toHaveBeenCalledWith('crossover_password', 'pass123', afu);
+    expect(await AsyncStorage.getItem('credential_access_afu_v1')).toBe('1');
+    expect(await loadCredentials()).toEqual({ username: 'user@example.com', password: 'pass123' });
+  });
+
+  it('is a no-op once the flag is set', async () => {
+    await AsyncStorage.setItem('credential_access_afu_v1', '1');
+    await SecureStore.setItemAsync('crossover_username', 'u');
+    await SecureStore.setItemAsync('crossover_password', 'p');
+    mockSecureStore.setItemAsync.mockClear();
+
+    await migrateCredentialAccessibility();
+
+    expect(mockSecureStore.setItemAsync).not.toHaveBeenCalled();
+  });
+
+  it('sets the flag without writing when no credentials are stored', async () => {
+    await migrateCredentialAccessibility();
+    expect(mockSecureStore.setItemAsync).not.toHaveBeenCalled();
+    expect(await AsyncStorage.getItem('credential_access_afu_v1')).toBe('1');
+  });
+
+  it('never throws and leaves the flag unset when the keychain read fails', async () => {
+    mockSecureStore.getItemAsync.mockRejectedValueOnce(new Error('locked'));
+    await expect(migrateCredentialAccessibility()).resolves.toBeUndefined();
+    expect(await AsyncStorage.getItem('credential_access_afu_v1')).toBeNull();
   });
 });

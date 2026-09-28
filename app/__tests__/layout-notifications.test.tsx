@@ -35,6 +35,11 @@ jest.mock('@/src/lib/pushToken', () => ({
   registerPushToken: mockRegisterPushToken,
 }));
 
+const mockMigrateCredentialAccessibility = jest.fn().mockResolvedValue(undefined);
+jest.mock('@/src/store/config', () => ({
+  migrateCredentialAccessibility: mockMigrateCredentialAccessibility,
+}));
+
 jest.mock('@/src/notifications/handler', () => ({
   registerBackgroundPushHandler: mockRegisterBackgroundPushHandler,
 }));
@@ -199,10 +204,12 @@ describe('FR1: setNotificationHandler — module scope', () => {
     expect(mockSetNotificationHandler).toHaveBeenCalledTimes(1);
   });
 
-  it('FR1.5 — handler config: shouldShowAlert is true', async () => {
+  it('FR1.5 — handler config: shows banner and list entry (not deprecated shouldShowAlert)', async () => {
     const call = mockSetNotificationHandler.mock.calls[0][0];
     const result = await call.handleNotification({});
-    expect(result.shouldShowAlert).toBe(true);
+    expect(result.shouldShowBanner).toBe(true);
+    expect(result.shouldShowList).toBe(true);
+    expect(result).not.toHaveProperty('shouldShowAlert');
   });
 
   it('FR1.6 — handler config: shouldPlaySound is true', async () => {
@@ -307,5 +314,21 @@ describe('FR3: registerBackgroundPushHandler — mount and cleanup', () => {
       renderer.unmount();
     });
     expect(mockRemove).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('credential accessibility migration', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockRegisterBackgroundPushHandler.mockReturnValue({ remove: mockRemove });
+  });
+
+  it('runs migrateCredentialAccessibility once on mount', async () => {
+    mockConfigValue = { config: null, isLoading: false };
+    act(() => {
+      create(React.createElement(require('../_layout').default));
+    });
+    await act(async () => {});
+    expect(mockMigrateCredentialAccessibility).toHaveBeenCalledTimes(1);
   });
 });

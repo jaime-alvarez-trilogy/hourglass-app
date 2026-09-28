@@ -103,18 +103,18 @@ Silent push wakes the app, which fetches fresh data and updates the widget witho
 
 ### 2.1 Server side (Railway)
 
-- **Sender** — `server/push.ts:34-83`. `sendPushBatch()` chunks tokens into batches of ≤100, posts to `https://exp.host/--/api/v2/push/send` with `data: { type: 'bg_refresh' }` and `_contentAvailable: true`. Returns sent/failed counts plus `DeviceNotRegistered` tokens for cleanup.
+- **Sender** — `server/push.ts:34-83`. `sendPushBatch()` chunks tokens into batches of ≤100, posts to `https://exp.host/--/api/v2/push/send` with `data: { type: 'bg_refresh' }`, `contentAvailable: true` and `priority: 'normal'` (APNs priority 5, required for background pushes). Returns sent/failed counts plus `DeviceNotRegistered` tokens for cleanup.
 - **Dispatcher** — `server/cron.ts:14-47`. `runCron()` runs on `*/30 * * * *` via `node-cron`. Fetches registered tokens from DB, calls `sendPushBatch`, deletes stale tokens.
 
 ### 2.2 On-device flow
 
-1. Silent push arrives. `expo-notifications` invokes the listener registered at `src/notifications/handler.ts:65-67`.
+1. Silent push arrives. When the app is backgrounded or terminated, iOS/Android launch the JS bundle headlessly and run the TaskManager task `BG_PUSH_TASK`, defined and registered at module scope in `src/notifications/backgroundTask.ts` (imported first by the entry `index.ts`, which is `package.json` `main`). The executor parses the payload with `getPushTypeFromTaskPayload` (Expo's `data` arrives under `body` or as JSON in `dataString`). While the app is running, the foreground listener (`registerBackgroundPushHandler`) may also fire; both paths call the same coalesced `runBgRefresh()` so one push never runs two refreshes concurrently.
 2. `handleBackgroundPush(notification)` (`handler.ts:51-84`) filters on `data.type === 'bg_refresh'`.
-3. `fetchFreshData()` — loads config + credentials from SecureStore, fetches timesheet + payments + work diary + approval items in parallel, returns a `CrossoverSnapshot`.
+3. `fetchFreshData()` — loads config + credentials from SecureStore (written with `AFTER_FIRST_UNLOCK` so they are readable on a locked device; pre-existing items are rewritten once by `migrateCredentialAccessibility()` on foreground launch), fetches timesheet + payments + work diary + approval items in parallel, returns a `CrossoverSnapshot`.
 4. `updateWidgetData(snapshot)` — writes `widget_data` to AsyncStorage and (on iOS) updates the widget App Group UserDefaults via `expo-widgets`.
 5. **Manager ID-set diff** (`handler.ts:65-82`, spec `06-push-dedup`): if `config.isManager`, build `currentIds = new Set(approvalItems.map(it => it.id))`, read persisted `prev_approval_ids` via `getPrevIds()`. If absent/corrupt → seed and return (no notification). Otherwise compute `newIds = currentIds \ prevIds`; if non-empty, fire `scheduleLocalNotification(newIds.length)` wrapped in `withScheduleLock` (spec 07 — coordinates with foreground `scheduleAll`). Then write back the full `currentIds` set, replacing prior state — this `savePrevIds` always runs, even when the lock was contended and the notification skipped, so the next push doesn't re-evaluate the same items as new.
 
-**Note**: this is the only background code path. It bypasses React entirely. The widget refreshes from AsyncStorage; the app picks up changes only on next foreground (TanStack Query will rehydrate from its persisted cache on cold start).
+**Note**: this is the only background code path (the task and the listener share `runBgRefresh`). It bypasses React entirely. The widget refreshes from AsyncStorage; the app picks up changes only on next foreground (TanStack Query will rehydrate from its persisted cache on cold start).
 
 ---
 

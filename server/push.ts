@@ -18,7 +18,8 @@ export interface PushBatchResult {
 interface ExpoPushMessage {
   to: string;
   data: { type: string };
-  _contentAvailable: boolean;
+  contentAvailable: boolean;
+  priority: 'normal';
 }
 
 interface ExpoTicket {
@@ -50,7 +51,9 @@ export async function sendPushBatch(tokens: string[]): Promise<PushBatchResult> 
     const messages: ExpoPushMessage[] = chunk.map(token => ({
       to: token,
       data: { type: 'bg_refresh' },
-      _contentAvailable: true,
+      contentAvailable: true,
+      // APNs rejects priority 10 for background pushes; Expo maps 'normal' to 5.
+      priority: 'normal',
     }));
 
     try {

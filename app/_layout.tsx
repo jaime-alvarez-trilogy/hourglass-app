@@ -42,12 +42,14 @@ import { useRoleRefresh } from '@/src/hooks/useRoleRefresh';
 import { useScheduledNotifications } from '@/src/hooks/useScheduledNotifications';
 import { colors } from '@/src/lib/colors';
 import { registerPushToken } from '@/src/lib/pushToken';
+import { migrateCredentialAccessibility } from '@/src/store/config';
 import { registerBackgroundPushHandler } from '@/src/notifications/handler';
 
 // FR1: Configure foreground notification display before any component renders
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
   }),
@@ -97,6 +99,10 @@ function RootLayout() {
     hasRegisteredToken.current = true;
     registerPushToken().catch(() => {});
   }, [config?.setupComplete]);
+
+  useEffect(() => {
+    migrateCredentialAccessibility();
+  }, []);
 
   // FR3: Register background push handler on mount, clean up on unmount
   const pushSubscription = useRef<Notifications.Subscription | null>(null);
