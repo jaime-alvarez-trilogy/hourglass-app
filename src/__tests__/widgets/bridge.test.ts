@@ -8,6 +8,21 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // Mock expo-widgets — iOS-only native module (virtual so it doesn't need to exist on disk)
 jest.mock('expo-widgets', () => ({}), { virtual: true });
 
+jest.mock('react-native-android-widget', () => ({
+  requestWidgetUpdate: jest.fn().mockResolvedValue(undefined),
+  FlexWidget: () => null,
+  TextWidget: () => null,
+  SvgWidget: () => null,
+}));
+
+// babel-preset-expo rewrites `import { Platform } from 'react-native'` to a deep
+// react-native-web import under jest-expo/node, so mocking 'react-native' alone
+// leaves Platform.OS === 'web'. Mock the resolved module to exercise Android.
+jest.mock('react-native-web/dist/exports/Platform', () => ({
+  __esModule: true,
+  default: { OS: 'android', select: (o: Record<string, unknown>) => o.android ?? o.default },
+}));
+
 // Mock Platform so bridge runs Android path (no iOS-only modules needed)
 jest.mock('react-native', () => ({
   Platform: { OS: 'android' },
@@ -103,6 +118,28 @@ describe('updateWidgetData (FR1)', () => {
   it('calls AsyncStorage.setItem with widget_data key', async () => {
     await updateWidgetData(makeHoursData(), makeAIData(), 0, makeConfig());
     expect(AsyncStorage.setItem).toHaveBeenCalledWith('widget_data', expect.any(String));
+  });
+
+  it('asks Android to re-render HourglassWidget with the written snapshot', async () => {
+    const { requestWidgetUpdate } = require('react-native-android-widget');
+    const { HourglassWidget } = require('../../widgets/android/HourglassWidget');
+    await updateWidgetData(makeHoursData(), makeAIData(), 0, makeConfig());
+    expect(requestWidgetUpdate).toHaveBeenCalledTimes(1);
+    const { widgetName, renderWidget } = requestWidgetUpdate.mock.calls[0][0];
+    expect(widgetName).toBe('HourglassWidget');
+    const el = renderWidget({});
+    expect(el.type).toBe(HourglassWidget);
+    expect(el.props.data).toEqual(getWrittenWidgetData());
+  });
+
+  it('does not throw when the Android widget update fails', async () => {
+    const { requestWidgetUpdate } = require('react-native-android-widget');
+    requestWidgetUpdate.mockRejectedValueOnce(new Error('no widget'));
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(
+      updateWidgetData(makeHoursData(), makeAIData(), 0, makeConfig())
+    ).resolves.toBeUndefined();
+    errSpy.mockRestore();
   });
 
   it('formats hours as string with 1 decimal', async () => {

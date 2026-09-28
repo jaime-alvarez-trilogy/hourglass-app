@@ -4,6 +4,7 @@
 // readWidgetData — read by Android widget task handler
 // Extended in 08-widget-enhancements: buildDailyEntries, formatApprovalItems, formatMyRequests
 
+import { createElement } from 'react';
 import { Platform } from 'react-native';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -863,6 +864,22 @@ export async function updateWidgetData(
 
   // Android: write snapshot to AsyncStorage for task handler to read
   await AsyncStorage.setItem(WIDGET_DATA_KEY, JSON.stringify(data));
+
+  if (Platform.OS === 'android') {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { requestWidgetUpdate } = require('react-native-android-widget');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { HourglassWidget } = require('./android/HourglassWidget');
+      await requestWidgetUpdate({
+        widgetName: 'HourglassWidget',
+        renderWidget: () => createElement(HourglassWidget, { data }),
+      });
+    } catch (err) {
+      console.error('[bridge] Android widget update failed:', err);
+    }
+    return;
+  }
 
   // iOS: store layout string + timeline entries in App Group UserDefaults,
   // then signal WidgetKit to reload.

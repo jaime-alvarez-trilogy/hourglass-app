@@ -45,6 +45,11 @@ declare module 'react-native-android-widget' {
   export function SvgWidget(props: SvgWidgetProps): JSX.Element;
   export function registerWidgetTaskHandler(handler: (props: unknown) => Promise<void>): void;
   export function updateWidget(params: unknown): Promise<void>;
+  export function requestWidgetUpdate(params: {
+    widgetName: string;
+    renderWidget: (info: unknown) => JSX.Element | Promise<JSX.Element>;
+    widgetNotFound?: () => void;
+  }): Promise<void>;
 }
 
 declare module 'expo-widgets' {

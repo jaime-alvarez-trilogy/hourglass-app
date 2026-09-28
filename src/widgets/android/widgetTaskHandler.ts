@@ -4,7 +4,9 @@
 // Reads WidgetData from AsyncStorage via readWidgetData() and renders
 // the HourglassWidget component, or a fallback state if data is unavailable.
 
+import { createElement } from 'react';
 import { readWidgetData } from '../bridge';
+import { HourglassWidget } from './HourglassWidget';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -16,46 +18,32 @@ interface WidgetInfo {
 
 interface WidgetTaskHandlerProps {
   widgetInfo: WidgetInfo;
+  widgetAction?: 'WIDGET_ADDED' | 'WIDGET_UPDATE' | 'WIDGET_RESIZED' | 'WIDGET_DELETED' | 'WIDGET_CLICK';
+  renderWidget?: (widget: ReturnType<typeof createElement>) => void;
 }
 
 // ─── widgetTaskHandler ────────────────────────────────────────────────────────
 
 /**
- * Android widget task handler — entry point for react-native-android-widget.
+ * Android widget task handler — registered with react-native-android-widget
+ * from src/widgets/android/register.ts (imported by the app entry).
  *
- * Called by the Android system for widget lifecycle events:
- * - WIDGET_ADDED: new instance placed on home screen
- * - WIDGET_UPDATE: periodic refresh
- * - WIDGET_CLICK: user tapped widget
- *
- * For 'HourglassWidget': reads cached data from AsyncStorage and renders
- * the appropriate widget state. Falls back to a "Tap to refresh" state
- * if no data is available or data is malformed.
+ * On add/update/resize/click it reads the cached WidgetData snapshot from
+ * AsyncStorage and renders HourglassWidget (FallbackWidget when data is
+ * missing or malformed). Deletions are ignored. Never throws.
  */
 async function widgetTaskHandler(props: WidgetTaskHandlerProps): Promise<void> {
-  const { widgetInfo } = props;
+  const { widgetInfo, widgetAction, renderWidget } = props;
 
-  if (widgetInfo.widgetName !== 'HourglassWidget') {
+  if (widgetInfo.widgetName !== 'HourglassWidget' || widgetAction === 'WIDGET_DELETED') {
     return;
   }
 
   try {
     const data = await readWidgetData();
-
-    if (data === null) {
-      // Render fallback state — no data available
-      // In production this would call updateWidget() with a fallback component
-      // The fallback UI is handled by HourglassWidget component when data is null
-      return;
-    }
-
-    // Data is available — widget component renders from AsyncStorage directly
-    // react-native-android-widget renders via the registered widget component
-    // The HourglassWidget component reads from the same AsyncStorage key
-    // No explicit updateWidget() call needed here — widget re-renders on AsyncStorage change
+    renderWidget?.(createElement(HourglassWidget, { data }));
   } catch {
-    // Non-critical: widget update failure should not crash the app
-    // Next widget refresh cycle will retry
+    // Non-critical: the next widget update retries.
   }
 }
 
