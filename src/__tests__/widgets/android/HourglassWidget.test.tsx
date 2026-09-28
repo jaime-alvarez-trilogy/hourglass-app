@@ -32,8 +32,10 @@ jest.mock(
       ImageWidget: ({ image, style }: { image: unknown; style?: Record<string, unknown> }) =>
         mockReact.createElement('ImageWidget', { image, style }),
     };
-  },
-  { virtual: true }
+  }
+  // Not `virtual`: the package is installed, and a virtual mock is keyed differently,
+  // so when another suite in the same process resolved the real package first,
+  // HourglassWidget got the real (null-rendering) components.
 );
 
 // ─── Fixture helpers ───────────────────────────────────────────────────────────
