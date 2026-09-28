@@ -2,12 +2,11 @@
   "expo": {
     "name": "Hourglass.xo",
     "slug": "hourglassws",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "hourglassws",
     "userInterfaceStyle": "dark",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.jalvarez0907.hourglass",
@@ -23,7 +22,7 @@
           "group.com.jalvarez0907.hourglass.widgets"
         ]
       },
-      "buildNumber": "16"
+      "buildNumber": "17"
     },
     "android": {
       "package": "com.jalvarez0907.hourglass",
@@ -33,7 +32,6 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.RECEIVE_BOOT_COMPLETED",

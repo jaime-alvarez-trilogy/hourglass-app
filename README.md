@@ -73,9 +73,9 @@ hourglassws/
 
 ### Prerequisites
 
-- Node.js 18+
-- Expo CLI (`npm install -g expo-cli`)
-- iOS: Xcode 15+ (for simulator or device builds)
+- Node.js 22 (see `.nvmrc`)
+- EAS CLI (`npm install -g eas-cli`); the Expo CLI runs via `npx expo`
+- iOS: Xcode 26+ (for simulator or device builds)
 - Android: Android Studio (for emulator builds)
 - A Crossover employee account
 
@@ -172,7 +172,17 @@ eas build --platform ios --profile production
 eas submit --platform ios --latest
 ```
 
-Bump `buildNumber` in `app.json` before each submission.
+Bump `buildNumber` in `app.json` before each submission. Once a version has been released on the App Store its version string is closed, so the next submission also needs a new `version` (e.g. 1.0.0 → 1.0.1).
+
+### Over-the-air updates (EAS Update)
+
+`runtimeVersion` uses the `appVersion` policy, so an OTA reaches only binaries with the same `version`. Any native change (SDK upgrade, new native module, `app.json` plugin/Info.plist change, patch to native code) needs a new `version` and a new binary; never publish an OTA built on a newer native layer to an older version.
+
+```bash
+eas update --channel production --environment production --message "..."
+```
+
+`--environment` is required for SDK 55+. Define `EXPO_PUBLIC_*` values in the EAS `production` environment (`eas env:set`) so builds and updates inline the same values.
 
 ### Android (Google Play)
 
