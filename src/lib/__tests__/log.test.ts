@@ -217,6 +217,44 @@ describe('logger — FR5: rotation', () => {
   });
 });
 
+describe('logger — rotation without a Buffer global (Hermes)', () => {
+  const realBuffer = global.Buffer;
+  afterEach(() => {
+    global.Buffer = realBuffer;
+  });
+
+  it('still rotates when Buffer is undefined', async () => {
+    const mod = freshLogger();
+    const { log } = mod;
+    mod.__setRotationLimits(500, 300);
+    // @ts-expect-error simulate the React Native runtime
+    delete global.Buffer;
+    for (let i = 0; i < 20; i++) log.info('evt', { i });
+    await log.flush();
+    global.Buffer = realBuffer;
+
+    const content = _fsGet(LOG_URI)!;
+    expect(Buffer.byteLength(content, 'utf8')).toBeLessThanOrEqual(500);
+    expect(content.startsWith('{')).toBe(true);
+  });
+});
+
+describe('utf8ByteLength', () => {
+  it.each([
+    ['', 0],
+    ['abc', 3],
+    ['é', 2],
+    ['€', 3],
+    ['😀', 4],
+    ['a😀é€', 10],
+    ['\ud83d', 3],
+  ])('matches Buffer.byteLength for %j', (input, expected) => {
+    const { utf8ByteLength } = freshLogger();
+    expect(utf8ByteLength(input)).toBe(expected);
+    expect(utf8ByteLength(input)).toBe(Buffer.byteLength(input, 'utf8'));
+  });
+});
+
 describe('logger — FR6: never throws', () => {
   // T34
   it('swallows writeAsStringAsync rejections', async () => {

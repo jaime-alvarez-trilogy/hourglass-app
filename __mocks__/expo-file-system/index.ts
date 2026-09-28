@@ -2,6 +2,9 @@
 // We export the same surface twice: as `expo-file-system` (root) and as
 // `expo-file-system/legacy` via jest.config moduleNameMapper.
 
+// Captured at load so tests can delete global.Buffer to simulate Hermes.
+const NodeBuffer = Buffer;
+
 const files: Record<string, string> = {};
 let docDir = '/mock-docs/';
 
@@ -27,7 +30,7 @@ export const readAsStringAsync = jest.fn(async (uri: string): Promise<string> =>
 export const getInfoAsync = jest.fn(
   async (uri: string): Promise<{ exists: boolean; size: number; uri: string }> => {
     if (files[uri] === undefined) return { exists: false, size: 0, uri };
-    return { exists: true, size: Buffer.byteLength(files[uri], 'utf8'), uri };
+    return { exists: true, size: NodeBuffer.byteLength(files[uri], 'utf8'), uri };
   }
 );
 
@@ -55,7 +58,7 @@ export const _reset = () => {
   });
   getInfoAsync.mockImplementation(async (uri: string) => {
     if (files[uri] === undefined) return { exists: false, size: 0, uri };
-    return { exists: true, size: Buffer.byteLength(files[uri], 'utf8'), uri };
+    return { exists: true, size: NodeBuffer.byteLength(files[uri], 'utf8'), uri };
   });
   deleteAsync.mockImplementation(async (uri: string) => {
     delete files[uri];

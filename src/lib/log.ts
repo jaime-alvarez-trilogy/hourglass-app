@@ -181,7 +181,7 @@ class Logger {
     let kept: string[] = [];
     let cumulative = 0;
     for (let i = lines.length - 1; i >= 0; i--) {
-      const lineBytes = Buffer.byteLength(lines[i], 'utf8') + 1; // +1 for \n
+      const lineBytes = utf8ByteLength(lines[i]) + 1; // +1 for \n
       if (cumulative + lineBytes > TARGET_BYTES) break;
       cumulative += lineBytes;
       kept.unshift(lines[i]);
@@ -194,6 +194,26 @@ class Logger {
       encoding: FileSystem.EncodingType?.UTF8 ?? 'utf8',
     } as Parameters<typeof FileSystem.writeAsStringAsync>[2]);
   }
+}
+
+// Hermes has no Node Buffer global; counting here keeps rotation dependency-free.
+export function utf8ByteLength(s: string): number {
+  let bytes = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x80) bytes += 1;
+    else if (c < 0x800) bytes += 2;
+    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
+      const next = s.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        i++;
+      } else {
+        bytes += 3;
+      }
+    } else bytes += 3;
+  }
+  return bytes;
 }
 
 /** Singleton — import as `import { log } from '@/src/lib/log';`. */
