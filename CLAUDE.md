@@ -66,7 +66,7 @@ Default to writing no comments. The exception is exported functions in `src/api/
 
 ## Project quick reference
 
-- **Framework:** Expo SDK 55, React Native 0.83, Expo Router, TanStack Query v5
+- **Framework:** Expo SDK 57, React Native 0.86, Expo Router, TanStack Query v5 (import navigation APIs from `expo-router/react-navigation` / `expo-router/js-tabs`, never `@react-navigation/*`)
 - **iOS widgets:** `expo-widgets` (JSX → SwiftUI)
 - **Android widgets:** `react-native-android-widget`
 - **Credentials:** `expo-secure-store` (encrypted, on-device only)

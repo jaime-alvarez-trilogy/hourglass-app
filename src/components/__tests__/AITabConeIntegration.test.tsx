@@ -150,14 +150,14 @@ jest.mock('@/src/lib/aiCone', () => ({
 }));
 
 // useFocusKey — mock to return a stable key (0)
-// Also mock @react-navigation/native since useFocusKey uses useIsFocused which
+// Also mock expo-router/react-navigation since useFocusKey uses useIsFocused which
 // requires a NavigationContainer — not available in jest-expo/node environment
 const mockUseFocusKey = jest.fn(() => 0);
 jest.mock('@/src/hooks/useFocusKey', () => ({
   useFocusKey: () => mockUseFocusKey(),
 }));
 
-jest.mock('@react-navigation/native', () => ({
+jest.mock('expo-router/react-navigation', () => ({
   useIsFocused: () => true,
   useNavigation: () => ({ navigate: jest.fn(), replace: jest.fn(), push: jest.fn() }),
   useRoute: () => ({ params: {} }),

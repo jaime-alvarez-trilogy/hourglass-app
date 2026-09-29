@@ -26,9 +26,13 @@ import {
   withSpring,
   useReducedMotion,
 } from 'react-native-reanimated';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused } from 'expo-router/react-navigation';
 import { springBouncy } from '@/src/lib/reanimated-presets';
 import type { StyleProp, ViewStyle } from 'react-native';
+
+// Reanimated 4.5 types useAnimatedStyle's result as an AnimatedStyleHandle, which is
+// only valid on Animated components; plain resting styles are returned out of range.
+type EntryStyle = StyleProp<ViewStyle> | ReturnType<typeof useAnimatedStyle>;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -43,7 +47,7 @@ export interface StaggeredEntryOptions {
 }
 
 export interface UseStaggeredEntryReturn {
-  getEntryStyle: (index: number) => StyleProp<ViewStyle>;
+  getEntryStyle: (index: number) => EntryStyle;
   isReady: boolean;
 }
 
@@ -106,7 +110,7 @@ export function useStaggeredEntry({
   }, [isFocused]);
 
   // Return animated style by index; indices beyond animatedCount get resting plain style
-  function getEntryStyle(index: number): StyleProp<ViewStyle> {
+  function getEntryStyle(index: number): EntryStyle {
     if (index >= animatedCount || index >= count) {
       return { opacity: 1, transform: [{ translateY: 0 }] };
     }

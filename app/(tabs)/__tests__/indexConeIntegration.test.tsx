@@ -41,8 +41,8 @@ jest.mock('expo-router', () => ({
 }));
 
 // useFocusKey uses useIsFocused which requires NavigationContainer.
-// Mock @react-navigation/native so useFocusKey works in jest-expo/node.
-jest.mock('@react-navigation/native', () => ({
+// Mock expo-router/react-navigation so useFocusKey works in jest-expo/node.
+jest.mock('expo-router/react-navigation', () => ({
   useIsFocused: () => true,
   useNavigation: () => ({ navigate: jest.fn(), replace: jest.fn(), push: jest.fn() }),
   useRoute: () => ({ params: {} }),

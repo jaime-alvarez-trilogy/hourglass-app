@@ -75,7 +75,7 @@ hourglassws/
 
 - Node.js 22 (see `.nvmrc`)
 - EAS CLI (`npm install -g eas-cli`); the Expo CLI runs via `npx expo`
-- iOS: Xcode 26+ (for simulator or device builds)
+- iOS: Xcode 26.4+ (for simulator or device builds); minimum supported iOS is 16.4
 - Android: Android Studio (for emulator builds)
 - A Crossover employee account
 

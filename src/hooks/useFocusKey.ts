@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused } from 'expo-router/react-navigation';
 
 /**
  * Returns a key that increments each time the screen re-focuses (after initial mount).

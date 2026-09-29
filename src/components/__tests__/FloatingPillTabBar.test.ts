@@ -307,9 +307,9 @@ describe('01-floating-pill-tab — Integration: forbidden imports', () => {
     expect(code).not.toContain('IconSymbol');
   });
 
-  it('imports BottomTabBarProps from @react-navigation/bottom-tabs', () => {
+  it('imports BottomTabBarProps from expo-router/js-tabs', () => {
     expect(source).toMatch(
-      /from\s*['"]@react-navigation\/bottom-tabs['"]/,
+      /from\s*['"]expo-router\/js-tabs['"]/,
     );
   });
 });

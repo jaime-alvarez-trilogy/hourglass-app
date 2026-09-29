@@ -15,7 +15,7 @@ import Animated, {
   withTiming,
   useReducedMotion,
 } from 'react-native-reanimated';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused } from 'expo-router/react-navigation';
 import { springSnappy, timingSmooth } from '@/src/lib/reanimated-presets';
 
 interface FadeInScreenProps {

@@ -83,8 +83,8 @@ describe('HapticTab — FR3: source file checks', () => {
 
 describe('HapticTab — FR3: runtime render', () => {
   beforeAll(() => {
-    // Mock PlatformPressable since it's from @react-navigation/elements
-    jest.mock('@react-navigation/elements', () => ({
+    // Mock PlatformPressable since it's from expo-router/react-navigation
+    jest.mock('expo-router/react-navigation', () => ({
       PlatformPressable: ({ children, onPressIn, onPressOut, ...rest }: any) =>
         require('react').createElement('View', { onPressIn, onPressOut, ...rest }, children),
     }));

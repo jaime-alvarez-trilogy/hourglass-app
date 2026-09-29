@@ -6,7 +6,7 @@
 
 import { createElement } from 'react';
 import { Platform } from 'react-native';
-import { requireOptionalNativeModule } from 'expo-modules-core';
+import { requireOptionalNativeModule } from 'expo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getUrgencyLevel, getSundayMidnightGMT, computePacingSignal } from '../lib/hours';
 import type { HoursData, DailyEntry } from '../lib/hours';
@@ -597,7 +597,7 @@ const WIDGET_LAYOUT_JS = `(function(props, env) {
       items.push(Text({ modifiers: [foregroundStyle(violet), font({ size: 11, weight: 'bold' })], children: brainlift + ' BL' }));
     }
     items.push(Spacer({}));
-    return HStack({ children: items });
+    return HStack({ spacing: 0, children: items });
   }
 
   // ── Approval row (manager large) ──────────────────────────────────────────────
@@ -614,7 +614,7 @@ const WIDGET_LAYOUT_JS = `(function(props, env) {
           startPoint: { x: 0, y: 0 }, endPoint: { x: 0, y: 0.5 } }),
         opacity(0.07), fillFrame
       ]}),
-      HStack({ modifiers: [padding({ top: 10, bottom: 10, leading: 12, trailing: 12 })], children: [
+      HStack({ spacing: 0, modifiers: [padding({ top: 10, bottom: 10, leading: 12, trailing: 12 })], children: [
         Text({ modifiers: [foregroundStyle(text1), font({ size: 13, weight: 'medium' })],
           children: item.name || '' }),
         Spacer({}),
@@ -699,7 +699,7 @@ const WIDGET_LAYOUT_JS = `(function(props, env) {
         Text({ modifiers: [foregroundStyle(gold), font({ size: 22, weight: 'bold' })], children: earnings }),
       ])
     ]}),
-    HStack({ alignment: 'center', children: [
+    HStack({ spacing: 0, alignment: 'center', children: [
       buildPill(),
       Spacer({}),
       mediumStatusRight
@@ -732,7 +732,7 @@ const WIDGET_LAYOUT_JS = `(function(props, env) {
           Text({ modifiers: [foregroundStyle(gold), font({ size: 22, weight: 'bold' })], children: earnings }),
         ])
       ]}),
-      HStack({ children: [
+      HStack({ spacing: 0, children: [
         Text({ modifiers: [foregroundStyle('#F43F5E'), font({ size: 12, weight: 'bold' })],
           children: '\u26A0  PENDING APPROVALS' }),
         Spacer({}),
@@ -776,7 +776,7 @@ const WIDGET_LAYOUT_JS = `(function(props, env) {
           Text({ modifiers: [foregroundStyle(gold), font({ size: 22, weight: 'bold' })], children: earnings }),
         ])
       ]}),
-      HStack({ alignment: 'center', children: largeStatusChildren }),
+      HStack({ spacing: 0, alignment: 'center', children: largeStatusChildren }),
       // Second metrics row: AI% + BrainLift
       HStack({ spacing: 12, modifiers: [frame({ height: 58 })], children: [
         buildGlassCard([

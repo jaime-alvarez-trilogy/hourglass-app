@@ -51,7 +51,7 @@ jest.mock('@/src/components/FadeInScreen', () => {
     default: ({ children }: any) => mockReact.createElement(mockReact.Fragment, null, children),
   };
 });
-jest.mock('@react-navigation/native', () => ({
+jest.mock('expo-router/react-navigation', () => ({
   useIsFocused: () => true,
 }));
 

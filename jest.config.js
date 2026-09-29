@@ -10,6 +10,9 @@ module.exports = {
   // timers never crash the process when multiple test suites run in the same worker.
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
+    // jest-expo 57's node preset no longer aliases react-native to react-native-web;
+    // RNTL fireEvent then reaches native TurboModules and throws.
+    '^react-native$': 'react-native-web',
     // Stub binary image assets — prevents Jest module resolution errors for PNG/JPG
     '\\.(png|jpg|jpeg|gif|webp)$': '<rootDir>/__mocks__/fileMock.js',
     // expo-linear-gradient — no native module available in Jest/node environment
@@ -18,6 +21,6 @@ module.exports = {
     '\\.css$': '<rootDir>/__mocks__/fileMock.js',
   },
   transformIgnorePatterns: [
-    'node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|@shopify/react-native-skia|victory-native)',
+    'node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|standard-navigation|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|@shopify/react-native-skia|victory-native)',
   ],
 };

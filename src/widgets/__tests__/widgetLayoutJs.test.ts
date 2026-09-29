@@ -824,3 +824,28 @@ describe('04-cockpit-hud FR5: Priority ordering (iOS — current bridge.ts)', ()
     expect(treeContains(tree, '71%\u201375%')).toBe(true);
   });
 });
+
+describe('@expo/ui 57 stack spacing', () => {
+  // @expo/ui 57.0.9 forwards an unset HStack/VStack spacing as the system default
+  // instead of 0, so every stack must set it explicitly to keep the layout.
+  it('every HStack/VStack call sets spacing', () => {
+    const js = extractWidgetLayoutJs();
+    const missing: string[] = [];
+    const re = /\b(HStack|VStack)\(\{/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(js))) {
+      let depth = 0;
+      let j = m.index + m[0].length - 1;
+      let props = '';
+      for (; j < js.length; j++) {
+        const c = js[j];
+        props += c;
+        if (c === '{') depth++;
+        else if (c === '}' && --depth === 0) break;
+      }
+      const topLevel = props.replace(/\{[^{}]*\}/g, (inner, off) => (off === 0 ? inner : ''));
+      if (!/\bspacing\s*:/.test(topLevel.split('children')[0])) missing.push(props.slice(0, 60));
+    }
+    expect(missing).toEqual([]);
+  });
+});

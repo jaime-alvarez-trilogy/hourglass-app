@@ -38,6 +38,10 @@ import {
 import { springBouncy } from '@/src/lib/reanimated-presets';
 import type { StyleProp, ViewStyle } from 'react-native';
 
+// Reanimated 4.5 types useAnimatedStyle's result as an AnimatedStyleHandle, which is
+// only valid on Animated components; plain resting styles are returned out of range.
+type EntryStyle = StyleProp<ViewStyle> | ReturnType<typeof useAnimatedStyle>;
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 /** Maximum number of items pre-allocated (fixed upper bound for hooks compliance). */
@@ -57,7 +61,7 @@ export interface UseListCascadeOptions {
 }
 
 export interface UseListCascadeReturn {
-  getItemStyle: (index: number) => StyleProp<ViewStyle>;
+  getItemStyle: (index: number) => EntryStyle;
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -124,7 +128,7 @@ export function useListCascade(
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [count, ...deps]);
 
-  function getItemStyle(index: number): StyleProp<ViewStyle> {
+  function getItemStyle(index: number): EntryStyle {
     if (index < 0 || index >= count || index >= MAX_ITEMS) {
       // Out-of-range: return resting plain style (no animation overhead)
       return { opacity: 1, transform: [{ translateY: 0 }, { scale: 1 }] };

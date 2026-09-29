@@ -101,7 +101,7 @@ jest.mock('expo-status-bar', () => ({
   StatusBar: () => null,
 }));
 
-jest.mock('@react-navigation/native', () => ({
+jest.mock('expo-router/react-navigation', () => ({
   DarkTheme: {},
   ThemeProvider: ({ children }: any) => {
     const mockReact = require('react');

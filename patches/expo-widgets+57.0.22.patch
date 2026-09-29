@@ -1,0 +1,27 @@
+diff --git a/node_modules/expo-widgets/ios/Widgets/EntryView.swift b/node_modules/expo-widgets/ios/Widgets/EntryView.swift
+index 946b66d..d3a9957 100644
+--- a/node_modules/expo-widgets/ios/Widgets/EntryView.swift
++++ b/node_modules/expo-widgets/ios/Widgets/EntryView.swift
+@@ -29,8 +29,22 @@ public struct WidgetsEntryView: View {
+        !layout.isEmpty {
+       let node = evaluateLayout(layout: layout, props: entry.props ?? [:], environment: widgetEnvironment)
+       WidgetsDynamicView(name: entry.name, kind: .widget, node: node, entryIndex: entry.entryIndex, environmentString: widgetEnvironmentString)
++        .modifier(HourglassContainerBackground())
+     } else {
+       WidgetsDynamicView(name: entry.name, kind: .widget, node: createRedBox(message: "No layout found for \(WidgetsStorage.appGroupIdentifier ?? "")::\(entry.name)"), entryIndex: entry.entryIndex, environmentString: widgetEnvironmentString)
+     }
+   }
+ }
++
++// Hourglass: expo-widgets 56 removed the built-in containerBackground; without one
++// iOS 17+ shows the "adopt containerBackground API" placeholder. Applied natively so
++// it also covers layouts stored by older app versions until the app rewrites them.
++private struct HourglassContainerBackground: ViewModifier {
++  func body(content: Content) -> some View {
++    if #available(iOS 17.0, *) {
++      content.containerBackground(Color(red: 0.051, green: 0.051, blue: 0.102, opacity: 1), for: .widget)
++    } else {
++      content
++    }
++  }
++}

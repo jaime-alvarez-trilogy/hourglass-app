@@ -2,9 +2,8 @@
 // Pure display component: one insight chip rendered as a GlassCard surface
 // with a colored dot, bold primary line, and muted secondary line.
 
-import React from 'react';
+import React, { type ComponentProps } from 'react';
 import { View, Text } from 'react-native';
-import type { StyleProp, ViewStyle } from 'react-native';
 import Animated from 'react-native-reanimated';
 import GlassCard from './GlassCard';
 
@@ -14,7 +13,7 @@ interface InsightChipProps {
   /** Hex color from colors.* palette — sets dot fill */
   dotColor: string;
   /** From useStaggeredEntry's getEntryStyle(3 + i) */
-  animatedStyle?: StyleProp<ViewStyle>;
+  animatedStyle?: ComponentProps<typeof Animated.View>['style'];
 }
 
 export function InsightChip({

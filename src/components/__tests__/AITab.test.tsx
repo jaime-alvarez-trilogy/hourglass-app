@@ -160,12 +160,12 @@ jest.mock('@/src/hooks/useConfig', () => ({
 }));
 
 // useFocusKey — added by 03-ai-tab-integration (ai.tsx now calls useFocusKey for chartKey)
-// Also mock @react-navigation/native to avoid NavigationContainer requirement
+// Also mock expo-router/react-navigation to avoid NavigationContainer requirement
 jest.mock('@/src/hooks/useFocusKey', () => ({
   useFocusKey: () => 0,
 }));
 
-jest.mock('@react-navigation/native', () => ({
+jest.mock('expo-router/react-navigation', () => ({
   useIsFocused: () => true,
   useNavigation: () => ({ navigate: jest.fn(), replace: jest.fn(), push: jest.fn() }),
   useRoute: () => ({ params: {} }),
