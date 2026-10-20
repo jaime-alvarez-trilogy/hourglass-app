@@ -59,12 +59,15 @@ Feature: `store-compliance`
 
 ⚠️ **Validate test design BEFORE implementing.** Weak tests lead to weak implementation.
 
-- [ ] Run `red-phase-test-validator` agent on `__tests__/config/app-config.test.ts`
-- [ ] All FR1 success criteria have test coverage (range, string type, semver, appVersionSource)
-- [ ] Assertions are specific (numeric `>= 18`, regex, strict equality to `'local'`), not just "is defined"
-- [ ] No hard-coded `"18"` equality that would break build 19 (spec 06)
-- [ ] Config is read through spec 03's typed JSON imports (`expo`, `easJson`). No `fs`/`path`/`__dirname`
-- [ ] Fix any issues identified before proceeding
+- [x] Run `red-phase-test-validator` agent on `__tests__/config/app-config.test.ts`
+  - The orchestrator ran the test-design validators outside this session and passed 0 findings to the implementation run (2026-10-20), so there was nothing to fix.
+- [x] All FR1 success criteria have test coverage (range, string type, semver, appVersionSource)
+- [x] Assertions are specific (numeric `>= 18`, regex, strict equality to `'local'`), not just "is defined"
+- [x] No hard-coded `"18"` equality that would break build 19 (spec 06)
+  - `grep -nE "'18'|\"18\"|=== ?18" __tests__/config/app-config.test.ts` → nothing.
+- [x] Config is read through spec 03's typed JSON imports (`expo`, `easJson`). No `fs`/`path`/`__dirname`
+  - `git diff 9c1652e -- __tests__/config/app-config.test.ts` adds only `+import easJson from '@/eas.json';`, with no `fs`/`path`/`__dirname`.
+- [x] Fix any issues identified before proceeding
 
 ---
 
@@ -270,50 +273,78 @@ asc.js is untracked, so it has no Jest coverage. The "tests" are the command tra
 
 ⚠️ **Validate test design BEFORE implementing.** Weak tests lead to weak implementation.
 
-- [ ] Run `red-phase-test-validator` agent on the Phase 2.0 expected-transcript list (spec.md FR2–FR5 as the reference)
-- [ ] Every FR2–FR5 success criterion has a transcript, grep or GET item
-- [ ] Expectations are specific (exact line counts, exact JSON attributes, exit codes), not just "runs"
-- [ ] Every write command has an `ASC_TRACE=1 … 2>&1 | grep -E '^\[http\] (POST|PATCH|DELETE)'` → empty check
-- [ ] Fix any issues identified before proceeding
+- [x] Run `red-phase-test-validator` agent on the Phase 2.0 expected-transcript list (spec.md FR2–FR5 as the reference)
+  - The orchestrator ran the test-design validators outside this session and passed 0 findings to the implementation run (2026-10-20), so there was nothing to fix.
+- [x] Every FR2–FR5 success criterion has a transcript, grep or GET item
+  - Offline: 82 `check.js` cases. The post-live criteria (re-runs after the FR7 live writes) run against the `post-live`/`v110-prepped` fixtures, and are recorded live in Phase 3.1.
+- [x] Expectations are specific (exact line counts, exact JSON attributes, exit codes), not just "runs"
+- [x] Every write command has an `ASC_TRACE=1 … 2>&1 | grep -E '^\[http\] (POST|PATCH|DELETE)'` → empty check
+  - `check.js` applies it to every case: it fails any non-GET `[http]` trace line and any non-GET that reaches the transport.
+- [x] Fix any issues identified before proceeding
 
 ---
 
 ## Phase 2.1: Implementation (`.appstore/asc.js`)
 
 ### FR2: Safety fixes and dry-run plumbing
-- [ ] Config block: add `URLS`, `EDITABLE_VERSION_STATES`, `EDITABLE_INFO_STATES`. Keep `KEY_ID`/`ISSUER_ID`/`KEY_PATH` at the top (for OPS O8).
-- [ ] Add `request()` returning `{status, body}`, with `ASC_TRACE` logging and the non-GET-under-dry-run throw. Re-implement `api()` as `request().body`.
-- [ ] Add `write()` (dry-run print + counter, else request + throw on `status >= 400` / `errors`) and the end-of-command `[dry-run] <n> write(s) skipped`.
-- [ ] Argument parsing: strip `--dry-run`, `--type=…`, `--file <p>` before positional args.
-- [ ] `getAppId()`: throw `ASC API error: <status> <code> — <title>` when `res.errors`.
-- [ ] `listTesters()`: `?? '<anonymous>'`, `?? ''` for names and inviteType, id column, `--type` filter, per-type counts.
-- [ ] `versionState()`, `getLatestVersion()` (editable-only, throws on 0 or more than 1), `getNewestVersion()` (unfiltered). Switch `checkSubmissionState` to `getNewestVersion()`.
-- [ ] `getEditableAppInfo(appId)`.
-- [ ] Move the dispatcher (`// ── Main`) to the end of the file. Update the usage string and header comment with all commands + `--dry-run`.
-- [ ] `node --check .appstore/asc.js` → exit 0.
-- [ ] Re-run the FR2 Phase 2.0 items and record actual vs expected.
+- [x] Config block: add `URLS`, `EDITABLE_VERSION_STATES`, `EDITABLE_INFO_STATES`. Keep `KEY_ID`/`ISSUER_ID`/`KEY_PATH` at the top (for OPS O8).
+  - Also in the Config block: `LIVE_VERSION_STATES`, `INVITE_TYPES`, `WHATS_NEW_MAX_CHARS`, `CREATE_VERSION_HINT`, `REVIEW_NOTES_UNLISTED` (moved up from line 382), `DRY_RUN` and `TRACE`. FR2.02 and FR2.03 pass.
+- [x] Add `request()` returning `{status, body}`, with `ASC_TRACE` logging and the non-GET-under-dry-run throw. Re-implement `api()` as `request().body`.
+  - Under `DRY_RUN` a non-GET rejects with `Refusing <METHOD> in --dry-run (<path>): this command can't preview its writes` before anything is sent. `api()` is now `request().then(r => r.body)`. `request()` also sets the response encoding to utf8 and a 60 s timeout.
+- [x] Add `write()` (dry-run print + counter, else request + throw on `status >= 400` / `errors`) and the end-of-command `[dry-run] <n> write(s) skipped`.
+  - The live error message is `<METHOD> <path> failed: ASC API error: <status> <code> — <title> (<detail>)`. The trailer is printed after a successful command under `--dry-run` (on errors, only the error prints).
+- [x] Argument parsing: strip `--dry-run`, `--type=…`, `--file <p>` before positional args.
+  - `--file=<p>` is accepted too. A `--file` followed by another `--` flag counts as missing.
+- [x] `getAppId()`: throw `ASC API error: <status> <code> — <title>` when `res.errors`.
+  - Also on any status >= 400. The app id is memoized, so a command makes the bundle-id lookup once.
+- [x] `listTesters()`: `?? '<anonymous>'`, `?? ''` for names and inviteType, id column, `--type` filter, per-type counts.
+- [x] `versionState()`, `getLatestVersion()` (editable-only, throws on 0 or more than 1), `getNewestVersion()` (unfiltered). Switch `checkSubmissionState` to `getNewestVersion()`.
+  - The no-editable message names the live version (`READY_FOR_SALE`/`READY_FOR_DISTRIBUTION`) and, if different, the newest one: `No editable App Store version (live: 1.0 READY_FOR_DISTRIBUTION). Run: node .appstore/asc.js create-version <x.y.z>`. `check-submission`'s first line still prints `appStoreState` (falling back to `appVersionState`), so its format and value match the baseline.
+- [x] `getEditableAppInfo(appId)`.
+- [x] Move the dispatcher (`// ── Main`) to the end of the file. Update the usage string and header comment with all commands + `--dry-run`.
+  - Sections, in order: Config, JWT, HTTP, Paginate, Lookups, Commands, Store listing (legacy), Release ×4, Main. The usage, the header comment and the dispatcher list all 19 commands. An unknown command prints the usage and sets `process.exitCode = 1`. Errors also use `process.exitCode = 1` instead of `process.exit(1)`, so piped output is flushed.
+- [x] `node --check .appstore/asc.js` → exit 0.
+- [x] Re-run the FR2 Phase 2.0 items and record actual vs expected.
+  - **Offline, 2026-10-20:** `node features/app/store-compliance/specs/05-release-build-18/asc-offline/check.js --target "/Users/Trilogy/Documents/Claude Code/WS/hourglassws/.appstore/asc.js"` → `82 passed, 0 failed (82 cases, 6 characterization)`. Every FR2 case passes, including the 6 characterization cases (`builds`, `beta-info`, `check-submission` formats unchanged).
+  - **New offline transport check** `asc-offline/write-path.js --target <asc.js>` → `10 passed, 0 failed`. It covers what `check.js` can't: `write()`'s live branch (200 resolves the body; 204 empty resolves; 409 + `errors`, 200 + `errors` and a 500 HTML body all throw), `api()` returning only the body, `[http]` tracing of a failed write, and the dry-run print and backstop. It loads asc.js in a `vm` sandbox with no command and a stub `https`. No asc.js command runs, and the sandbox has no `fetch` and refuses `http`/`net`/`tls`/`child_process`. Mutation check: 5 mutants (no throw on errors, no backstop, dry-run sends, `api()` returns `{status, body}`, no trace) were each caught by exactly their case.
+  - **Live, read-only GETs, 2026-10-20** (`ASC_TRACE=1`): `builds`, `list-testers`, `check-submission` and `beta-info` each print `[http] GET /v1/apps?filter[bundleId]=com.jalvarez0907.hourglass -> 403` and `Error: ASC API error: 403 FORBIDDEN.REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED — A required agreement is missing or has expired. (This request requires an in-effect agreement that has not been signed or has expired.)`, then exit 1. No more "App not found". The live `list-testers` table, the live `set-review-notes --dry-run` refusal and the live `check-submission` 1.0 record wait for the agreement (Phase 3.0).
+  - **Live, refusals before any request** (`ASC_TRACE=1`, 0 `[http]` and 0 `[dry-run]` lines, exit 1 each): `create-version 1.1 --dry-run`, `create-version --dry-run`, `attach-build --dry-run`, `submit-app-review --dry-run`, `set-whats-new --dry-run`, `set-whats-new --file <empty> / <whitespace> / <4001 chars> --dry-run`, `set-whats-new hello --file <f>`, `list-testers --type=BOGUS`, and an unknown command (usage).
 
 ### FR3: Public-link lockdown
-- [ ] `disable-public-link`: list groups, `write` PATCH for each `publicLinkEnabled === true`, no-op message otherwise.
-- [ ] `remove-public-link-testers [ids…]`: validate all ids are PUBLIC_LINK before any write, `write` DELETE per tester, no-op message when 0.
-- [ ] Re-run the FR3 Phase 2.0 items with `ASC_TRACE=1` and record the transcripts. The trace grep must be empty.
+- [x] `disable-public-link`: list groups, `write` PATCH for each `publicLinkEnabled === true`, no-op message otherwise.
+  - It also prints `Internal group: "<name>"`, or `Internal group: none (J: create one in ASC → TestFlight for the smoke test)`.
+- [x] `remove-public-link-testers [ids…]`: validate all ids are PUBLIC_LINK before any write, `write` DELETE per tester, no-op message when 0.
+- [x] Re-run the FR3 Phase 2.0 items with `ASC_TRACE=1` and record the transcripts. The trace grep must be empty.
+  - Offline: FR3.01–FR3.10 pass (`today` fixture: 1 PATCH `/betaGroups/bg-test`, 12 DELETEs, EMAIL / mixed / unknown ids refused with 0 writes). Live transcripts with the real group and tester ids wait for the agreement (Phase 3.1).
 
 ### FR4: Version record commands
-- [ ] `create-version <x.y.z>`: format check, the existing/editable/non-editable/different-version branches, POST version (`AFTER_APPROVAL`), ensure phased release (`INACTIVE`), `<new-version-id>` placeholder in a dry run.
-- [ ] `attachBuild(version, buildId)` with guards (a)–(d), the already-attached no-op, and the PATCH body moved from `asc.js:429-434`. Add the `attach-build <buildId>` command.
-- [ ] `set-whats-new <text> | --file <path>`: trim, check 1–4000 chars, en-US loc, equality no-op, `write` PATCH.
-- [ ] `REVIEW_NOTES_UNLISTED` → granted-tense sentence from spec FR4. `set-review-notes` gets the equality no-op and goes through `write()`.
-- [ ] `submit-app-review <buildId>`: require the id, remove the auto-pick (421-426) and the "Proceeding anyway" branch (417-419), use `attachBuild()`, route the 3 submission writes through `write()` with a `<new-submission-id>` placeholder in dry runs.
-- [ ] Extend `check-submission` with: releaseType, phased state, copyright, whatsNew (120 chars), supportUrl, marketingUrl, privacyPolicyUrl, socialMedia, appStoreAgeRating.
-- [ ] Write `/tmp/whats-new-1.1.0.txt` with the exact 4-bullet copy from spec FR4. Check it with `grep -ci '\borg\b' /tmp/whats-new-1.1.0.txt` → `0`.
-- [ ] Re-run the FR4 Phase 2.0 items with `ASC_TRACE=1` and record the transcripts. The trace grep must be empty, including `submit-app-review <build17-id> --dry-run` (expected now: the "run create-version" refusal, since 1.1.0 doesn't exist yet; no non-GET request). This doesn't satisfy the FR4 full-preview criterion. That transcript is recorded in Phase 3.1 → Attach, once build 18 is attached.
+- [x] `create-version <x.y.z>`: format check, the existing/editable/non-editable/different-version branches, POST version (`AFTER_APPROVAL`), ensure phased release (`INACTIVE`), `<new-version-id>` placeholder in a dry run.
+- [x] `attachBuild(version, buildId)` with guards (a)–(d), the already-attached no-op, and the PATCH body moved from `asc.js:429-434`. Add the `attach-build <buildId>` command.
+  - Guard (d) reads `/builds?filter[app]=…&filter[preReleaseVersion.version]=<v>&filter[processingState]=VALID&limit=200` and compares build numbers numerically. A refusal reads `Refusing: a newer valid build 18 (<id>) exists for 1.1.0; attach that one instead of build 17`.
+- [x] `set-whats-new <text> | --file <path>`: trim, check 1–4000 chars, en-US loc, equality no-op, `write` PATCH.
+  - The length is counted in code points. Inline text may span several args; they're joined with spaces. `<text>` and `--file` together are refused.
+- [x] `REVIEW_NOTES_UNLISTED` → granted-tense sentence from spec FR4. `set-review-notes` gets the equality no-op and goes through `write()`.
+  - Checked: the new constant equals the backup's text with only the Unlisted sentence replaced (it equals `fixtures.REVIEW_NOTES_NEW`; the backup's equals `REVIEW_NOTES_OLD`). A missing `appStoreReviewDetail` now refuses with `fill in App Review Information in the ASC UI`.
+- [x] `submit-app-review <buildId>`: require the id, remove the auto-pick (421-426) and the "Proceeding anyway" branch (417-419), use `attachBuild()`, route the 3 submission writes through `write()` with a `<new-submission-id>` placeholder in dry runs.
+- [x] Extend `check-submission` with: releaseType, phased state, copyright, whatsNew (120 chars), supportUrl, marketingUrl, privacyPolicyUrl, socialMedia, appStoreAgeRating.
+  - It also prints the en-US description and keyword lengths, so the Phase 3.1 "copyright, description and keywords copied over" check (spec Edge Cases) is visible. Each FR4 extra is read softly: a failing GET prints `(unavailable: …)` instead of aborting the read-only report.
+- [x] Write `/tmp/whats-new-1.1.0.txt` with the exact 4-bullet copy from spec FR4. Check it with `grep -ci '\borg\b' /tmp/whats-new-1.1.0.txt` → `0`.
+  - 2026-10-20: written. `grep -ci '\borg\b'` → `0`. The trimmed text equals the spec copy (`fixtures.WHATS_NEW_110`), 317 characters, sha256 `e2d9559d…`. `/tmp` may be cleared before Phase 3.1: regenerate it from the spec FR4 block (the 4 lines, newline-terminated).
+- [x] Re-run the FR4 Phase 2.0 items with `ASC_TRACE=1` and record the transcripts. The trace grep must be empty, including `submit-app-review <build17-id> --dry-run` (expected now: the "run create-version" refusal, since 1.1.0 doesn't exist yet; no non-GET request). This doesn't satisfy the FR4 full-preview criterion. That transcript is recorded in Phase 3.1 → Attach, once build 18 is attached.
+  - Offline: FR4.01–FR4.36 pass. FR4.31 (`submit-app-review bld-17 --dry-run` before 1.1.0 exists) refuses with "run create-version" and makes no non-GET request. The FR4.33/FR4.34 full submission previews pass against the `post-live`/`v110-build18` fixtures. The live preview is still recorded in Phase 3.1 → Attach.
 
 ### FR5: Compliance metadata
-- [ ] Replace the 4 dead URLs in `setBetaInfo` (188) and `setStoreListing` (253, 283, 284) with `URLS.*`. `grep -c "hourglass/hourglassws"` → `0`.
-- [ ] `set-urls`: URL 200 pre-check (no redirects, runs in dry-run too), then up to 3 diff-only PATCHes (appInfoLocalizations, appStoreVersionLocalizations, betaAppLocalizations) via `write()`.
-- [ ] `set-social-media-age-rating`: `GET /appInfos/{id}/ageRatingDeclaration`. Refuse if the `socialMedia` key is absent (print the keys). No-op if `false`. Else `write` PATCH `{socialMedia:false}` only. Print `appStoreAgeRating` and `/brazil/i` attributes, and warn if the rating isn't `FOUR_PLUS`.
-- [ ] Re-run the FR5 Phase 2.0 items and record them.
-- [ ] Final: `node --check .appstore/asc.js`. Then `git -C "/Users/Trilogy/Documents/Claude Code/WS/hourglassws" status --porcelain .appstore` → empty (still ignored). Then `git check-ignore -v .appstore/asc.js` → `.gitignore:62`.
+- [x] Replace the 4 dead URLs in `setBetaInfo` (188) and `setStoreListing` (253, 283, 284) with `URLS.*`. `grep -c "hourglass/hourglassws"` → `0`.
+  - `grep -c "hourglass/hourglassws" .appstore/asc.js` → `0`. Diffing every legacy function against the backup: `setStoreListing` differs in exactly its 3 URL lines and `setBetaInfo` in its 1. `setListingMetadata`, `getBetaInfo`, `listBuilds`, `addTester`, `removeTester`, `submitForReview` and `makeToken` are identical.
+- [x] `set-urls`: URL 200 pre-check (no redirects, runs in dry-run too), then up to 3 diff-only PATCHes (appInfoLocalizations, appStoreVersionLocalizations, betaAppLocalizations) via `write()`.
+  - The URL check uses `https.get` (no redirects) and logs `[http] GET <url> -> <status>` under `ASC_TRACE=1`. All 3 URLs are checked and every failure is listed. Every GET runs before the first write, so a missing en-US localization refuses before anything is written.
+- [x] `set-social-media-age-rating`: `GET /appInfos/{id}/ageRatingDeclaration`. Refuse if the `socialMedia` key is absent (print the keys). No-op if `false`. Else `write` PATCH `{socialMedia:false}` only. Print `appStoreAgeRating` and `/brazil/i` attributes, and warn if the rating isn't `FOUR_PLUS`.
+  - The `/brazil/i` attributes are printed from both the appInfo and the declaration. The non-FOUR_PLUS warning exits 0, because the spec's exit-code contract has no warning state: the `⚠ WARNING: … Stop ASC prep` line is the stop signal.
+- [x] Re-run the FR5 Phase 2.0 items and record them.
+  - Offline: FR5.01–FR5.13 pass.
+  - **Live, 2026-10-20:** `ASC_TRACE=1 node .appstore/asc.js set-urls --dry-run` → 3 `[http] GET https://jaime-alvarez-trilogy.github.io/hourglass-app/… -> 404` lines, then `Error: URL not live: …/privacy-policy.html -> 404 (finish spec 01 / OPS O2)` (plus the same for support and marketing), exit 1, 0 ASC requests, 0 `[dry-run]` lines. This meets the FR5 criterion "before spec 01 is deployed". `curl` agrees: all 3 return 404.
+- [x] Final: `node --check .appstore/asc.js`. Then `git -C "/Users/Trilogy/Documents/Claude Code/WS/hourglassws" status --porcelain .appstore` → empty (still ignored). Then `git check-ignore -v .appstore/asc.js` → `.gitignore:62`.
+  - 2026-10-20: `node --check` exit 0. `git status --porcelain .appstore` → empty. `git check-ignore -v .appstore/asc.js` → `.gitignore:62:.appstore/`. The backup `.appstore/asc.js.bak-20261019` still has sha256 `9d77b903…` (unchanged).
 
 ---
 
@@ -502,3 +533,30 @@ For every asc.js step: (1) `--dry-run` → paste the transcript; (2) live run �
     - (4) The `remove-public-link-testers` and `set-urls` writes may come in any order.
     - (5) FR5.13 doesn't assert an exit code for the non-FOUR_PLUS warning.
   - The test-design validators (Phase 1 and Phase 2 gates) are run separately by the orchestrator.
+
+**2026-10-20 (implement, Phase X.1 = Phases 1.1 + 2.1):**
+- No red-phase validator findings were passed to this run, so no test changes were needed for them.
+- **FR1:** `app.json` `ios.buildNumber` is `"18"` and `eas.json` `cli.appVersionSource` is `"local"`. `app-config.test.ts`: 23/23. `npx expo config --type public --json` → `1.1.0 18`.
+- **FR6:** `## Native release` is appended to `docs/RELEASING.md` (line 120 on), and OPS O3, O4 and O6 are re-owned to `(C)`. Every Phase 1.0 RELEASING.md and OPS.md check passes, and spec 04's 118 lines are byte-identical.
+- **FR2–FR5:** `.appstore/asc.js` in the main checkout was rewritten in place (500 → 963 lines). The backup `.appstore/asc.js.bak-20261019` was made in Phase 2.0 and was not overwritten: its sha256 is still `9d77b903…`, the pre-edit file.
+  - Offline: `check.js` → 82/82, and the new `write-path.js` → 10/10.
+  - Live, non-writing only: the read-only GETs show the surfaced 403. The argument refusals make no request. `set-urls --dry-run` refuses on the real 404 Pages URLs before any ASC request.
+  - No asc.js write command ran without `--dry-run`, and no non-GET request reached Apple.
+- **Full suite:** `npx jest --silent` → 4953 passed / 1 failed / 4954. The failure is the known out-of-repo `NativeWindSmoke` FR3 SC3.2 (spec 07 removes it), and the 2 FR1 red tests are now green.
+  - `npx tsc --noEmit` → 541, the same as this worktree's Phase 1.0 count.
+  - `npx expo lint` → 9 errors / 494 warnings, the baseline.
+- **Choices made where the spec is silent:**
+  - (1) The FR1 commit uses `feat(…)`, not the checklist's `chore(…)`, because this run's commit rules allow only test/feat/fix/docs.
+  - (2) A 404 on the phased-release, attached-build and review-detail GETs is read as "none", the same as `data: null`. The live response for "none" can't be checked until the agreement is accepted.
+  - (3) The non-FOUR_PLUS age-rating warning exits 0, with a `⚠ WARNING … Stop ASC prep` line. The spec only defines exit codes for success and refusal.
+  - (4) `check-submission` also prints the en-US description and keyword lengths, so the Phase 3.1 "copied over" check is visible. Its FR4 extras degrade to `(unavailable: …)` instead of aborting.
+  - (5) Failed commands set `process.exitCode = 1` instead of calling `process.exit(1)`, so piped output is flushed.
+- **Not live-verifiable until J accepts the agreement** (403 today). The fixtures follow the ASC API reference, and each of these is exercised by the Phase 3.1 dry-run → live → re-run sequence:
+  - The real response shapes and ids/counts for `betaGroups`, `betaTesters/{id}`, `appInfos` `state`, and `/appInfos/{id}/ageRatingDeclaration`. Whether `socialMedia` is exposed there.
+  - `filter[preReleaseVersion.version]` on `/builds`.
+  - Whether `create-version` copies the 1.0 localizations and App Review details.
+  - `write()` success and error handling against Apple itself (offline it's covered only by the stub in `write-path.js`).
+- **Not in this run:**
+  - Phase 1.2 / 2.2 reviews. The orchestrator runs the reviewers.
+  - The live Phase 2.0 baselines. They wait for the agreement.
+  - Phase 3. It belongs to the orchestrator: gates, live ASC prep, EAS cloud build, upload, the ITMS-91053 check and smoke.
