@@ -112,15 +112,62 @@ Feature: `store-compliance`
     - `useStaggeredEntry.test.ts`: 1 failed / 65 passed / 66 (the `expo-router` regex).
 
 ### FR3: `expo/fetch` readiness
-- [ ] (C) Add `makeExpoLikeResponse({ status, body, headers })` to a shared test helper. A second `text()`/`json()` call throws `TypeError("Failed to execute 'text' on 'Response': Response body is already used.")`.
-- [ ] (C) Tests in `src/__tests__/api/client.test.ts` and `__tests__/client.test.ts`:
+- [x] (C) Add `makeExpoLikeResponse({ status, body, headers })` to a shared test helper. A second `text()`/`json()` call throws `TypeError("Failed to execute 'text' on 'Response': Response body is already used.")`.
+  - Done 2026-10-20: `__tests__/helpers/expoLikeResponse.ts`. It's a helper module, not a suite: jest's `testMatch` only runs `*.test.ts(x)`, and the sdk58 walk skips `__tests__`.
+    - **Modeled on expo@58.0.16** `src/winter/fetch/FetchResponse.ts`: `checkBodyUsedError` (the read rejects, because it throws inside an async method), `json()` = `JSON.parse(await this.text())`, `ok` derived from `status`, and a real `Headers`.
+    - **Read tracking:** `text`/`json` are `jest.fn`s, and `res.reads` logs every read in order, including rejected ones. So a test can assert "read once" or "never read".
+    - **`FetchError`:** also exported. It mirrors `FetchErrors.ts`: an `Error` subclass with a `fetch failed: ` message prefix and no `name` override.
+  - Self-test `__tests__/helpers/expoLikeResponse.test.ts` (7 cases):
+    - a second `text()` rejects with the exact `TypeError`;
+    - `json()` and `text()` consume each other's body;
+    - `json()` on a non-JSON or empty body → `SyntaxError`;
+    - `bodyUsed` flips on the first read;
+    - `ok` at 200/204/299/300/401, and case-insensitive headers;
+    - the defaults;
+    - the `FetchError` shape.
+- [x] (C) Tests in `src/__tests__/api/client.test.ts` and `__tests__/client.test.ts`:
   - Every path (mint OK and error, GET and PUT, each with and without the `creds` retry) passes with the helper.
   - 200 empty, 204 empty, 200 and 204 whitespace-only (`' '`, `'\n'`), and 200 `{}` bodies, for GET and PUT.
   - A 200 `text/html` body → `ApiError` with `statusCode` 200, for GET **and** PUT.
   - `class FetchError extends Error {}` rejection → `NetworkError` with the message preserved.
-- [ ] (C) `src/__tests__/lib/pushToken.test.ts`: `registerPushToken` never calls `text()` or `json()` on the response.
-- [ ] (C) `sdk58-migration.test.ts`: no `_bodyInit|_bodyText|_bodyBlob` in source.
-- [ ] (C) Run them. The non-JSON → `ApiError` and whitespace cases are red; record any others.
+  - Done 2026-10-20.
+    - **`__tests__/client.test.ts`, 26 → 46: `10 FR3: every client path reads each body at most once (expo/fetch)`.**
+      - Mint (4 cases): a 200 plain token; a 200 `{"token"}`; a 401 envelope → `AuthError` with `errorCode`; a 500 envelope → `ApiError` with `errorCode`/`errorType`.
+      - `describe.each` GET/PUT (8 cases each):
+        - no creds: 200; 422 envelope; 401 (no retry);
+        - with creds: 200 (no retry); 401 → mint → 200 (the 401 is discarded unread, and the retry carries the fresh `x-auth-token`); HTML 5xx → mint → 200; 401 → mint → 401 (the retry's envelope); 401 → the mint itself fails 401.
+      - Each case asserts every Response's `reads` exactly, and an `afterEach` asserts that no Response in the test was read twice.
+      - The error cases also assert that the envelope arrived. `handleStatus` wraps its read in try/catch, so it would swallow a second-read `TypeError` without a trace.
+    - **`src/__tests__/api/client.test.ts`, 13 → 39.**
+      - `10 FR3: GET|PUT 2xx body parsing`, 11 cases per method:
+        - 200/204 × `''`, `' '` and `'\n'`, plus `' \r\n\t '`: each resolves to `undefined` after one read;
+        - 200 `{}` → `{}`;
+        - whitespace-wrapped JSON (`'\n  [1,2]\n'`) still parses;
+        - a 200 `text/html` captive-portal page → `ApiError` with `statusCode` 200 and message `Invalid JSON response body`, not `SyntaxError`;
+        - a 201 truncated `{"a":` → `ApiError(201)`.
+      - `10 FR3: expo/fetch FetchError rejection → NetworkError` (4 cases): `apiGet`, `apiPut` and `mintAuthToken` reject with `FetchError('The network connection was lost.')` → `NetworkError` (not a `FetchError`), message `fetch failed: The network connection was lost.`. The 4th case is an aborted request.
+- [x] (C) `src/__tests__/lib/pushToken.test.ts`: `registerPushToken` never calls `text()` or `json()` on the response.
+  - Done 2026-10-20, 19 → 24: `registerPushToken` with a 200/204/500 response and `unregisterPushToken` with a 200/404 response. In every case `text`/`json` are never called and `bodyUsed` stays false.
+  - The ok branch still runs: the token is stored only on 2xx, and `removeItem` always runs.
+- [x] (C) `sdk58-migration.test.ts`: no `_bodyInit|_bodyText|_bodyBlob` in source.
+  - Done 2026-10-20, 11 → 15.
+    - **Detector `whatwgBodyInternalReads`:** property access, string-literal element access, object destructuring and `'…' in r`.
+      - Fixtures: all 5 hit forms are flagged. A comment, a log string, `bodyUsed` and `text()` are ignored.
+    - **Positive control, detector `fetchCalls`:** `fetch`, `globalThis.fetch` and `global.fetch` are flagged; `queryClient.fetchQuery()` and `client.fetch()` are not.
+      - The real tree's `fetch()` sites must be exactly `{ src/api/client.ts: 3, src/lib/pushToken.ts: 2 }` (the spec-research F2.7 inventory). A new site fails the case until someone reviews it against the FR3 rules.
+    - The walk's known sites now include `src/api/client.ts` and `src/lib/pushToken.ts`.
+- [x] (C) Run them. The non-JSON → `ApiError` and whitespace cases are red; record any others.
+  - **Red, 2026-10-20** (`npx jest <the 5 files> --json`): 14 failed / 117 passed / 131.
+    - All 14 are in `src/__tests__/api/client.test.ts`, 7 per method:
+      - the 5 whitespace cases: `Rejected to value: [SyntaxError: Unexpected end of JSON input]`;
+      - the 2 non-JSON cases: `Expected constructor: ApiError`, `Received constructor: SyntaxError`.
+    - The cause is the right one: the raw `JSON.parse` in `parseBody`.
+  - **Green before the change, as the checklist expects ("none is expected"):** the 20 single-read cases, 4 FetchError, 5 pushToken, 4 sdk58 and 7 self-test cases. The client already reads each body once, and it maps `FetchError` through `err instanceof Error`.
+  - **Proof that the single-read cases aren't vacuous.** `src/api/client.ts` was mutated temporarily and restored from a copy (`git diff --quiet` afterwards):
+    - (A) `handleStatus` tries `json()`, then falls back to `text()` → 24 FR3 failures (the 14, plus 10 single-read/envelope cases).
+    - (B) `parseBody` reads `text()`, then `json()` → 26 (14 + 12).
+    - (C) `mintAuthToken` tries `json()`, then falls back to `text()` → 22 (14 + 8).
+    - Under (A), the pre-existing suites (`approvals-api`, `auth-api`, `error-envelope`, `auth-resilience`, and the old cases in both client files) had **0** failures. Their mocks give `text` and `json` independent bodies, so only the new helper sees a double read.
 
 ## Test Design Validation (MANDATORY), Phase A
 
@@ -137,6 +184,12 @@ Feature: `store-compliance`
 > - The source walk can't pass vacuously. It asserts ≥ 50 files (150 today), the named known sites, and 0 parse errors. Each ban has a positive control on real files, plus fixtures that prove its detector fires.
 > - The copy/trim detector was widened so it is red on the real pre-FR2 code.
 > - The Skia mock change was shown to turn leftover mutation into a failing test (32 `is not a function` failures against the old implementation).
+>
+> 2026-10-20, FR3 run: the boxes stay open for the Phase A validation pass. Manual check of the FR3 tests:
+> - Every FR3 success criterion has a test or a recorded check: the helper, the GET/PUT body matrix, HTML → `ApiError(200)`, `FetchError` → `NetworkError`, the four unchanged suites (counts recorded), the gates and checkpoint A (recorded; the device checks are deferred).
+> - The helper's second-read rejection has a self-test with the exact `TypeError` message.
+> - Three double-read mutations of `client.ts` turn the single-read cases red (24/26/22 FR3 failures). The pre-existing suites catch none of mutation (A).
+> - The FR3 source-walk case has fixtures for every hit form, and a positive control (the exact `fetch()` site inventory).
 
 - [ ] Run the `red-phase-test-validator` agent on `deps.test.ts`, `ci-gates.test.ts`, `ota-publish.test.ts`, `sdk58-migration.test.ts`, the ScrubCursor, AIArcHero and useStaggeredEntry tests, and the client tests.
 - [ ] Every FR1–FR3 success criterion has a test, or a recorded command check.
@@ -253,26 +306,60 @@ Feature: `store-compliance`
   - Commit `62df574` `refactor(10-sdk-58-ios-27): FR2 useIsFocused from expo-router, version-neutral Skia paths, drop haptic-tab`: tests and implementation together, green on all three gates. The red phase stayed local and was never committed on its own.
 
 ### FR3
-- [ ] (C) `parseBody`:
+- [x] (C) `parseBody`:
   - `text.trim() === ''` → `undefined`.
   - Otherwise wrap `JSON.parse` and throw `ApiError(response.status, 'Invalid JSON response body')` on failure.
   - Update the doc comment with why PUTs also get `ApiError` (captive portal / proxy 200 HTML; `useApprovalItems.ts:155-162` refetches).
-- [ ] (C) Fix any path the single-read helper exposes; none is expected.
-- [ ] (C) FR3 tests green. Three gates green.
+  - Done 2026-10-20: `if (text.trim() === '') return undefined as T;`, then `try { return JSON.parse(text) as T; } catch { throw new ApiError(response.status, 'Invalid JSON response body'); }`.
+    - **Doc comment:** it now covers the single read, the blank rule, and why PUTs throw too: a captive portal or proxy 200 HTML page means the PUT may never have reached Crossover. After the error, `useApprovalItems.ts:155-162` restores the optimistic list and runs `invalidateQueries` in `finally` (checked at those lines; the approve/reject callers are `src/api/approvals.ts:61,80,97,115`).
+    - **Observation, no change:** onboarding (`src/hooks/useAuth.ts:78`) maps `ApiError` to the manual-setup step. A captive-portal 200 HTML during sign-in now takes that branch, not the generic "unexpected error" one. The spec mandates `ApiError`, so this is recorded only.
+- [x] (C) Fix any path the single-read helper exposes; none is expected.
+  - Done 2026-10-20: none was exposed. All 20 single-read cases were green before `parseBody` changed.
+- [x] (C) FR3 tests green. Three gates green.
+  - Done 2026-10-20, final tree:
+    - **FR3 files:** `__tests__/client.test.ts` 46/46, `src/__tests__/api/client.test.ts` 39/39, `pushToken` 24/24, `sdk58-migration` 15/15, `expoLikeResponse` 7/7.
+    - **The unchanged suites:** no diff, and the same counts as the pre-FR3 baseline: `approvals-api` 27, `auth-api` 43, `error-envelope` 16, `auth-resilience` 27.
+    - `npm test` → **exit 0**, 182 suites / 5199 tests. That's FR2's 5137 plus 62: root client +20, src client +26, pushToken +5, sdk58 +4, and the self-test's 7 in 1 new suite.
+    - `npm run typecheck` → **exit 0**. A first run caught `err: unknown` in two new cases; typing the rejection fixed it.
+    - `npm run lint` → **exit 0**, `✖ 490 problems (0 errors, 490 warnings)`, the same as FR2.
+      - Per-file counts against `HEAD`: `client.ts` 0→0, root client test 0→0, src client test 2→2, pushToken 3→3, sdk58 0→0. Both helper files have 0.
+      - A first pass placed the helper imports after the mocks, which added 2 `import/first` warnings. The imports moved to the top, since the helper depends on no mock.
+  - Commit `ed4cdde` `fix(10-sdk-58-ios-27): FR3 expo/fetch readiness: blank and non-JSON 2xx bodies, single-read tests`: tests and implementation together, green on all three gates. The red phase stayed local and was never committed on its own.
 
 ### Checkpoint A
-- [ ] (C) Record:
+- [x] (C) Record:
   - HEAD, and the `npm test`/`typecheck`/`lint` counts and exit codes.
   - `git diff aade79b -- app.json` is empty, and `git diff aade79b -- eas.json` shows only `cli.version` (nothing native changed).
-- [ ] (J/C) **Device run on SDK 55 (Decision 2).**
+  - Done 2026-10-20.
+    - **HEAD:** `ed4cdde` (the FR3 code; this checklist commit follows it).
+    - **Gates:** `npm test` exit 0 (182 suites / 5199 tests), `npm run typecheck` exit 0, `npm run lint` exit 0 (0 errors, 490 warnings).
+    - `git diff aade79b -- app.json | wc -l` → `0`.
+    - `git diff aade79b -- eas.json` → the single hunk `"version": ">= 18.0.0"` → `">= 25.2.0"`.
+    - `package.json` differs from build 18 only by FR1's changes: the pins, dropping ngrok and inner-shadow, and `install.exclude`. No native module was added (Decision 2: inner-shadow is JS-only).
+- [x] (J/C) **Device run on SDK 55 (Decision 2).**
   - Dev client: an existing SDK 55 dev build (J: which one? ______), or `eas build -p ios --profile development` on this tree (`auto` → `sdk-55` image; build id ______).
   - `npx expo start --dev-client --port 8082` from this worktree. Confirm `lsof -i :8081` still shows the WS server untouched.
   - Results:
-    - `AIArcHero` sweep animates to the right %: ______
-    - Overview/Trend scrub-cursor line draws and follows the finger: ______
-    - `FadeInScreen` / `useStaggeredEntry` entry animations on tab focus: ______
-    - One approve and one reject on QA succeed (empty-body PUTs, no error): ______
-- [ ] (C) Push `feat/sdk-58` (all of Phase A is green).
+    - `AIArcHero` sweep animates to the right %: deferred to FR11 device smoke (no agent device access). The tabs sit behind sign-in.
+    - Overview/Trend scrub-cursor line draws and follows the finger: deferred to FR11 device smoke (no agent device access).
+    - `FadeInScreen` / `useStaggeredEntry` entry animations on tab focus: deferred to FR11 device smoke (no agent device access).
+    - One approve and one reject on QA succeed (empty-body PUTs, no error): deferred to FR11 device smoke (no agent device access). It needs a QA manager sign-in and taps. Jest covers the empty-body PUT contract: 200/204 with `''` or whitespace → `undefined`.
+  - **Done 2026-10-20 as substitution (1)** (ground rules 2026-10-20): Expo Go 55.0.27 on the simulator "iPhone 17" (`07D9D7E1-8B46-4E06-8CE2-DE45E347E86A`, iOS 26.5), not a dev client on a device. No EAS build runs in FR1–FR10.
+    - **Dev client:** n/a. Expo Go 55.0.27 came from `~/.expo/ios-simulator-app-cache/` (`xcrun simctl install` exit 0). No build id.
+    - **Metro:** `CI=1 npx expo start --go --port 8082` from this worktree, in the background, logging to `/tmp/fr3-metro.log`. It reported `Waiting on http://localhost:8082`. Its expected-version list is the build-18 drift recorded in FR1. `--ios` was not passed.
+    - **Port 8081:** `lsof -nP -iTCP:8081 -sTCP:LISTEN` → nothing listening (the WS Metro wasn't running at the time). Nothing in WS was touched. The user's iPhone 17 Pro (`142D825B-…`) stayed booted and unused.
+    - **Two first-run prompts, cleared without taps, on the test simulator only:**
+      - iOS's `Open in "Expo Go"?` alert for `simctl openurl`: pre-approved with `xcrun simctl spawn <udid> defaults write com.apple.launchservices.schemeapproval "com.apple.CoreSimulator.CoreSimulatorBridge-->exp" -string host.exp.Exponent`, plus a reboot of that simulator.
+      - Expo Go's tools-menu onboarding sheet: skipped by setting `EXDevMenuIsOnboardingFinished`, `EXHomeIsNuxFinishedDefaultsKey` and `ExpoGoOnboardingFinished` to YES (`defaults write host.exp.Exponent …`). The key names came from `strings` on the Expo Go binary. `EXKernelDisableNuxDefaultsKey` alone didn't do it.
+    - **Result: PASS (boot and sign-in render).**
+      - Metro: `iOS Bundled 8228ms node_modules/expo-router/entry.js (2835 modules)`.
+      - The welcome screen rendered ("Hourglass.xo", "Crossover Time Tracker", "Get Started").
+      - The deep link `exp://127.0.0.1:8082/--/credentials` rendered the Sign In screen: Email, Password, the Keychain note and the Sign In button.
+      - No red box and no LogBox banner. Metro logged 0 `ERROR` lines, only Expo Go's two `expo-notifications` WARNs. The one `ERR_STREAM_PREMATURE_CLOSE` came from a bundle request that was aborted by terminating Expo Go.
+      - Screenshots: `/tmp/fr3-shots/07b-welcome.png` and `08-credentials.png` (ephemeral, not committed).
+    - **Afterwards:** Metro was stopped (port 8082 free), and the test simulator was shut down.
+- [x] (C) Push `feat/sdk-58` (all of Phase A is green).
+  - Done 2026-10-20: `git push origin feat/sdk-58`, `30ad67c..` this checklist commit (`ed4cdde` plus this commit). The Phase A.2 review and the Phase A test-design validation boxes stay open.
 
 ## Phase A.2: Review (MANDATORY)
 
@@ -623,3 +710,11 @@ Each cell passes when there's no clipping or overlap, every chart re-measures wi
 - Deviations:
   - `expo.install.exclude` also lists `react-native-reanimated`, because the iff rule requires it while its patch exists.
   - `versionAtLeast` is kept, with neutral unit values, for FR4.
+
+**2026-10-20 (FR3 implemented)**: FR3 and checkpoint A are done on SDK 55, with all three gates green.
+- Commits on `feat/sdk-58`: `ed4cdde` (tests and `parseBody`) and this checklist commit. Both are pushed.
+- `parseBody` treats a whitespace-only body as empty. A non-JSON 2xx body is now `ApiError(status, 'Invalid JSON response body')`, on PUT as well.
+- `__tests__/helpers/expoLikeResponse.ts` is the shared single-read Response stand-in, with a self-test.
+- Checkpoint A ran as substitution (1): Expo Go 55 on the "iPhone 17" simulator. It booted and rendered welcome and Sign In with no red box.
+  - The `AIArcHero` sweep, the scrub cursor, the focus animations and the QA approve/reject are deferred to the FR11 device smoke (no agent device access).
+- Still open: the Phase A test-design validation and the Phase A.2 review, and the ITMS-91053 baseline (J) before FR4.
