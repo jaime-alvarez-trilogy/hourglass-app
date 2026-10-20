@@ -154,7 +154,7 @@
       "url": "https://u.expo.dev/4ad8a6bd-aec2-45a5-935f-5598d47b605d"
     },
     "runtimeVersion": {
-      "policy": "appVersion"
+      "policy": "fingerprint"
     },
     "experiments": {
       "typedRoutes": true,

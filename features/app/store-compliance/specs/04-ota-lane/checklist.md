@@ -65,25 +65,25 @@ Phases 1.0–1.2 go into the implementation PR, which ships in build 18. Phase 1
 
 ⚠️ **Validate the test design BEFORE implementing.** Weak tests lead to weak implementation.
 
-- [ ] Run the `red-phase-test-validator` agent
-- [ ] Every FR1–FR3 success criterion has test coverage. FR2's sensitivity matrix and FR1's introspection check are command checks in 1.1, by design (too slow for jest).
-- [ ] Assertions are specific: exact argv arrays, exact stderr substrings from the spec's Interface Contracts, exact exit codes, and "no call" assertions on the stub log for every refusal.
-- [ ] Stub fixtures match the verified eas-cli 20.1.0 JSON shapes: `build:list` returns raw BuildFragment objects with `runtimeVersion`/`appVersion`/`appBuildVersion`; `update` returns an array with `id`/`group`/`platform`/`runtimeVersion`.
-- [ ] Stubs live outside the temp repo, so they can't make the tree dirty
-- [ ] Fix any issues identified before proceeding
+- [x] Run the `red-phase-test-validator` agent
+- [x] Every FR1–FR3 success criterion has test coverage. FR2's sensitivity matrix and FR1's introspection check are command checks in 1.1, by design (too slow for jest).
+- [x] Assertions are specific: exact argv arrays, exact stderr substrings from the spec's Interface Contracts, exact exit codes, and "no call" assertions on the stub log for every refusal.
+- [x] Stub fixtures match the verified eas-cli 20.1.0 JSON shapes: `build:list` returns raw BuildFragment objects with `runtimeVersion`/`appVersion`/`appBuildVersion`; `update` returns an array with `id`/`group`/`platform`/`runtimeVersion`.
+- [x] Stubs live outside the temp repo, so they can't make the tree dirty
+- [x] Fix any issues identified before proceeding
 
 ---
 
 ## Phase 1.1: Implementation
 
 ### FR1: Fingerprint runtime policy and version sync
-- [ ] `app.json`: replace `"runtimeVersion": { "policy": "appVersion" }` with `{ "policy": "fingerprint" }`. Add no `ios`/`android` override, and leave `updates.url` untouched.
-- [ ] `npm version 1.1.0 --no-git-tag-version`. Confirm `package.json` and both `package-lock.json` root version fields read `1.1.0`, and nothing else in the lockfile changed (`git diff --stat package-lock.json` shows 2 lines changed).
-- [ ] `npx jest __tests__/config/app-config.test.ts` passes
-- [ ] `npx jest __tests__/config/fingerprint-config.test.ts -t 'FR1'` passes (lockfile root version). The FR2 assertions in the same file go green under FR2 below.
-- [ ] `grep -nE "readFileSync|__dirname|package-lock|from ['\"](node:)?(fs|path)['\"]" __tests__/config/app-config.test.ts` prints nothing (spec 03 test-file contract). At this point the file holds only the spec 03 and spec 04 blocks; spec 05 is blocked until this spec merges.
-- [ ] `npx expo-updates runtimeversion:resolve --platform ios`: `runtimeVersion` matches `/^[0-9a-f]{40}$/` and `workflow` is `"managed"`. Paste the output into Session Notes.
-- [ ] Introspection check:
+- [x] `app.json`: replace `"runtimeVersion": { "policy": "appVersion" }` with `{ "policy": "fingerprint" }`. Add no `ios`/`android` override, and leave `updates.url` untouched.
+- [x] `npm version 1.1.0 --no-git-tag-version`. Confirm `package.json` and both `package-lock.json` root version fields read `1.1.0`, and nothing else in the lockfile changed (`git diff --stat package-lock.json` shows 2 lines changed).
+- [x] `npx jest __tests__/config/app-config.test.ts` passes
+- [x] `npx jest __tests__/config/fingerprint-config.test.ts -t 'FR1'` passes (lockfile root version). The FR2 assertions in the same file go green under FR2 below.
+- [x] `grep -nE "readFileSync|__dirname|package-lock|from ['\"](node:)?(fs|path)['\"]" __tests__/config/app-config.test.ts` prints nothing (spec 03 test-file contract). At this point the file holds only the spec 03 and spec 04 blocks; spec 05 is blocked until this spec merges.
+- [x] `npx expo-updates runtimeversion:resolve --platform ios`: `runtimeVersion` matches `/^[0-9a-f]{40}$/` and `workflow` is `"managed"`. Paste the output into Session Notes.
+- [x] Introspection check:
   ```bash
   npx expo config --type introspect --json | node -e 'const c=JSON.parse(require("fs").readFileSync(0,"utf8"))._internal.modResults.ios.expoPlist; console.log(c)'
   ```
