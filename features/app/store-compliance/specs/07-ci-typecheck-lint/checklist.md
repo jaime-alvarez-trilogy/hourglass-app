@@ -13,7 +13,7 @@ Two PRs are recommended (see spec → Release & Merge Order):
 
 ### Pre-flight (record the numbers in Session Notes)
 - [x] Read `docs/ARCHITECTURE.md` §1, §5 and §8.1–8.4. The app `CLAUDE.md` routing table requires this for notification and navigation changes.
-- [ ] On the PR's base commit (after rebasing PR B onto 01–04), record:
+- [x] On the PR's base commit (after rebasing PR B onto 01–04), record:
   - [x] `npx tsc --noEmit 2>&1 | grep -c "error TS"` (526 expected at `b6b79b7`; more is possible if 02–04 added code)
   - [x] `npx tsc --noEmit --types jest,node 2>&1 | grep -c "error TS"` (113 expected at `b6b79b7`)
   - [x] `npx expo lint --no-cache 2>&1 | tail -3` (9 errors / 494 warnings expected at `b6b79b7`)
@@ -299,3 +299,18 @@ Two PRs are recommended (see spec → Release & Merge Order):
   - Merge before the build-18 cut.
   - Phase 1.2 review.
 - **Files shared with specs 01–05:** `package.json` (`scripts.typecheck` plus the `@types/node` devDependency), `package-lock.json` (one root devDependency line), `tsconfig.json` (`types`) and `.github/workflows/test.yml` (`app-tests` steps). This spec didn't touch `app/modal.tsx`, `app.json`, `eas.json` or `.gitignore`. It did touch `app/__tests__/modal-debug-log.test.tsx` (mock parameter typing only), which spec 02 may also edit.
+
+**2026-10-20 (build-18 merge, worktree `hg-worktrees/build18`, branch `feat/store-compliance-build18`):** PR B was merged (not rebased) on top of specs 01–05. This closes the Pre-flight re-measure item.
+- **Merge order:** `feat/store-compliance-build18` (03, 04, 05) ← `feat/legal-pages-links` (01, 02) as `6f429f7` ← `feat/ci-typecheck-lint` (07) as `297dcfa`. The 07 merge was conflict-free. The 01/02 merge conflicted only in the root `dependencies` of `package.json`/`package-lock.json`, resolved as spec 02's `expo-application` kept and spec 03's `expo-background-fetch`/`expo-task-manager` removal kept.
+- **Re-measured on the 01–05 base `6f429f7`** (tracked files via `git archive`, symlinked `node_modules`):
+  - `npx tsc --noEmit`: **564**. The +35 over 529 come from the spec 01–05 test files, and FR3's node types clear all of them (see the next line).
+  - `npx tsc --noEmit --types jest,node`: **113**, the same as the spec catalog. So specs 01–05 add **no** error outside FR3's scope, and no `fix(merge)` commit is needed.
+  - `npx expo lint --no-cache`: **9 errors / 499 warnings**. The +5 warnings are `@typescript-eslint/no-require-imports` in spec 02's new `app/__tests__/modal-about.test.tsx` (the jest `require()` pattern). They're warnings, so the errors-only gate isn't affected, and this spec's own diff adds none.
+- **On the merged head `297dcfa`:**
+  - `npm run typecheck` exits 0 with 0 errors.
+  - `npx expo lint --no-cache` exits 0: 0 errors / 499 warnings.
+  - CI parity (`git archive HEAD` + symlinked `node_modules`): `tsc_exit=0`, `lint_exit=0`.
+  - `npx jest --silent`: **5058 passed / 0 failed, 179 suites**.
+  - FR7 probes: `Buffer` in `src/lib/__probe.ts` → exit 1 (`no-restricted-globals`). In `src/lib/__tests__/probe.test.ts` → exit 0. `TextEncoder` in `src/lib/__probe.ts` → exit 0.
+  - iOS runtime: `a0123e904dabf5610e315a75f845005f5f814b5c`. This is unchanged by the `typecheck` script, because spec 04's fingerprint config skips `packageJson:scripts`.
+- **Still open (orchestrator):** push and the PR CI run, the gate probe, merging to `main` before the build-18 cut, and Phase 1.2.

@@ -168,10 +168,10 @@ Phases 1.0–1.2 go into the implementation PR, which ships in build 18. Phase 1
 - [ ] Commit if changes were made: `fix(04-ota-lane): strengthen test assertions`
 
 ### Final Verification
-- [ ] `npx jest __tests__/config/app-config.test.ts __tests__/config/fingerprint-config.test.ts __tests__/scripts/ota-publish.test.ts` passes
+- [x] `npx jest __tests__/config/app-config.test.ts __tests__/config/fingerprint-config.test.ts __tests__/scripts/ota-publish.test.ts` passes
 - [ ] No regressions: CI `npm test` is green on the PR. Don't run the full suite locally as part of this checklist.
-- [ ] If spec 07 has merged: `npm run typecheck` and `npm run lint` pass with the new files
-- [ ] `npx expo-updates runtimeversion:resolve --platform ios` on the final PR head prints a 40-hex runtime
+- [x] If spec 07 has merged: `npm run typecheck` and `npm run lint` pass with the new files
+- [x] `npx expo-updates runtimeversion:resolve --platform ios` on the final PR head prints a 40-hex runtime
 - [ ] The code follows existing patterns (CJS config like `babel.config.js`; tests under `__tests__/`)
 
 ---
@@ -242,3 +242,10 @@ Phases 1.0–1.2 go into the implementation PR, which ships in build 18. Phase 1
   - `npx expo lint`: 9 errors / 494 warnings, same as baseline. eslint is clean on the new and changed files.
   - `npx expo-doctor`: 19/20; only the package-versions check fails.
 - **Left for the orchestrator:** the live EAS `--dry-run "check"` (FR3, last item), all of Phase 1.2, and Phase 1.3.
+
+**2026-10-20 (build-18 merge, worktree `hg-worktrees/build18`):** `feat/legal-pages-links` (01, 02) and `feat/ci-typecheck-lint` (07) were merged into `feat/store-compliance-build18`, giving merge commits `6f429f7` and `297dcfa`. Final Verification on the merged head `297dcfa`:
+- The three targeted files pass inside the full run. `npx jest --silent`: **5058 passed / 0 failed, 179 suites**.
+- Spec 07 has merged. `npm run typecheck` exits 0 with 0 errors, and `npx expo lint --no-cache` exits 0 with 0 errors / 499 warnings. The 12 Node-builtin errors in the spec 03/04 test files are cleared by spec 07's `@types/node`.
+- `npx expo-updates runtimeversion:resolve --platform ios` → `a0123e904dabf5610e315a75f845005f5f814b5c` (40-hex, `workflow: "managed"`). That's identical to the Phase 1.1 base, so spec 07's `scripts.typecheck` and spec 02's `expo-application` declaration don't move the runtime. `expo-application` was already autolinked.
+- Introspect: `UIBackgroundModes` is `["remote-notification"]`, there's no `NSFaceIDUsageDescription`, `privacyManifests` is present, `runtimeVersion` is `{"policy":"fingerprint"}`, and `ios.buildNumber` is `"18"`.
+- **Still open (orchestrator):** the CI `npm test` on the PR, Phase 1.2 review, the live EAS dry run, and Phase 1.3.

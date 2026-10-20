@@ -609,3 +609,11 @@ For every asc.js step: (1) `--dry-run` → paste the transcript; (2) live run �
   - `npx jest --silent` → 4953 passed / 1 failed / 4954. The failure is the known out-of-repo `NativeWindSmoke` FR3 SC3.2.
   - `npx tsc --noEmit` → 541, this worktree's Phase 1.0 count.
   - `npx expo lint` → 9 errors / 494 warnings, the baseline. `check.js` is ESLint-clean.
+
+**2026-10-20 (build-18 merge, worktree `hg-worktrees/build18`):** this branch now carries specs 01, 02 and 07 (PR A and PR B together) on top of 03/04/05. The merges are `6f429f7` (`feat/legal-pages-links`) and `297dcfa` (`feat/ci-typecheck-lint`), with nothing pushed. Below is a **preview** of the Phase 3.0 Pre-flight on the merged head. The Gates and Pre-flight items stay unticked, because they must be re-run on `main` after it's pushed.
+- `npx jest --silent` → **5058 passed / 0 failed, 179 suites**. The `NativeWindSmoke` failure is gone, since spec 07 FR2 deleted that test.
+- `npm run typecheck` → exit 0 (0 errors). `npx expo lint --no-cache` → exit 0 (0 errors / 499 warnings).
+- `npx expo config --type introspect --json`: `UIBackgroundModes` is `["remote-notification"]`, there's no `NSFaceIDUsageDescription`, `privacyManifests` is present, `runtimeVersion` is `{"policy":"fingerprint"}`, `ios.buildNumber` is `"18"`, and the version is `1.1.0`.
+- `npx expo-doctor` → 19/20. The config-schema check passes; only the package-versions check fails (25 patch mismatches, spec 06).
+- iOS runtime `a0123e904dabf5610e315a75f845005f5f814b5c`.
+- `scripts/check-legal-pages.sh` was not run. Pages isn't enabled yet (OPS O2, spec 01 Phase 1.3).
