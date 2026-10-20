@@ -41,6 +41,9 @@ export async function runRoleRefresh(
       config.useQA,
     );
     const detail = await getProfileDetail(token, config.useQA);
+    // Partial /detail: leave config untouched. Defaulting would persist
+    // isManager: false or a team id of "undefined".
+    if (!detail.avatarTypes || !detail.assignment?.team) return;
 
     const updatedConfig: CrossoverConfig = {
       ...config,

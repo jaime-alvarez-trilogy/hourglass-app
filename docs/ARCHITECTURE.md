@@ -71,7 +71,7 @@ Calendar-triggered notifications rely on iOS same-id replace (no AsyncStorage ID
 
 - **Request**: `src/lib/pushToken.ts:22-40` (`registerPushToken`). Called once from `app/_layout.tsx:95-99` when `config.setupComplete` is true. Uses `requestPermissionsAsync()`. On failure, push token is never registered with the ping server.
 - **Check**: `useScheduledNotifications.ts:224-225` uses `getPermissionsAsync()` on every foreground (no re-prompt).
-- **Foreground handler**: `app/_layout.tsx:48-54`. `shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false`. Set at module scope.
+- **Foreground handler**: `app/_layout.tsx:48-55`. `shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false` (banner + list + sound, badge off; `.banner | .list` is the iOS 14+ equivalent of the deprecated alert option). Set at module scope.
 - **Background listener**: `app/_layout.tsx:101-108` calls `registerBackgroundPushHandler()` (`src/notifications/handler.ts:65-67`) which wires `addNotificationReceivedListener(handleBackgroundPush)`. Unsubscribed on unmount.
 
 ### 1.5 iOS categories / actions
@@ -250,7 +250,7 @@ app/
 `app/(tabs)/_layout.tsx`. Platform-split rendering:
 
 - **iOS** (`NativeTabs` from `expo-router/unstable-native-tabs`): native `UITabBarController` with glass pill on iOS 26+.
-- **Android** (`Tabs` + custom `FloatingPillTabBar` at `:136-142`): default tab bar hidden, custom pill overlay; `contentStyle` adds `PILL_BOTTOM_OFFSET=112` padding.
+- **Android** (`Tabs` + custom `FloatingPillTabBar` at `:126-132`): default tab bar hidden, custom pill overlay. Content clearance comes from each tab screen's own scroll `paddingBottom: 100` (no navigator-level padding).
 
 `TAB_SCREENS` constant (`:50-56`): Home, Overview, AI, Requests + hidden `explore`. Approvals badge shown when `items.length > 0` (`:79`).
 

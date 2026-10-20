@@ -17,7 +17,7 @@
 // FR1–FR4 (02-platform-split-nav): Platform-split navigation.
 //   - iOS → NativeTabs (UITabBarController + iOS 26 glass pill). Unchanged.
 //   - Android → FloatingPillTabBar (custom floating pill via <Tabs> tabBar prop).
-//   - PILL_BOTTOM_OFFSET applied via contentStyle to prevent content hiding behind pill.
+//   - Pill clearance comes from each tab screen's scroll paddingBottom (100).
 //   - USE_NATIVE_TABS feature flag removed — Platform.OS drives the split always.
 
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
@@ -36,12 +36,6 @@ import { useConfig } from '@/src/hooks/useConfig';
 import { useWidgetSync } from '@/src/hooks/useWidgetSync';
 import { useWeeklyHistory } from '@/src/hooks/useWeeklyHistory';
 import { getMondayOfWeek } from '@/src/lib/ai';
-
-// ─── Bottom padding constant (Android floating pill) ──────────────────────────
-// Pill height (60) + bottom offset (24) + max safe-area inset (28) = 112.
-// Applied via contentStyle to all tab screens so content clears the pill.
-
-const PILL_BOTTOM_OFFSET = 112;
 
 // ─── Shared tab screen configuration ─────────────────────────────────────────
 // Single source of truth consumed by both NativeTabs and Android Tabs paths.
@@ -121,14 +115,13 @@ export default function TabLayout() {
   // ── Android path — FloatingPillTabBar ─────────────────────────────────────
   // Custom floating pill tab bar. tabBarStyle: display none hides React
   // Navigation's default BottomNavigationView so only the pill renders.
-  // contentStyle padding prevents screen content hiding behind the pill.
+  // Each tab screen's scroll paddingBottom keeps content clear of the pill.
   return (
     <View style={{ flex: 1 }}>
       <Tabs
         screenOptions={{
           headerShown: false,
           tabBarStyle: { display: 'none' },
-          contentStyle: { paddingBottom: PILL_BOTTOM_OFFSET },
         }}
         tabBar={(props) => (
           <FloatingPillTabBar

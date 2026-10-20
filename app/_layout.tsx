@@ -47,7 +47,8 @@ import { registerBackgroundPushHandler } from '@/src/notifications/handler';
 // FR1: Configure foreground notification display before any component renders
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
   }),

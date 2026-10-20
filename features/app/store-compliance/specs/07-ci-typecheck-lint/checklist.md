@@ -136,19 +136,19 @@ Two PRs are recommended (see spec → Release & Merge Order):
 - [x] Commit: `fix(07-ci-typecheck-lint): FR4 React 19 / RN 0.83 type drift`
 
 ### FR5: Behavioural-surface production fixes (PR B)
-- [ ] `app/_layout.tsx:48-54`: return `{ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }`.
-- [ ] `src/hooks/useRoleRefresh.ts`: right after `getProfileDetail`, add `if (!detail.avatarTypes || !detail.assignment?.team) return;`. No `?? []` defaults.
-- [ ] `app/(tabs)/_layout.tsx`:
-  - [ ] Delete the `contentStyle` line (131).
-  - [ ] Delete the `PILL_BOTTOM_OFFSET` constant and its comment block (40-44).
-  - [ ] Update the comments at lines 20 and 122-124.
-  - [ ] The iOS branch is untouched (diff check).
-- [ ] `src/components/AIConeChart.tsx:396`: remove the `enabled` prop from `<GestureDetector>`.
-- [ ] `docs/ARCHITECTURE.md:74` and `:253`: update them. `grep -n "shouldShowAlert\|contentStyle\|PILL_BOTTOM_OFFSET" docs/ARCHITECTURE.md` returns nothing.
-- [ ] Run the notification-area tests the app `CLAUDE.md` names: `npx jest app/__tests__/layout-notifications.test.tsx src/__tests__/notifications/handler.test.ts src/hooks/__tests__/useScheduledNotifications.test.ts`. All green.
-- [ ] Run `npx jest __tests__/use-role-refresh.test.ts "app/(tabs)/__tests__/native-tabs.test.tsx" src/components/__tests__/AIConeChart.test.tsx`. All green.
-- [ ] Typecheck count drops by 10. No casts or suppressions in the four files.
-- [ ] Commit: `fix(07-ci-typecheck-lint): FR5 notification behavior, role-refresh guard, dead tab/gesture props`
+- [x] `app/_layout.tsx:48-54`: return `{ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }`.
+- [x] `src/hooks/useRoleRefresh.ts`: right after `getProfileDetail`, add `if (!detail.avatarTypes || !detail.assignment?.team) return;`. No `?? []` defaults.
+- [x] `app/(tabs)/_layout.tsx`:
+  - [x] Delete the `contentStyle` line (131).
+  - [x] Delete the `PILL_BOTTOM_OFFSET` constant and its comment block (40-44).
+  - [x] Update the comments at lines 20 and 122-124.
+  - [x] The iOS branch is untouched (diff check).
+- [x] `src/components/AIConeChart.tsx:396`: remove the `enabled` prop from `<GestureDetector>`.
+- [x] `docs/ARCHITECTURE.md:74` and `:253`: update them. `grep -n "shouldShowAlert\|contentStyle\|PILL_BOTTOM_OFFSET" docs/ARCHITECTURE.md` returns nothing.
+- [x] Run the notification-area tests the app `CLAUDE.md` names: `npx jest app/__tests__/layout-notifications.test.tsx src/__tests__/notifications/handler.test.ts src/hooks/__tests__/useScheduledNotifications.test.ts`. All green.
+- [x] Run `npx jest __tests__/use-role-refresh.test.ts "app/(tabs)/__tests__/native-tabs.test.tsx" src/components/__tests__/AIConeChart.test.tsx`. All green.
+- [x] Typecheck count drops by 10. No casts or suppressions in the four files.
+- [x] Commit: `fix(07-ci-typecheck-lint): FR5 notification behavior, role-refresh guard, dead tab/gesture props`
 
 ### FR6: Test and mock type errors (PR B)
 - [ ] Fix each file in the spec's FR6 table under its rules:
