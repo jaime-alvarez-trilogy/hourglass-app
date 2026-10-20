@@ -15,31 +15,43 @@ Feature: `store-compliance`
 ## Phase 1.0: Test Foundation (tracked repo)
 
 ### FR1: Build number 18 with a pinned local version source
-- [ ] Confirm `__tests__/config/app-config.test.ts` exists (spec 03 merged). If it doesn't, stop.
-- [ ] Add `describe('05-release-build-18')`. Follow spec 03's test-file contract (typed JSON imports, no `fs`):
+- [x] Confirm `__tests__/config/app-config.test.ts` exists (spec 03 merged). If it doesn't, stop.
+- [x] Add `describe('05-release-build-18')`. Follow spec 03's test-file contract (typed JSON imports, no `fs`):
   - Reuse spec 03's module-level `expo` (from `import appJson from '@/app.json'`).
   - Add `import easJson from '@/eas.json'` next to spec 03's imports at the top of the file.
   - Don't use `fs`, `path` or `__dirname`. `tsconfig.json` has `"types": ["jest"]`, so they'd add TS2307/TS2304 until spec 07 FR3.
-- [ ] Test: `expo.ios?.buildNumber` is a `string`, matches `/^\d+$/`, and `Number(...) >= 18`. Never `=== '18'`.
-- [ ] Test: `expo.version` matches `/^\d+\.\d+\.\d+$/`.
-- [ ] Test: `expect(easJson.cli).toHaveProperty('appVersionSource', 'local')`. Don't read `easJson.cli.appVersionSource` directly: that's TS2339 before FR1 adds the key.
-- [ ] `git diff __tests__/config/app-config.test.ts | grep -E "^\+.*(from 'fs'|from 'path'|__dirname)"` → nothing.
-- [ ] Run `npx jest __tests__/config/app-config.test.ts`. The buildNumber and appVersionSource tests **fail** (red: `"17"`, `undefined`), the semver test passes, and spec 03/04 tests in the file are unaffected.
+  - Done: `describe('05-release-build-18')` › `describe('FR1: build number with a pinned local version source')` › the three `it`s named in the spec's interface contract.
+- [x] Test: `expo.ios?.buildNumber` is a `string`, matches `/^\d+$/`, and `Number(...) >= 18`. Never `=== '18'`.
+- [x] Test: `expo.version` matches `/^\d+\.\d+\.\d+$/`.
+- [x] Test: `expect(easJson.cli).toHaveProperty('appVersionSource', 'local')`. Don't read `easJson.cli.appVersionSource` directly: that's TS2339 before FR1 adds the key.
+- [x] `git diff __tests__/config/app-config.test.ts | grep -E "^\+.*(from 'fs'|from 'path'|__dirname)"` → nothing. (Only added import: `+import easJson from '@/eas.json';`. `npx tsc --noEmit` stays at 541 errors in this worktree, none in this file.)
+- [x] Run `npx jest __tests__/config/app-config.test.ts`. The buildNumber and appVersionSource tests **fail** (red: `"17"`, `undefined`), the semver test passes, and spec 03/04 tests in the file are unaffected.
+  - Red, 2026-10-20: 2 failed / 21 passed / 23. `ios.buildNumber is an integer string >= 18` → `Expected: >= 18, Received: 17`. `eas.json pins cli.appVersionSource to local` → `Expected path: "appVersionSource" … Received value: {"version": ">= 18.0.0"}`. `expo.version is semver x.y.z` passes. All 20 spec 03/04 tests pass.
+  - Full suite: `npx jest --silent` → 4951 passed / 3 failed (the 2 above plus the known out-of-repo `NativeWindSmoke` FR3 SC3.2). One earlier full run also showed the Android widget suite failing; that's the parallel-worker flake the spec notes, and it didn't recur.
 
 ### FR6: Native release runbook and OPS.md ownership
-- [ ] Confirm `docs/RELEASING.md` exists (spec 04 merged). If it doesn't, stop. Save `git show HEAD:docs/RELEASING.md > /tmp/releasing-before.md` for the unchanged-OTA check.
-- [ ] Write down the verification commands before writing the doc:
+- [x] Confirm `docs/RELEASING.md` exists (spec 04 merged). If it doesn't, stop. Save `git show HEAD:docs/RELEASING.md > /tmp/releasing-before.md` for the unchanged-OTA check.
+  - Done 2026-10-20 at HEAD `9c1652e`: `/tmp/releasing-before.md` is 118 lines. If `/tmp` has been cleared, regenerate it with `git show 9c1652e:docs/RELEASING.md`.
+- [x] Write down the verification commands before writing the doc:
   - `grep -n '^## Native release' docs/RELEASING.md` → exactly 1 match.
   - `grep -n '^### ' docs/RELEASING.md` → Pre-flight, App Store Connect prep (asc.js), Build, Upload, Attach and verify (asc.js), TestFlight smoke, User-only steps, Submit, Post-release, If something fails, in that order (10 headings, after spec 04's). ASC prep must come before Build (OPS O6: public link off before the build lands).
   - `grep -c -- '--dry-run' docs/RELEASING.md` ≥ 1, and `grep -n 'main checkout' docs/RELEASING.md` ≥ 1.
   - `grep -n 'runtimeversion:resolve --platform ios' docs/RELEASING.md` ≥ 1 in the new section, and `grep -n 'expo-fingerprint' docs/RELEASING.md` → nothing (spec 04's check covers the whole file).
   - `grep -n 'ITMS-91053' docs/RELEASING.md` ≥ 1, with a line number between the "Upload" and "Attach and verify (asc.js)" headings.
   - `grep -n 'app-build-version' docs/RELEASING.md` ≥ 1 in the Build subsection, and `grep -n -E 'eas submit.*--path' docs/RELEASING.md` → nothing.
-- [ ] Write down the OPS.md verification before editing it. Save `git show HEAD:features/app/store-compliance/OPS.md > /tmp/ops-before.md`, then:
+  - **Red baseline, 2026-10-20 (before FR6):** `^## Native release` → 0 matches. `^### ` → only spec 04's A–E (lines 22, 49, 71, 86, 101), so the 10 new headings must all come after line 101. `main checkout` → 0. `ITMS-91053` → 0. `expo-fingerprint` → nothing (must stay so). `eas submit.*--path` → nothing (must stay so).
+  - **Whole-file greps that already pass on spec 04's text.** These are vacuous, so scope them to the new section or subsection. Each command below was checked on a sample section.
+    - `--dry-run`: whole file = 2 already (spec 04's `ota-publish.sh --dry-run`). Use `awk '/^## Native release/{f=1} f' docs/RELEASING.md | grep -c -- '--dry-run'`: 0 today, must be ≥ 1.
+    - `runtimeversion:resolve --platform ios`: already in spec 04's section A step 4. Use the same `awk '/^## Native release/{f=1} f' …` prefix: 0 today, must be ≥ 1.
+    - `app-build-version`: already in spec 04's section A step 1. Use `awk '/^### Build$/{f=1;next} /^#{2,3} /{f=0} f' docs/RELEASING.md | grep -c 'app-build-version'`: must be ≥ 1.
+    - ITMS-91053 placement: `awk '/^### Upload$/{f=1;next} /^#{2,3} /{f=0} f' docs/RELEASING.md | grep -c 'ITMS-91053'` must be ≥ 1, and `awk '/^## Native release/{exit} 1' docs/RELEASING.md | grep -c 'ITMS-91053'` must be 0.
+- [x] Write down the OPS.md verification before editing it. Save `git show HEAD:features/app/store-compliance/OPS.md > /tmp/ops-before.md`, then:
   - `grep -n -E '^- \[ \] \*\*O(3|4|6) \(C\)' features/app/store-compliance/OPS.md` → 3 lines.
   - `grep -n 'spec 05' features/app/store-compliance/OPS.md` → O3, O4 and O6 each cite spec 05 FR5/FR3.
   - `grep -n '~~Move the two email testers' features/app/store-compliance/OPS.md` → 1 line, followed by the Out of Scope 7 reason.
   - `diff /tmp/ops-before.md features/app/store-compliance/OPS.md` → only the O3, O4 and O6 lines differ, and none is ticked (`[x]`).
+  - **Red baseline, 2026-10-20:** `/tmp/ops-before.md` saved (25 lines). Regenerate it with `git show 9c1652e:features/app/store-compliance/OPS.md` if needed. `(C)` O3/O4/O6 → 0 lines, because all three are `(J)` today. `~~Move the two email testers` → 0.
+  - `grep -n 'spec 05'` already matches O7 (line 13), so check each line: `grep -E '^- \[ \] \*\*O3 \(C\)' features/app/store-compliance/OPS.md | grep -c 'spec 05 FR5'` → 1. Same for O4 with `spec 05 FR5`, and for O6 with `spec 05 FR3`.
 
 ---
 
@@ -145,39 +157,103 @@ Feature: `store-compliance`
 
 asc.js is untracked, so it has no Jest coverage. The "tests" are the command transcripts below. Write the expected result next to each item **before** implementing, then record the actual output after. **No live writes in Phase 2.** Run every write command with `--dry-run` and `ASC_TRACE=1`.
 
+**Offline harness (added in Phase 2.0, 2026-10-20).** The ASC API returns 403 for every call until J accepts the agreement, so no live GET or dry-run transcript can be produced today. The expected transcripts below are encoded as an executable suite in `features/app/store-compliance/specs/05-release-build-18/asc-offline/`:
+- `fixtures.js`: ASC JSON:API states for each point in the FR7 sequence (`agreement-403`, `today`, `v110-fresh`, `v110-prepped`, `v110-build18`, `post-live`, `v110-in-review`) plus negative-case modifiers (`+two-editable`, `+no-en-us`, `+no-socialmedia-key`, `+pages-redirect`, …). The 403 body is the one captured live on 2026-10-19.
+- `fake-asc.js`: a pure in-memory router for those states.
+- `mock-https.js`: a `node -r` preload. It replaces `https`/`http` request/get, `fetch`, `net`/`tls` connects and `child_process`, so **nothing leaves the machine**. It answers every non-GET with an error and logs it as `blocked`. It refuses to load without `ASC_MOCK_SCENARIO`.
+- `check.js`: 82 cases (6 characterization), each run with `ASC_TRACE=1`. It asserts exit codes, exact `[dry-run] <METHOD> <path> <json>` lines and bodies, the `[dry-run] <n> write(s) skipped` trailer, one `[http] …` stderr trace line per ASC request, and zero non-GET requests. That last check is the `ASC_TRACE … | grep -E '^\[http\] (POST|PATCH|DELETE)'` → empty check, applied to every case. It also runs static checks on the file.
+- Run it from anywhere: `node features/app/store-compliance/specs/05-release-build-18/asc-offline/check.js --target "/Users/Trilogy/Documents/Claude Code/WS/hourglassws/.appstore/asc.js"`. `--red` asserts the red phase. `--transcripts` prints every transcript. `--only <id>` filters cases. `--self-test` checks the fake and the transport.
+- **Red phase, 2026-10-20, against the unmodified asc.js** (sha256 `9d77b903…`): `--red` → `6 passed, 76 failed (82 cases, 6 characterization)`, "red phase OK". The 6 characterization cases pass: FR2.01 `node --check`, FR2.02 `KEY_*` at top, FR2.16 `check-submission` format, FR2.17 `check-submission` on a non-editable newest version, FR2.18 `builds` format, FR2.19 `beta-info` format. No case failed from a fixture gap or a non-fixture host. In 9 cases (FR2.12, FR2.14, FR4.28–FR4.34), the current code ignored `--dry-run` and tried a PATCH. The harness intercepted it in-process (`blocked`), so nothing was sent to Apple. This is the FR2/FR4 bug the cases exist to catch.
+- The runner's passing path was proven against a throwaway spec-shaped stand-in for 23 cases (list-testers, disable-public-link, remove-public-link-testers, create-version, set-urls, and the 403 path). The stand-in was deleted.
+- **What offline can't prove.** It doesn't prove the real ASC response shapes: fixtures follow the ASC API reference. It doesn't prove whether the API exposes `socialMedia`, or whether a new version copies the 1.0 localizations. It doesn't cover `write()`'s live error path (`status >= 400` / `errors`): no live writes are run, even offline. It doesn't use the real tester and group ids and counts. These still need the live transcripts in Phase 3.
+
 ### Setup
-- [ ] `cd "/Users/Trilogy/Documents/Claude Code/WS/hourglassws"` (not a worktree). Check `ls .appstore/asc.js` succeeds.
-- [ ] Back up: `cp .appstore/asc.js .appstore/asc.js.bak-$(date +%Y%m%d)`. Then `ls .appstore/asc.js.bak-*`.
-- [ ] Agreement probe: `node .appstore/asc.js builds`.
+- [x] `cd "/Users/Trilogy/Documents/Claude Code/WS/hourglassws"` (not a worktree). Check `ls .appstore/asc.js` succeeds.
+  - Ran with absolute paths from the build18 worktree. This run's rules keep the cwd in the worktree, and asc.js resolves its key via `__dirname`. `.appstore/asc.js` is present: 500 lines, 23380 bytes.
+- [x] Back up: `cp .appstore/asc.js .appstore/asc.js.bak-$(date +%Y%m%d)`. Then `ls .appstore/asc.js.bak-*`.
+  - `.appstore/asc.js.bak-20261019`, made with `cp -p`, has the same sha256 as asc.js: `9d77b903cc7eccdf9a2fb4be9027ea9413f940223df2c785da32b34d73c8685b`. `git status --porcelain .appstore` in the main checkout → empty, and `git check-ignore -v .appstore/asc.js` → `.gitignore:62`.
+- [x] Agreement probe: `node .appstore/asc.js builds`.
   - Record the result. Expected today: `Error: App not found for bundle ID` (the hidden 403).
   - If it 403s, the read-only GET items below wait for (J) to accept the agreement in ASC → Business. `node --check`, the grep items and dry-run refusals that need no API (bad args) can still go ahead.
+  - 2026-10-20: `Error: App not found for bundle ID: com.jalvarez0907.hourglass`, exit 1. A raw read-only `GET /v1/apps?filter[bundleId]=…` returns HTTP 403 `FORBIDDEN.REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED`, "A required agreement is missing or has expired.", `links.see: /business`. That body is the `agreement-403` fixture.
 
 ### FR2: Safety fixes and dry-run plumbing (red baselines)
-- [ ] Red: `node .appstore/asc.js list-testers` → expected `TypeError … reading 'padEnd'` (agreement accepted) or the hidden 403. Record it.
-- [ ] Red: `node .appstore/asc.js check-submission` → expected `Version 1.0: READY_FOR_SALE`. Record the full output as the format baseline.
-- [ ] Red: `node .appstore/asc.js builds` → record the output as the format baseline (build 17 VALID expected).
-- [ ] Expected after the fix (write down now):
+- [x] Red: `node .appstore/asc.js list-testers` → expected `TypeError … reading 'padEnd'` (agreement accepted) or the hidden 403. Record it.
+  - Live: `Error: App not found for bundle ID: com.jalvarez0907.hourglass`, exit 1.
+  - Offline (`today` fixture, 12 testers with null `email`/`firstName`/`lastName`): the header prints, then `Error: Cannot read properties of null (reading 'padEnd')`, exit 1. Harness FR2.09–FR2.11.
+- [x] Red: `node .appstore/asc.js check-submission` → expected `Version 1.0: READY_FOR_SALE`. Record the full output as the format baseline.
+  - Live: the hidden 403, exit 1. Offline format baseline (`today` fixture), pinned by FR2.16:
+    ```
+    Version 1.0: READY_FOR_SALE
+    Attached build: v15 (bld-15)
+    Demo account required: true  |  demo user set: yes
+    Review notes match Unlisted text: true
+
+    Review submissions:
+      rs-100  state=COMPLETE  platform=IOS
+    ```
+  - [ ] Live format baseline, once J accepts the agreement (Phase 3.0 Gates).
+- [x] Red: `node .appstore/asc.js builds` → record the output as the format baseline (build 17 VALID expected).
+  - Live: the hidden 403, exit 1. Offline format baseline (`today` fixture), pinned by FR2.18:
+    ```
+    Build      Date                   State                Audience
+    ──────────────────────────────────────────────────────────────────────
+    17         8/6/2026, 7:00:00 PM   VALID                APP_STORE_ELIGIBLE
+    …
+    Build IDs (for submit-review):
+      bld-17  v17  VALID
+    ```
+  - [ ] Live format baseline, once J accepts the agreement (Phase 3.0 Gates).
+- [x] Expected after the fix (write down now):
   - `list-testers` shows an id column, `<anonymous>` for 12 PUBLIC_LINK rows, no `null`, and per-type counts.
   - `set-review-notes --dry-run` → exit 1, `No editable App Store version (live: 1.0 …)`.
   - `check-submission` → still prints 1.0.
   - Agreement 403 → `ASC API error: 403 FORBIDDEN.REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED`.
+  - Encoded as harness cases, all red today:
+    - FR2.03: Config block `URLS`/`EDITABLE_*`, evaluated in a sandbox.
+    - FR2.04: dispatcher after every function and UPPER_CASE const.
+    - FR2.05 / FR2.06: header comment and usage list all 19 commands and `--dry-run`.
+    - FR2.07a–c: the 403 is surfaced as `ASC API error: 403 … — A required agreement is missing or has expired.`
+    - FR2.08: `[http] GET … -> 200` on stderr.
+    - FR2.09–FR2.11: list-testers with `--type`.
+    - FR2.12: the `Run: node .appstore/asc.js create-version <x.y.z>` refusal.
+    - FR2.13: two editable versions → throw before any read.
+    - FR2.14: the `request()` backstop via legacy `set-beta-info --dry-run` → `Refusing PATCH in --dry-run`.
+    - FR2.15: `--dry-run` before the command.
 
 ### FR3: Public-link lockdown (expected transcripts)
-- [ ] `disable-public-link --dry-run`: lists groups, with "Test" external and `publicLinkEnabled: true`, then exactly 1 `[dry-run] PATCH /betaGroups/<id>` with `{"publicLinkEnabled":false}`.
-- [ ] `remove-public-link-testers --dry-run`: N `[dry-run] DELETE /betaTesters/<id>/relationships/apps` lines, where N = the `list-testers --type=PUBLIC_LINK` total (12 expected), and 0 lines for EMAIL ids.
-- [ ] `remove-public-link-testers <email-tester-id> --dry-run`: exit 1, `Refusing: <id> is EMAIL`, 0 `[dry-run]` lines.
+- [x] `disable-public-link --dry-run`: lists groups, with "Test" external and `publicLinkEnabled: true`, then exactly 1 `[dry-run] PATCH /betaGroups/<id>` with `{"publicLinkEnabled":false}`.
+  - FR3.01 asserts the full body `{"data":{"type":"betaGroups","id":"<id>","attributes":{"publicLinkEnabled":false}}}` and the trailer `[dry-run] 1 write(s) skipped`. The internal group (`publicLinkEnabled: null`) gets no write. FR3.02 covers the no-op (`= public link already disabled on all groups`). Red: unknown command.
+- [x] `remove-public-link-testers --dry-run`: N `[dry-run] DELETE /betaTesters/<id>/relationships/apps` lines, where N = the `list-testers --type=PUBLIC_LINK` total (12 expected), and 0 lines for EMAIL ids.
+  - FR3.03 expects 12 DELETEs, body `{"data":[{"type":"apps","id":"6761698411"}]}`, and trailer 12. FR3.06 covers 2 explicit ids, FR3.08 the no-op (`= no PUBLIC_LINK testers`), and FR3.09 / FR3.10 the after-lockdown `Total: 0` and the 2 EMAIL testers. Red: unknown command.
+- [x] `remove-public-link-testers <email-tester-id> --dry-run`: exit 1, `Refusing: <id> is EMAIL`, 0 `[dry-run]` lines.
+  - FR3.04. FR3.05 is the mixed list `<PUBLIC_LINK id> <EMAIL id>`, which must also make 0 writes (validate every id first). FR3.07 is an unknown id, looked up with `GET /betaTesters/{id}`.
 
 ### FR4: Version record commands (expected transcripts)
-- [ ] `create-version 1.1 --dry-run`: exit 1 (format), 0 `[dry-run]` lines.
-- [ ] `create-version 1.1.0 --dry-run` (no 1.1.0 record): 1 `[dry-run] POST /appStoreVersions` containing `"versionString":"1.1.0"`, `"platform":"IOS"`, `"releaseType":"AFTER_APPROVAL"`, plus 1 `[dry-run] POST /appStoreVersionPhasedReleases` with `<new-version-id>` and `"phasedReleaseState":"INACTIVE"`. Ends with `[dry-run] 2 write(s) skipped`.
-- [ ] `set-whats-new --file /tmp/empty.txt --dry-run`: exit 1. `attach-build --dry-run` (no id): exit 1, usage. `submit-app-review --dry-run` (no id): exit 1, usage.
-- [ ] Before 1.1.0 exists: `set-whats-new --file /tmp/whats-new-1.1.0.txt --dry-run`, `attach-build <id> --dry-run` and `set-review-notes --dry-run` all exit 1 with "run create-version".
+- [x] `create-version 1.1 --dry-run`: exit 1 (format), 0 `[dry-run]` lines.
+  - FR4.01 (bad format) and FR4.02 (no version). Also FR4.06: `1.2.0` while 1.1.0 is editable → refuse, never rename. And FR4.07: `1.1.0` while it's `WAITING_FOR_REVIEW` → refuse and print the state.
+- [x] `create-version 1.1.0 --dry-run` (no 1.1.0 record): 1 `[dry-run] POST /appStoreVersions` containing `"versionString":"1.1.0"`, `"platform":"IOS"`, `"releaseType":"AFTER_APPROVAL"`, plus 1 `[dry-run] POST /appStoreVersionPhasedReleases` with `<new-version-id>` and `"phasedReleaseState":"INACTIVE"`. Ends with `[dry-run] 2 write(s) skipped`.
+  - FR4.03 compares both bodies exactly against spec FR4. FR4.04 covers a record with no phased release (1 POST, real id). FR4.05 covers the re-run (`= version 1.1.0 already exists (PREPARE_FOR_SUBMISSION)`, `= phased release already configured (INACTIVE)`, 0 writes).
+- [x] `set-whats-new --file /tmp/empty.txt --dry-run`: exit 1. `attach-build --dry-run` (no id): exit 1, usage. `submit-app-review --dry-run` (no id): exit 1, usage.
+  - FR4.19 (empty), FR4.20 (whitespace only), FR4.27 (no text), FR4.08 (`attach-build <buildId>` usage), FR4.30 (`submit-app-review <buildId>` usage, no auto-pick).
+  - Other set-whats-new cases: FR4.21 (the PATCH with trimmed file contents on the **en-US** loc; the en-GB loc is listed first), FR4.22 (inline text), FR4.23 (4001 chars → refuse), FR4.24 (exactly 4000 → accept), FR4.25 (`= whatsNew unchanged`), FR4.26 (no en-US loc → refuse).
+  - Attach guards: (a) FR4.15 PROCESSING, (b) FR4.13 expired, (c) FR4.14 other marketing version, (d) FR4.10 build 17 vs a VALID 18. FR4.16 checks that a non-VALID 19 doesn't block. FR4.16b checks that 18 replaces an attached 17. FR4.11 is the 1-PATCH preview, FR4.12 the already-attached no-op, FR4.17 an unknown id.
+  - Submit: FR4.32 (17 refused through `attachBuild`), FR4.33 (attached 18 → `= build 18 already attached` + POST `/reviewSubmissions`, POST `/reviewSubmissionItems` with `<new-submission-id>`, PATCH `/reviewSubmissions/<new-submission-id>` `{submitted:true}`, trailer 3), FR4.34 (not attached → 4).
+  - Notes: FR4.28 (the PATCH equals the old notes with only the Unlisted sentence replaced), FR4.29 (`= review notes unchanged`).
+  - check-submission: FR4.35 (the FR4 fields after the FR7 writes), FR4.36 (no editable appInfo → still exit 0, phased `none`).
+- [x] Before 1.1.0 exists: `set-whats-new --file /tmp/whats-new-1.1.0.txt --dry-run`, `attach-build <id> --dry-run` and `set-review-notes --dry-run` all exit 1 with "run create-version".
+  - FR4.18, FR4.09 and FR2.12, plus FR4.31 (`submit-app-review <build17-id> --dry-run`). Each must print `create-version <x.y.z>` as the command's own refusal, not the global usage.
 
 ### FR5: Compliance metadata (expected transcripts)
-- [ ] `curl -s -o /dev/null -w '%{http_code}\n'` on each of the 3 `URLS`. Record them (404 until spec 01 deploys).
-- [ ] Spec 01 not live: `set-urls --dry-run` → exit 1, `URL not live: …`, 0 `[dry-run]` lines.
-- [ ] No 1.1.0 record: `set-social-media-age-rating --dry-run` → exit 1, "run create-version".
-- [ ] `grep -c "hourglass/hourglassws" .appstore/asc.js` → expected `0` after the fix (record the current count; expected 4).
+- [x] `curl -s -o /dev/null -w '%{http_code}\n'` on each of the 3 `URLS`. Record them (404 until spec 01 deploys).
+  - 2026-10-20: `…/hourglass-app/privacy-policy.html` → 404, `…/hourglass-app/support.html` → 404, `…/hourglass-app/` → 404.
+- [x] Spec 01 not live: `set-urls --dry-run` → exit 1, `URL not live: …`, 0 `[dry-run]` lines.
+  - FR5.01 requires the exact `URL not live: <URLS.*> -> 404 (finish spec 01 / OPS O2)`. FR5.06 checks that a 301 is refused (no redirects followed, `fetch` included).
+  - Other set-urls cases: FR5.02 (Pages live, no 1.1.0 → all 3 URLs checked, then "run create-version"), FR5.03 (3 PATCHes on the **editable** appInfo loc, the en-US version loc and the beta loc), FR5.03b (two editable appInfos → refuse), FR5.04 (diff-only attributes + 1 `= … URLs unchanged`), FR5.05 (3 unchanged, 0 writes). FR5.08 checks that `setBetaInfo`/`setStoreListing` read `URLS.*`.
+- [x] No 1.1.0 record: `set-social-media-age-rating --dry-run` → exit 1, "run create-version".
+  - FR5.09. FR5.10 is the preview: it shows `socialMedia: null`, sends 1 PATCH whose attributes are exactly `{"socialMedia":false}`, prints FOUR_PLUS and the Brazil value, and reads `/appInfos/<editable>/ageRatingDeclaration`, not the live one. FR5.11 is the no-op, FR5.12 the missing key (refuse, list keys), FR5.13 the non-FOUR_PLUS warning.
+- [x] `grep -c "hourglass/hourglassws" .appstore/asc.js` → expected `0` after the fix (record the current count; expected 4).
+  - Current count: 4 (as expected). FR5.07.
 
 ---
 
@@ -403,3 +479,17 @@ For every asc.js step: (1) `--dry-run` → paste the transcript; (2) live run �
 - Spec 07 gate narrowed to PR A. Typecheck and lint are required only if PR B has merged. `package.json` today has `lint` but no `typecheck` script.
 - OPS.md O3, O4 and O6 are re-owned to `(C)` (FR6), and ticked in Phase 3.1.
 - The FR1 test block uses spec 03's typed JSON imports (`@/app.json`, `@/eas.json`), with no `fs`. Checked with `tsc`: `toHaveProperty('appVersionSource', 'local')` type-checks on current `main`, but `easJson.cli.appVersionSource` is TS2339.
+
+**2026-10-20 (implement, Phase X.0 = Phases 1.0 + 2.0, tests first):**
+- **FR1:** added the `05-release-build-18` block to `__tests__/config/app-config.test.ts`. The only new import is `@/eas.json`, with no `fs`/`path`/`__dirname`. It's red for the right reasons: `17 < 18`, and `cli` has no `appVersionSource`. Semver passes. `tsc` count unchanged (541 in this worktree), and the file is ESLint-clean.
+- **FR6:** recorded red baselines for every RELEASING.md / OPS.md check. `/tmp/releasing-before.md` and `/tmp/ops-before.md` are saved from `9c1652e`. Several whole-file greps already pass on spec 04's text (`--dry-run`, `runtimeversion:resolve`, `app-build-version`, `spec 05`), so section- and line-scoped variants are written down next to them.
+- **FR2–FR5 (asc.js):** made the backup `.appstore/asc.js.bak-20261019`. That name was set by the orchestrator; the session date rolled to 10-20 mid-run. Nothing else in the main checkout was edited.
+  - Every live probe hits the hidden 403.
+  - The Phase 2.0 transcripts are encoded in `asc-offline/check.js`, 82 cases, red phase OK (see the Phase 2.0 header). This harness is test tooling in the spec folder: no secrets, ESLint-clean, not matched by Jest's `testMatch` or by tsc's `include`. It doesn't replace the Phase 3 live transcripts.
+  - **Harness rules that go beyond the literal checklist wording**, so Phase 2.1 implements against them:
+    - (1) Validation and lookup refusals must be the command's own error, not the global usage.
+    - (2) The contract GETs are asserted: `GET /betaTesters/{id}` for explicit ids, `GET /builds/{id}?include=preReleaseVersion`, `/appInfos/<editable>/ageRatingDeclaration`, and `/apps/{id}/appInfos`.
+    - (3) There must be one `[http]` stderr line per ASC request.
+    - (4) The `remove-public-link-testers` and `set-urls` writes may come in any order.
+    - (5) FR5.13 doesn't assert an exit code for the non-FOUR_PLUS warning.
+  - The test-design validators (Phase 1 and Phase 2 gates) are run separately by the orchestrator.
