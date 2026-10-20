@@ -109,10 +109,10 @@ Two PRs are recommended (see spec → Release & Merge Order):
 - [x] Commit: `fix(07-ci-typecheck-lint): FR1 Hermes-safe log rotation via TextEncoder`
 
 ### FR2: Remove the out-of-repo smoke test (PR A)
-- [ ] `git rm src/components/NativeWindSmoke.tsx __tests__/components/NativeWindSmoke.test.tsx`
-- [ ] `grep -rn "NativeWindSmoke" app src components hooks __tests__` matches only the comment in `src/components/__tests__/colors.test.ts`.
-- [ ] `npx jest __tests__/ci-gates.test.ts -t FR2` is green.
-- [ ] Commit: `chore(07-ci-typecheck-lint): FR2 delete NativeWindSmoke and out-of-repo test`
+- [x] `git rm src/components/NativeWindSmoke.tsx __tests__/components/NativeWindSmoke.test.tsx`
+- [x] `grep -rn "NativeWindSmoke" app src components hooks __tests__` matches only the comment in `src/components/__tests__/colors.test.ts`.
+- [x] `npx jest __tests__/ci-gates.test.ts -t FR2` is green.
+- [x] Commit: `chore(07-ci-typecheck-lint): FR2 delete NativeWindSmoke and out-of-repo test`
 
 ### FR3: Typecheck foundation (PR B)
 - [ ] `npm install --save-dev @types/node@25.3.5`
