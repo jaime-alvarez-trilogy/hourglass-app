@@ -147,3 +147,28 @@ describe('app.json — 03 native config cleanup', () => {
     });
   });
 });
+
+describe('app.json — 04 OTA lane', () => {
+  describe('FR1: fingerprint runtime policy', () => {
+    it('expo.runtimeVersion is exactly { policy: "fingerprint" }', () => {
+      expect(expo.runtimeVersion).toEqual({ policy: 'fingerprint' });
+    });
+
+    // resolveRuntimeVersionAsync reads config[platform]?.runtimeVersion ?? config.runtimeVersion,
+    // so a platform-level value would shadow the top-level policy.
+    it('neither expo.ios nor expo.android overrides runtimeVersion', () => {
+      expect(expo.ios).not.toHaveProperty('runtimeVersion');
+      expect(expo.android).not.toHaveProperty('runtimeVersion');
+    });
+
+    it('package.json version equals expo.version', () => {
+      expect(pkg.version).toBe(expo.version);
+    });
+
+    // Guard (green before and after): binaries listen on this URL; it must stay tied to the EAS project.
+    it('expo.updates.url is the u.expo.dev URL for extra.eas.projectId', () => {
+      expect(expo.extra?.eas?.projectId).toEqual(expect.any(String));
+      expect(expo.updates?.url).toBe(`https://u.expo.dev/${expo.extra?.eas?.projectId}`);
+    });
+  });
+});
