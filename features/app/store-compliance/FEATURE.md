@@ -28,14 +28,15 @@
 - `src/components/NativeWindSmoke.tsx` + its test (delete)
 
 ### Native config
-- `app.json` (modify — invalid keys, Face ID, background modes, privacy manifest, runtimeVersion, buildNumber; spec 10: v1.2.0, widget background plugin)
+- `app.json` (modify — invalid keys, Face ID, background modes, privacy manifest, runtimeVersion, buildNumber; spec 10: v1.2.0, widget background and widget privacy-manifest plugins)
+- `plugins/withHourglassWidgetBackground.js`, `plugins/withHourglassWidgetPrivacyManifest.js` (new — spec 10: widget `containerBackground` fallback; `PrivacyInfo.xcprivacy` for the `ExpoWidgetsTarget` extension)
 - `package.json` / `package-lock.json` (modify — dead deps, pins, scripts, SDK bumps)
 - `tsconfig.json` (modify — `types`)
-- `eas.json` (modify — later: pinned build image)
+- `eas.json` (modify — spec 10: `cli.version` ≥ 25.2.0, pinned production image `macos-tahoe-26.6-xcode-27.1`)
 - `TECH_STACK.md` (modify)
 
 ### CI
-- `.github/workflows/test.yml` (modify — typecheck + lint gates)
+- `.github/workflows/test.yml` (modify — typecheck + lint gates; spec 10: Node 22)
 
 ## Table of Contents
 
