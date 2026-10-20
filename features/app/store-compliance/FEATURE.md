@@ -125,15 +125,15 @@ Non-code steps (App Store Connect, key handling, repo hygiene) are in [OPS.md](O
 
 | Date | Spec | Description |
 |------|------|-------------|
-| 2026-10-19 | [01-legal-pages](specs/01-legal-pages/spec-research.md) | Corrected privacy policy + support page on GitHub Pages |
-| 2026-10-19 | [02-in-app-legal-links](specs/02-in-app-legal-links/spec-research.md) | Settings → About: Privacy, Support, version |
-| 2026-10-19 | [03-native-config-cleanup](specs/03-native-config-cleanup/spec-research.md) | app.json cleanup, drop background-fetch deps, privacy manifest |
-| 2026-10-19 | [04-ota-lane](specs/04-ota-lane/spec-research.md) | Fingerprint runtimeVersion + baseline-update verification |
-| 2026-10-19 | [05-release-build-18](specs/05-release-build-18/spec-research.md) | Build 18 bump, TestFlight smoke, submission runbook |
-| 2026-10-19 | [06-dependency-hygiene](specs/06-dependency-hygiene/spec-research.md) | Pin patched deps, harden patch-package, SDK 55 patch refresh |
-| 2026-10-19 | [07-ci-typecheck-lint](specs/07-ci-typecheck-lint/spec-research.md) | Fix Buffer bug, delete out-of-repo test, clear TS/lint, add CI gates |
-| 2026-10-19 | [08-expo-sdk-57-scenes](specs/08-expo-sdk-57-scenes/spec-research.md) | SDK 55→56→57 + UIKit scene lifecycle |
-| 2026-10-19 | [09-sdk-58-xcode-27](specs/09-sdk-58-xcode-27/spec-research.md) | SDK 58 on an Xcode 27 image (externally blocked) |
+| 2026-10-19 | [01-legal-pages](specs/01-legal-pages/spec.md) | Corrected privacy policy + support page on GitHub Pages |
+| 2026-10-19 | [02-in-app-legal-links](specs/02-in-app-legal-links/spec.md) | Settings → About: Privacy, Support, version |
+| 2026-10-19 | [03-native-config-cleanup](specs/03-native-config-cleanup/spec.md) | app.json cleanup, drop background-fetch deps, privacy manifest |
+| 2026-10-19 | [04-ota-lane](specs/04-ota-lane/spec.md) | Fingerprint runtimeVersion + baseline-update verification |
+| 2026-10-19 | [05-release-build-18](specs/05-release-build-18/spec.md) | Build 18 bump, TestFlight smoke, submission runbook |
+| 2026-10-19 | [06-dependency-hygiene](specs/06-dependency-hygiene/spec.md) | Pin patched deps, harden patch-package, SDK 55 patch refresh |
+| 2026-10-19 | [07-ci-typecheck-lint](specs/07-ci-typecheck-lint/spec.md) | Fix Buffer bug, delete out-of-repo test, clear TS/lint, add CI gates |
+| 2026-10-19 | [08-expo-sdk-57-scenes](specs/08-expo-sdk-57-scenes/spec.md) | SDK 55→56→57 + UIKit scene lifecycle |
+| 2026-10-19 | [09-sdk-58-xcode-27](specs/09-sdk-58-xcode-27/spec.md) | SDK 58 on an Xcode 27 image (externally blocked) |
 
 ### Dependency Graph
 
