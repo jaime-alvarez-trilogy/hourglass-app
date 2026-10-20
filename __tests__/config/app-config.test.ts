@@ -205,3 +205,18 @@ describe('05-release-build-18', () => {
     });
   });
 });
+
+describe('10-sdk-58-ios-27', () => {
+  // FR1: every EAS build in spec 10 runs on the same CLI. eas-cli >= 22 changed the build JSON
+  // shape (scripts/ota-publish.sh reads both), and 25.2.0 is the floor recorded in spec-research.
+  it('eas cli.version floor is >= 25.2.0', () => {
+    const m = /^>=\s*(\d+)\.(\d+)\.(\d+)$/.exec(easJson.cli.version);
+    expect(m).not.toBeNull();
+    const [major, minor, patch] = m!.slice(1).map(Number);
+    const floor = major * 1e6 + minor * 1e3 + patch;
+    expect({ version: easJson.cli.version, atLeast25_2_0: floor >= 25_002_000 }).toEqual({
+      version: easJson.cli.version,
+      atLeast25_2_0: true,
+    });
+  });
+});
