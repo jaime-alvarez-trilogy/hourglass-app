@@ -193,10 +193,27 @@ async function handleStatus(response: Response): Promise<never> {
  * Unexpected end of input" on those; reading text first and returning `undefined`
  * for an empty body avoids it. Used by BOTH apiGet and apiPut so the read and
  * write paths can never drift apart again.
+ *
+ * 10-sdk-58-ios-27 FR3 (`expo/fetch` is `globalThis.fetch` from SDK 56):
+ * - The body is read exactly once, as text. expo/fetch rejects a second
+ *   `text()`/`json()` with `TypeError: … Response body is already used`.
+ * - A blank body (empty or whitespace-only, `text.trim() === ''`) returns `undefined`.
+ * - A non-blank body that isn't JSON throws `ApiError(status, 'Invalid JSON response
+ *   body')`, never a raw `SyntaxError`. This applies to apiPut too, even though the
+ *   approve/reject callers discard the result (src/api/approvals.ts): a 200 HTML page
+ *   (a captive portal or proxy) means the PUT may never have reached Crossover, so an
+ *   error is safer than a false success. After the error, `useApprovalItems` restores
+ *   the list and refetches in `finally` (src/hooks/useApprovalItems.ts:155-162), so the
+ *   user sees the real state before retrying.
  */
 async function parseBody<T>(response: Response): Promise<T> {
   const text = await response.text();
-  return (text ? JSON.parse(text) : undefined) as T;
+  if (text.trim() === '') return undefined as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new ApiError(response.status, 'Invalid JSON response body');
+  }
 }
 
 // ---------------------------------------------------------------------------

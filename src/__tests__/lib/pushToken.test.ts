@@ -4,6 +4,7 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { makeExpoLikeResponse } from '../../../__tests__/helpers/expoLikeResponse';
 
 // Mock expo-notifications — use jest.fn() inside factory (hoisting safe)
 jest.mock('expo-notifications', () => ({
@@ -262,5 +263,48 @@ describe('FR4: unregisterPushToken — response.ok validation', () => {
     jest.spyOn(console, 'warn').mockImplementation(() => {});
 
     await expect(unregisterPushToken()).resolves.toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 10-sdk-58-ios-27 FR3: the ping-server calls never read the response body
+// ---------------------------------------------------------------------------
+// expo/fetch reads a body once; these calls only need `ok`/`status`, so they must never
+// consume it (nothing to parse, nothing to "already use").
+
+describe('10 FR3: push-token calls never read the response body (expo/fetch)', () => {
+  it.each([200, 204, 500])('registerPushToken with a %i response: no text()/json()', async (status) => {
+    mockRequestPermissions.mockResolvedValueOnce({ granted: true });
+    mockGetExpoPushToken.mockResolvedValueOnce({ data: VALID_TOKEN });
+    const res = makeExpoLikeResponse({ status, body: '{"ok":true}' });
+    mockFetch.mockResolvedValueOnce(res);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await registerPushToken();
+    warn.mockRestore();
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(res.text).not.toHaveBeenCalled();
+    expect(res.json).not.toHaveBeenCalled();
+    expect(res.bodyUsed).toBe(false);
+    // The ok/!ok branch still ran: the token is stored only on 2xx.
+    if (status < 300) expect(AsyncStorage.setItem).toHaveBeenCalledWith('push_token', VALID_TOKEN);
+    else expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it.each([200, 404])('unregisterPushToken with a %i response: no text()/json()', async (status) => {
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(VALID_TOKEN);
+    const res = makeExpoLikeResponse({ status, body: '{"ok":true}' });
+    mockFetch.mockResolvedValueOnce(res);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await unregisterPushToken();
+    warn.mockRestore();
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(res.text).not.toHaveBeenCalled();
+    expect(res.json).not.toHaveBeenCalled();
+    expect(res.bodyUsed).toBe(false);
+    expect(AsyncStorage.removeItem).toHaveBeenCalledWith('push_token');
   });
 });

@@ -11,6 +11,10 @@
 //   - No Skia.Path.Make() and no copy()+trim(): Skia 2.14 removes the mutable SkPath API (#4092).
 //     MakeFromSVGString and <Path start end> work on both 2.4.18 and 2.14.0 (spec-research F2.4).
 //   - components/haptic-tab.tsx is gone (its PlatformPressable survives only in a deprecated fork).
+//
+// FR3 (SDK 55, forward-compatible with SDK 58):
+//   - No code reads whatwg-fetch internals (_bodyInit/_bodyText/_bodyBlob). From SDK 56,
+//     globalThis.fetch is expo/fetch, whose Response has none of them (spec-research F2.7).
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -209,6 +213,47 @@ function copyThenTrimCalls(sf: ts.SourceFile): number[] {
   return lines;
 }
 
+const WHATWG_BODY_INTERNALS = new Set(['_bodyInit', '_bodyText', '_bodyBlob']);
+
+/**
+ * Reads of whatwg-fetch Response internals: `r._bodyInit`, `r['_bodyText']`,
+ * `const { _bodyBlob } = r` and `'_bodyInit' in r`. A string that merely contains the
+ * name (a log message) and comments don't count.
+ */
+function whatwgBodyInternalReads(sf: ts.SourceFile): number[] {
+  const lines: number[] = [];
+  visit(sf, (n) => {
+    const hit =
+      (ts.isPropertyAccessExpression(n) && WHATWG_BODY_INTERNALS.has(n.name.text)) ||
+      (ts.isElementAccessExpression(n) &&
+        ts.isStringLiteralLike(n.argumentExpression) &&
+        WHATWG_BODY_INTERNALS.has(n.argumentExpression.text)) ||
+      (ts.isBindingElement(n) &&
+        ts.isObjectBindingPattern(n.parent) &&
+        ts.isIdentifier(n.propertyName ?? n.name) &&
+        WHATWG_BODY_INTERNALS.has(((n.propertyName ?? n.name) as ts.Identifier).text)) ||
+      (ts.isBinaryExpression(n) &&
+        n.operatorToken.kind === ts.SyntaxKind.InKeyword &&
+        ts.isStringLiteralLike(n.left) &&
+        WHATWG_BODY_INTERNALS.has(n.left.text));
+    if (hit) lines.push(lineOf(sf, n));
+  });
+  return lines;
+}
+
+/** Calls to the global `fetch` (`fetch(…)`, `globalThis.fetch(…)`, `global.fetch(…)`). */
+function fetchCalls(sf: ts.SourceFile): number[] {
+  const lines: number[] = [];
+  visit(sf, (n) => {
+    if (!ts.isCallExpression(n)) return;
+    const name = dottedName(n.expression);
+    if (name === 'fetch' || name === 'globalThis.fetch' || name === 'global.fetch') {
+      lines.push(lineOf(sf, n));
+    }
+  });
+  return lines;
+}
+
 // ─── The real tree ────────────────────────────────────────────────────────────
 
 type Parsed = { rel: string; sf: ts.SourceFile };
@@ -246,6 +291,8 @@ describe('10 FR2/FR3/FR4 — source migrations', () => {
           'src/hooks/useStaggeredEntry.ts',
           'src/components/ScrubCursor.ts',
           'src/components/AIArcHero.tsx',
+          'src/api/client.ts',
+          'src/lib/pushToken.ts',
         ]),
       );
     });
@@ -332,6 +379,42 @@ describe('10 FR2/FR3/FR4 — source migrations', () => {
         copyThenTrimCalls(parseFixture("const s = ' x '.trim();\nconst n = name.trim();", 'f.ts')),
       ).toEqual([]);
     });
+
+    it('whatwg-internals detector flags property, element, destructure and `in` reads, not strings or comments', () => {
+      expect(
+        whatwgBodyInternalReads(
+          parseFixture(
+            [
+              'const a = res._bodyInit;',
+              "const b = res['_bodyText'];",
+              'const { _bodyBlob: blob } = res;',
+              "const c = '_bodyInit' in res;",
+              'const { _bodyText } = res;',
+            ].join('\n'),
+            'f.ts',
+          ),
+        ),
+      ).toEqual([1, 2, 3, 4, 5]);
+      expect(
+        whatwgBodyInternalReads(
+          parseFixture(
+            "// res._bodyInit\nconsole.warn('no _bodyInit here');\nconst u = res.bodyUsed;\nconst t = await res.text();",
+            'f.ts',
+          ),
+        ),
+      ).toEqual([]);
+    });
+
+    it('fetch-call detector flags fetch, globalThis.fetch and global.fetch, not other .fetch methods', () => {
+      expect(
+        fetchCalls(
+          parseFixture(
+            "await fetch('a');\nawait globalThis.fetch('b');\nawait global.fetch('c');\nqueryClient.fetchQuery();\nclient.fetch('d');",
+            'f.ts',
+          ),
+        ),
+      ).toEqual([1, 2, 3]);
+    });
   });
 
   describe('FR2', () => {
@@ -369,6 +452,23 @@ describe('10 FR2/FR3/FR4 — source migrations', () => {
           .map((r) => `${rel}:${r.line}`),
       );
       expect(importers).toEqual([]);
+    });
+  });
+
+  describe('FR3', () => {
+    it('no whatwg-fetch internals (_bodyInit|_bodyText|_bodyBlob)', () => {
+      expect(hitsAcrossTree(whatwgBodyInternalReads)).toEqual([]);
+    });
+
+    it('positive control: the walk sees every fetch() call site (spec-research F2.7 inventory)', () => {
+      // A new fetch() site must follow the FR3 rules (one body read, FetchError → NetworkError).
+      // Review it against src/api/client.ts, then add it here.
+      const perFile: Record<string, number> = {};
+      for (const hit of hitsAcrossTree(fetchCalls)) {
+        const rel = hit.slice(0, hit.lastIndexOf(':'));
+        perFile[rel] = (perFile[rel] ?? 0) + 1;
+      }
+      expect(perFile).toEqual({ 'src/api/client.ts': 3, 'src/lib/pushToken.ts': 2 });
     });
   });
 });
