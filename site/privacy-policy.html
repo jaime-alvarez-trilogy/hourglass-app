@@ -133,17 +133,18 @@
     <p class="subtitle">Last updated: October 20, 2026</p>
 
     <div class="highlight">
-      <p><strong>Summary:</strong> Hourglass is an internal tool for Crossover employees. Your credentials stay on your device. We do not collect, store, or share your personal data on any external server.</p>
+      <p><strong>Summary:</strong> Hourglass is a companion tool for people who work through Crossover. Your credentials stay on your device. We do not collect, store, or share your personal data on any external server.</p>
     </div>
 
     <h2>1. About This App</h2>
-    <p>Hourglass is a mobile application built exclusively for employees of Crossover for Work. It provides a convenient view of your tracked hours, earnings, AI usage metrics, and team approval requests by connecting directly to your existing Crossover account.</p>
-    <p>Access requires an active Crossover employee account. The app is not available to the general public and cannot be used without valid Crossover credentials.</p>
+    <p>Hourglass is a mobile application for people who work through Crossover for Work. It provides a convenient view of your tracked hours, earnings, AI usage metrics, and team approval requests by connecting directly to your existing Crossover account.</p>
+    <p>Access requires an active Crossover account. The app cannot be used without valid Crossover credentials.</p>
 
     <h2>2. Information We Access</h2>
     <p>To display your work data, Hourglass connects to the Crossover API using credentials you provide. The following data is accessed:</p>
     <ul>
       <li>Your Crossover account credentials (email and password)</li>
+      <li>Your Crossover profile details: name, role, team, manager, hourly rate and weekly hours limit</li>
       <li>Work diary entries, tracked hours, and timesheet data</li>
       <li>Earnings and payment summaries</li>
       <li>AI usage and BrainLift session tags</li>
@@ -156,6 +157,7 @@
     <p>Your credentials are stored exclusively on your device using the platform's secure storage (iOS Keychain via Expo SecureStore). They are never transmitted to any server operated by this application.</p>
     <p>Work data may be temporarily cached on your device to allow the app and home screen widgets to display information when offline. This cache is stored locally and is never uploaded or shared.</p>
     <p>If you are a manager, the team data listed in section 2 is cached on your device in the same way as your own work data. Signing out deletes it from the app's cache and, in version 1.1.0 and later, from home screen widgets. Profile photos may stay in the iOS image cache until iOS clears it or you delete the app (see section 6).</p>
+    <p>The app also keeps a small debug log on your device (up to about 200 KB, oldest entries removed first). It records when errors happen and what type they are. Details that could identify you, such as names, email addresses, IDs, passwords and tokens, are removed before anything is written. The log is never sent automatically. It leaves your device only if you tap Share log in Settings and choose where to send it, for example to attach it to a support email. You can empty it at any time with Clear log, and signing out also clears it.</p>
 
     <h2>4. Data We Do Not Collect</h2>
     <ul>
@@ -170,19 +172,20 @@
     <p>Hourglass includes a lightweight background ping service that sends a silent push notification to your device as a refresh signal. No personal data is transmitted as part of this process — the notification contains no payload other than a refresh signal. The app does not currently refresh data when it receives this signal: your home screen widget updates when you open the app, and between opens it shows the last data the app fetched.</p>
     <p>If you allow notifications, the app registers an anonymous device push token with Expo's push notification service and with this refresh service; the token contains no personal data and is not linked to your identity or your Crossover account.</p>
     <p>Each time the app starts, it also checks Expo's update service (EAS Update) for a newer version of the app's code. That request includes a random installation identifier created by the app, the platform, the app's runtime version, release channel and current update ID, and, if the app hit a fatal error while starting on a previous launch, a short description of that error. It does not include your Crossover credentials or work data, and the identifier is not linked to your Crossover account.</p>
+    <p>These services are run by third parties. The refresh service is hosted on Railway (dynamic-balance-production-1696.up.railway.app). Push notifications are delivered through Expo's push service and the Apple Push Notification service (APNs). App updates are served by Expo (EAS Update). As with any internet request, these providers can see your device's IP address when your device connects to them. None of them receives your Crossover credentials or work data.</p>
 
     <h2>6. Data Retention and Deletion</h2>
-    <p>Your credentials and cached work data are kept only on your device. Signing out deletes your saved credentials and the app's cached work data. In version 1.1.0 and later, signing out also clears the data shown in home screen widgets; in earlier versions, widgets may continue to show the last data they received until you delete the app. Profile photos shown in the app may stay in the iOS image cache until iOS clears it or you delete the app. If you delete the app without signing out, iOS may keep your saved credentials in the device Keychain, so sign out first to remove them.</p>
+    <p>Your credentials and cached work data are kept only on your device. Signing out deletes your saved credentials, the app's cached work data and the on-device debug log. In version 1.1.0 and later, signing out also clears the data shown in home screen widgets; in earlier versions, widgets may continue to show the last data they received until you delete the app. Profile photos shown in the app may stay in the iOS image cache until iOS clears it or you delete the app. If you delete the app without signing out, iOS may keep your saved credentials in the device Keychain, so sign out first to remove them.</p>
     <p>The refresh service stores only the anonymous push token and the time it was last registered. When you sign out, the app asks the refresh service to delete the token. Tokens that Expo's push service reports as no longer registered are deleted automatically.</p>
 
     <h2>7. Permissions</h2>
     <p>The app may request the following device permissions:</p>
     <ul>
-      <li><strong>Notifications:</strong> To deliver reminders about approval deadlines and weekly summaries. You can disable these at any time in iOS Settings.</li>
+      <li><strong>Notifications:</strong> To deliver a Thursday hours pace check with your remaining hours for the week, a Monday summary of last week's earnings, hours and AI usage, and, for managers, a Monday reminder about pending approvals that expire that day. These reminders are scheduled on your device from data the app has already fetched. Allowing notifications also lets the app register for the silent refresh signal described in section 5. You can disable notifications at any time in iOS Settings.</li>
     </ul>
 
     <h2>8. Children's Privacy</h2>
-    <p>This app is intended for working adults who are Crossover employees. It is not directed at children under the age of 13 and we do not knowingly collect data from minors.</p>
+    <p>This app is intended for working adults who work through Crossover. It is not directed at children under the age of 13 and we do not knowingly collect data from minors.</p>
 
     <h2>9. Changes to This Policy</h2>
     <p>If this policy is updated, the revised version will be posted at this URL with an updated date. Continued use of the app after any changes constitutes acceptance of the updated policy.</p>
@@ -195,7 +198,7 @@
     </p>
 
     <footer>
-      <p>Hourglass &mdash; Internal tool for Crossover employees &mdash; Not affiliated with or endorsed by Crossover for Work, Inc.</p>
+      <p>Hourglass &mdash; A companion tool for people who work through Crossover &mdash; Not affiliated with or endorsed by Crossover for Work, Inc.</p>
     </footer>
 
   </div>

@@ -13,6 +13,8 @@
 #                                           pre-1.1.0 "keep your home screen widget up to date"
 #   support  GET $BASE/support.html         200; has the contact mailto and a policy link;
 #                                           not "in the background when iOS allows it"
+#   All three must not contain "tool for Crossover employees" (pre-build-18 footer/intro that
+#   contradicted the "Not affiliated with or endorsed by Crossover" disclaimer).
 #
 # On a non-200, the URL is re-requested with ?cb=<epoch>. A 200 there means the Pages CDN
 # is serving a cached response; otherwise Pages is probably not enabled/deployed (OPS O2).
@@ -115,16 +117,19 @@ check() {
 
 check index "$BASE/" \
   '+href="privacy-policy.html"' \
-  '+href="support.html"'
+  '+href="support.html"' \
+  '-tool for Crossover employees'
 check privacy "$BASE/privacy-policy.html" \
   '+Data Retention' \
   '+push token' \
   '-user accounts or databases' \
-  '-to keep your home screen widget up to date'
+  '-to keep your home screen widget up to date' \
+  '-tool for Crossover employees'
 check support "$BASE/support.html" \
   '+mailto:jaime.alvarez@trilogy.com' \
   '+href="privacy-policy.html"' \
-  '-in the background when iOS allows it'
+  '-in the background when iOS allows it' \
+  '-tool for Crossover employees'
 
 if [ "$failures" -eq 0 ]; then
   echo "All legal page checks passed for $BASE"

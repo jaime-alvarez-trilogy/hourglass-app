@@ -84,8 +84,18 @@ function styleBlock(html: string): string {
 
 const MAILTO = 'jaime.alvarez@trilogy.com';
 
+// "Internal tool for Crossover employees" contradicted the non-affiliation disclaimer in the same
+// line, and the people who work through Crossover are contractors, not Crossover employees.
 const FOOTER =
-  '<footer> <p>Hourglass &mdash; Internal tool for Crossover employees &mdash; Not affiliated with or endorsed by Crossover for Work, Inc.</p> </footer>';
+  '<footer> <p>Hourglass &mdash; A companion tool for people who work through Crossover &mdash; Not affiliated with or endorsed by Crossover for Work, Inc.</p> </footer>';
+
+// Phrases no page may use (build-18 final review): see FOOTER.
+const RETIRED_AFFILIATION_PHRASES = [
+  'internal tool',
+  'Crossover employee',
+  'employees of Crossover',
+  'not available to the general public',
+];
 
 // ---------------------------------------------------------------------------
 // Policy text contract (spec § Policy text contract)
@@ -132,25 +142,37 @@ const S5_NEW_P =
 const S5_UPDATES_P =
   "Each time the app starts, it also checks Expo's update service (EAS Update) for a newer version of the app's code. That request includes a random installation identifier created by the app, the platform, the app's runtime version, release channel and current update ID, and, if the app hit a fatal error while starting on a previous launch, a short description of that error. It does not include your Crossover credentials or work data, and the identifier is not linked to your Crossover account.";
 
+// PING_SERVER_URL (src/lib/pushToken.ts) defaults to the Railway host (server/railway.json); server/push.ts
+// sends through exp.host, which delivers via APNs. Each provider sees the connecting IP address.
+const S5_PROVIDERS_P =
+  "These services are run by third parties. The refresh service is hosted on Railway (dynamic-balance-production-1696.up.railway.app). Push notifications are delivered through Expo's push service and the Apple Push Notification service (APNs). App updates are served by Expo (EAS Update). As with any internet request, these providers can see your device's IP address when your device connects to them. None of them receives your Crossover credentials or work data.";
+
 // Sign-out runs clearWidgetData() (src/widgets/bridge.ts) from 1.1.0, which replaces the iOS widget
 // timeline in App Group UserDefaults; earlier builds left it. Team photos load through RN <Image>,
-// whose NSURLCache entries sign-out can't clear from JS.
+// whose NSURLCache entries sign-out can't clear from JS. handleSignOut (app/modal.tsx) also runs
+// log.clear() on the on-device debug log.
 const S6_PARAGRAPHS = [
-  "Your credentials and cached work data are kept only on your device. Signing out deletes your saved credentials and the app's cached work data. In version 1.1.0 and later, signing out also clears the data shown in home screen widgets; in earlier versions, widgets may continue to show the last data they received until you delete the app. Profile photos shown in the app may stay in the iOS image cache until iOS clears it or you delete the app. If you delete the app without signing out, iOS may keep your saved credentials in the device Keychain, so sign out first to remove them.",
+  "Your credentials and cached work data are kept only on your device. Signing out deletes your saved credentials, the app's cached work data and the on-device debug log. In version 1.1.0 and later, signing out also clears the data shown in home screen widgets; in earlier versions, widgets may continue to show the last data they received until you delete the app. Profile photos shown in the app may stay in the iOS image cache until iOS clears it or you delete the app. If you delete the app without signing out, iOS may keep your saved credentials in the device Keychain, so sign out first to remove them.",
   "The refresh service stores only the anonymous push token and the time it was last registered. When you sign out, the app asks the refresh service to delete the token. Tokens that Expo's push service reports as no longer registered are deleted automatically.",
 ];
 
-// Sections the spec requires to stay byte-identical (whitespace-insensitive here). §2 and §3 also
-// carry the manager team-data bullet and caching sentence (useTeamRoster / useTeamAggregateData,
-// persisted in HOURGLASS_QUERY_CACHE, which clearAll() removes and handleSignOut() clears in memory).
+// Sections locked byte-for-byte (whitespace-insensitive here). §2 and §3 also carry the manager
+// team-data bullet and caching sentence (useTeamRoster / useTeamAggregateData, persisted in
+// HOURGLASS_QUERY_CACHE, which clearAll() removes and handleSignOut() clears in memory).
+// Build-18 final review changed §1/§8 (no "internal tool"/"employees" wording; unlisted, not private),
+// §2 (profile details from /api/identity/users/current/detail + /api/v2/teams/assignments, stored in
+// crossover_config by src/api/auth.ts), §3 (debug log, src/lib/log.ts + src/lib/redact.ts, shared only
+// from Settings → Share log) and §7 (the three local notifications in useScheduledNotifications.ts;
+// no "New Approvals" alert: handleBackgroundPush never runs from the silent push, handler.ts L116-122).
 const UNCHANGED_SECTIONS: Record<string, string> = {
   '1. About This App': `
-    <p>Hourglass is a mobile application built exclusively for employees of Crossover for Work. It provides a convenient view of your tracked hours, earnings, AI usage metrics, and team approval requests by connecting directly to your existing Crossover account.</p>
-    <p>Access requires an active Crossover employee account. The app is not available to the general public and cannot be used without valid Crossover credentials.</p>`,
+    <p>Hourglass is a mobile application for people who work through Crossover for Work. It provides a convenient view of your tracked hours, earnings, AI usage metrics, and team approval requests by connecting directly to your existing Crossover account.</p>
+    <p>Access requires an active Crossover account. The app cannot be used without valid Crossover credentials.</p>`,
   '2. Information We Access': `
     <p>To display your work data, Hourglass connects to the Crossover API using credentials you provide. The following data is accessed:</p>
     <ul>
       <li>Your Crossover account credentials (email and password)</li>
+      <li>Your Crossover profile details: name, role, team, manager, hourly rate and weekly hours limit</li>
       <li>Work diary entries, tracked hours, and timesheet data</li>
       <li>Earnings and payment summaries</li>
       <li>AI usage and BrainLift session tags</li>
@@ -161,14 +183,15 @@ const UNCHANGED_SECTIONS: Record<string, string> = {
   '3. How Your Data Is Stored': `
     <p>Your credentials are stored exclusively on your device using the platform's secure storage (iOS Keychain via Expo SecureStore). They are never transmitted to any server operated by this application.</p>
     <p>Work data may be temporarily cached on your device to allow the app and home screen widgets to display information when offline. This cache is stored locally and is never uploaded or shared.</p>
-    <p>If you are a manager, the team data listed in section 2 is cached on your device in the same way as your own work data. Signing out deletes it from the app's cache and, in version 1.1.0 and later, from home screen widgets. Profile photos may stay in the iOS image cache until iOS clears it or you delete the app (see section 6).</p>`,
+    <p>If you are a manager, the team data listed in section 2 is cached on your device in the same way as your own work data. Signing out deletes it from the app's cache and, in version 1.1.0 and later, from home screen widgets. Profile photos may stay in the iOS image cache until iOS clears it or you delete the app (see section 6).</p>
+    <p>The app also keeps a small debug log on your device (up to about 200 KB, oldest entries removed first). It records when errors happen and what type they are. Details that could identify you, such as names, email addresses, IDs, passwords and tokens, are removed before anything is written. The log is never sent automatically. It leaves your device only if you tap Share log in Settings and choose where to send it, for example to attach it to a support email. You can empty it at any time with Clear log, and signing out also clears it.</p>`,
   '7. Permissions': `
     <p>The app may request the following device permissions:</p>
     <ul>
-      <li><strong>Notifications:</strong> To deliver reminders about approval deadlines and weekly summaries. You can disable these at any time in iOS Settings.</li>
+      <li><strong>Notifications:</strong> To deliver a Thursday hours pace check with your remaining hours for the week, a Monday summary of last week's earnings, hours and AI usage, and, for managers, a Monday reminder about pending approvals that expire that day. These reminders are scheduled on your device from data the app has already fetched. Allowing notifications also lets the app register for the silent refresh signal described in section 5. You can disable notifications at any time in iOS Settings.</li>
     </ul>`,
   "8. Children's Privacy": `
-    <p>This app is intended for working adults who are Crossover employees. It is not directed at children under the age of 13 and we do not knowingly collect data from minors.</p>`,
+    <p>This app is intended for working adults who work through Crossover. It is not directed at children under the age of 13 and we do not knowingly collect data from minors.</p>`,
   '9. Changes to This Policy': `
     <p>If this policy is updated, the revised version will be posted at this URL with an updated date. Continued use of the app after any changes constitutes acceptance of the updated policy.</p>`,
   '10. Contact': `
@@ -200,17 +223,18 @@ const SUPPORT_H3 = [
 
 const SUPPORT_PARAGRAPHS = [
   'Help with Hourglass',
-  'Hourglass shows your tracked hours, earnings, AI usage and team approval requests from your Crossover account, in the app and in home screen widgets. It is an internal tool for Crossover employees and requires an active Crossover account.',
+  'Hourglass shows your tracked hours, earnings, AI usage and team approval requests from your Crossover account, in the app and in home screen widgets. It is a companion tool for people who work through Crossover and requires an active Crossover account.',
   'Use the same email and password you use for Crossover. Your credentials are stored only on your device, in the iOS Keychain, and are sent only to Crossover.',
   'Widgets show data after you sign in and open the app at least once. After that, the widget updates each time you open the app. Between opens it shows the last data the app fetched, so open Hourglass to bring it up to date.',
-  "Tap the gear icon on the Home screen to open Settings, then tap Sign Out. This deletes your saved credentials and the app's cached work data from your device. In version 1.1.0 and later, it also clears your home screen widgets. Profile photos may stay in the iOS image cache until iOS clears it or you delete the app. Sign out before deleting the app to make sure your saved credentials are removed.",
+  "Tap the gear icon on the Home screen to open Settings, then tap Sign Out. This deletes your saved credentials, the app's cached work data and the debug log from your device. In version 1.1.0 and later, it also clears your home screen widgets. Profile photos may stay in the iOS image cache until iOS clears it or you delete the app. Sign out before deleting the app to make sure your saved credentials are removed.",
   'For help or to report a problem, email:',
   'Jaime Alvarez jaime.alvarez@trilogy.com',
+  "To help diagnose a problem, you can attach the app's debug log: open Settings (gear icon on the Home screen), tap Share log, and choose Mail. The log is redacted on your device and contains no credentials.",
   'Read the Privacy Policy to see what data Hourglass accesses and how it is stored.',
 ];
 
 const INDEX_DESCRIPTION =
-  'Hourglass shows your tracked hours, earnings, AI usage and approval requests from your Crossover account. It is an internal tool for Crossover employees.';
+  'Hourglass shows your tracked hours, earnings, AI usage and approval requests from your Crossover account. It is a companion tool for people who work through Crossover.';
 
 // ===========================================================================
 // FR1: Corrected privacy policy
@@ -235,13 +259,30 @@ describe('FR1: corrected privacy policy at site/privacy-policy.html', () => {
     expect(bullets).toEqual([NEW_S4_BULLET_1, ...S4_BULLETS_2_TO_5]);
   });
 
-  it('FR1: §5 is the relay paragraph (no widget-refresh claim), then the push-token and update-check paragraphs', () => {
+  it('FR1: §5 is the relay paragraph (no widget-refresh claim), then the push-token, update-check and providers paragraphs', () => {
     const html = readSite('privacy-policy.html');
     const paragraphs = innerAll(section(html, '5. '), 'p').map(squash);
-    expect(paragraphs).toHaveLength(3);
+    expect(paragraphs).toHaveLength(4);
     expect(paragraphs[0]).toBe(S5_RELAY_P);
     expect(paragraphs[1]).toBe(S5_NEW_P);
     expect(paragraphs[2]).toBe(S5_UPDATES_P);
+    expect(paragraphs[3]).toBe(S5_PROVIDERS_P);
+  });
+
+  it('FR1: §5 names the relay host the app actually registers with (src/lib/pushToken.ts)', () => {
+    const src = fs.readFileSync(path.join(ROOT, 'src/lib/pushToken.ts'), 'utf8');
+    const host = src.match(/'https:\/\/([^'/]+)'/)?.[1];
+    expect(host).toBeDefined();
+    expect(textOf(section(readSite('privacy-policy.html'), '5. '))).toContain(`hosted on Railway (${host})`);
+  });
+
+  it('FR1: no page calls Hourglass an internal tool, its users Crossover employees, or the app private', () => {
+    for (const page of PAGES) {
+      const text = textOf(readSite(page));
+      for (const phrase of RETIRED_AFFILIATION_PHRASES) {
+        expect(text.toLowerCase()).not.toContain(phrase.toLowerCase());
+      }
+    }
   });
 
   it('FR1: no page claims the silent push refreshes the widget in the background', () => {
@@ -279,7 +320,7 @@ describe('FR1: corrected privacy policy at site/privacy-policy.html', () => {
   it('FR1: summary box, §3 sentence, §4 bullets 2–5 (contract text), contact and footer are present', () => {
     const html = readSite('privacy-policy.html');
     expect(html).toContain(
-      '<p><strong>Summary:</strong> Hourglass is an internal tool for Crossover employees. Your credentials stay on your device. We do not collect, store, or share your personal data on any external server.</p>',
+      '<p><strong>Summary:</strong> Hourglass is a companion tool for people who work through Crossover. Your credentials stay on your device. We do not collect, store, or share your personal data on any external server.</p>',
     );
     expect(html).toContain(
       'They are never transmitted to any server operated by this application.',

@@ -254,6 +254,36 @@ describe('FR6: scripts/check-legal-pages.sh', () => {
     expect(run.stdoutLines).toContain('PASS privacy');
   });
 
+  // Build-18 final review: "Internal tool for Crossover employees" contradicted the footer's
+  // non-affiliation disclaimer, so a deployed page that still says it is stale.
+  it('FR6 (e1): any page still calling Hourglass a "tool for Crossover employees" → FAIL that page', async () => {
+    const OLD_FOOTER_PHRASE = 'Internal tool for Crossover employees';
+    const NEW_FOOTER_PHRASE = 'A companion tool for people who work through Crossover';
+    const stale = (name: string) => {
+      const html = readSitePage(name);
+      expect(html).toContain(NEW_FOOTER_PHRASE);
+      return html.split(NEW_FOOTER_PHRASE).join(OLD_FOOTER_PHRASE);
+    };
+    const srv = await startServer(
+      sitePages({
+        'index.html': stale('index.html'),
+        'privacy-policy.html': stale('privacy-policy.html'),
+        'support.html': stale('support.html'),
+      }),
+    );
+    const run = await runScript([srv.base]);
+    expect(run.code).toBe(1);
+    for (const name of ['index', 'privacy', 'support']) {
+      expect(run.stdoutLines).toContain(
+        `FAIL ${name}: contains forbidden "tool for Crossover employees"`,
+      );
+    }
+    expect(run.stdoutLines[run.stdoutLines.length - 1]).toBe(
+      `3 legal page check(s) failed for ${srv.base}`,
+    );
+    expect(run.output).not.toContain('HINT');
+  });
+
   it('FR6 (e): support page without the contact mailto → exit 1 with FAIL support', async () => {
     const noMailto = readSitePage('support.html')
       .split('mailto:jaime.alvarez@trilogy.com')
