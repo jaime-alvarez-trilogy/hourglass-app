@@ -20,15 +20,13 @@ import * as path from 'path';
 // The project-level mock handles Canvas, Rect, Circle, Paint, vec.
 // We add RadialGradient and BlendMode here since they're new to this component.
 jest.mock('@shopify/react-native-skia', () => {
-  const originalMock = jest.requireActual
-    ? (() => {
-        try {
-          return require('../../../__mocks__/@shopify/react-native-skia');
-        } catch {
-          return {};
-        }
-      })()
-    : {};
+  const originalMock = (() => {
+    try {
+      return require('../../../__mocks__/@shopify/react-native-skia');
+    } catch {
+      return {};
+    }
+  })();
   const mockReact = require('react');
   return {
     ...originalMock,

@@ -6,7 +6,7 @@
 const React = require('react');
 
 /** Shared mock path object factory — includes trim() for 04-victory-charts FR4 */
-function makeMockPath() {
+function makeMockPath(): Record<string, jest.Mock> {
   return {
     moveTo: jest.fn().mockReturnThis(),
     lineTo: jest.fn().mockReturnThis(),

@@ -381,7 +381,7 @@ describe('FR2: systemSmall layout', () => {
         brainliftTarget: '5h', deadline: Date.now(), pendingCount: 0, isManager: false,
         cachedAt: Date.now(), useQA: false, daily: [], approvalItems: [], myRequests: [],
         actionBg: '', weekDeltaHours: '', weekDeltaEarnings: '', hours: '0.0',
-        earningsRaw: 0, paceBadge: undefined },
+        earningsRaw: 0 },
       { widgetFamily: 'systemSmall' }
     )).not.toThrow();
   });

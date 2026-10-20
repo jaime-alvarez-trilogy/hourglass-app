@@ -13,6 +13,7 @@ jest.mock('../../widgets/bridge', () => ({
 
 import { updateWidgetData } from '../../lib/widgetBridge';
 import * as widgetsBridge from '../../widgets/bridge';
+import type { ApprovalItem } from '../../lib/approvals';
 
 const mockRealUpdateWidgetData = widgetsBridge.updateWidgetData as jest.Mock;
 
@@ -133,7 +134,7 @@ describe('FR3: widgetBridge.updateWidgetData', () => {
   // ─── FR6 (08-widget-enhancements): approvalItems and myRequests forwarding ──
 
   it('forwards approvalItems from snapshot to real bridge', async () => {
-    const approvalItems = [
+    const approvalItems: ApprovalItem[] = [
       { id: 'mt-1', category: 'MANUAL', userId: 100, fullName: 'Alice', durationMinutes: 60,
         hours: '1.0', description: 'Work', startDateTime: '2026-03-18T10:00:00Z',
         type: 'WEB', timecardIds: [1], weekStartDate: '2026-03-16' },

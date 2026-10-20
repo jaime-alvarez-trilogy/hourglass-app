@@ -22,7 +22,7 @@ jest.mock('@/src/lib/log', () => ({
   },
 }));
 
-const mockShareAsync = jest.fn(async () => undefined);
+const mockShareAsync = jest.fn(async (_url: string, _options?: Record<string, unknown>) => undefined);
 jest.mock('expo-sharing', () => ({
   shareAsync: mockShareAsync,
   isAvailableAsync: jest.fn(async () => true),

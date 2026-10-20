@@ -28,6 +28,7 @@ import type { AIWeekData } from '../../lib/ai';
 import type { CrossoverConfig } from '../../types/config';
 import type { ApprovalItem, ManualApprovalItem, OvertimeApprovalItem } from '../../lib/approvals';
 import type { ManualRequestEntry } from '../../types/requests';
+import type { WidgetData } from '../../widgets/types';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -282,7 +283,7 @@ describe('updateWidgetData — deadlineMs fallback is Sunday (FR2)', () => {
 // ─── FR2: buildTimelineEntries ─────────────────────────────────────────────────
 
 describe('buildTimelineEntries (FR2)', () => {
-  function makeBaseData() {
+  function makeBaseData(): WidgetData {
     return {
       hours: '32.5',
       hoursDisplay: '32.5h',
@@ -298,6 +299,15 @@ describe('buildTimelineEntries (FR2)', () => {
       isManager: false,
       cachedAt: Date.now(),
       useQA: false,
+      daily: [],
+      approvalItems: [],
+      myRequests: [],
+      actionBg: '',
+      paceBadge: 'none',
+      weekDeltaHours: '',
+      weekDeltaEarnings: '',
+      brainliftTarget: '5h',
+      todayDelta: '',
     };
   }
 

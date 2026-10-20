@@ -14,6 +14,16 @@ beforeEach(() => {
   mockFetch.mockReset();
 });
 
+// apiGet/apiPut resolve to `unknown` here, so a bare `.catch((e) => e)` is
+// typed `unknown`. Settle either way and type the result for field reads
+// (ApiError's fields are a superset of AuthError's).
+function captureError(p: Promise<unknown>): Promise<ApiError> {
+  return p.then(
+    (value) => value as ApiError,
+    (e: unknown) => e as ApiError,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // FR1 — ApiError constructor
 // ---------------------------------------------------------------------------
@@ -92,7 +102,7 @@ describe('FR3: handleStatus parses envelope from response body', () => {
           text: '"teamId" is not a valid value',
         }),
     });
-    const err = await apiGet('/x', {}, 'tok', false).catch((e) => e);
+    const err = await captureError(apiGet('/x', {}, 'tok', false));
     expect(err).toBeInstanceOf(ApiError);
     expect(err.statusCode).toBe(400);
     expect(err.errorCode).toBe('CROS-0005');
@@ -112,7 +122,7 @@ describe('FR3: handleStatus parses envelope from response body', () => {
           text: 'Access denied',
         }),
     });
-    const err = await apiGet('/x', {}, 'tok', false).catch((e) => e);
+    const err = await captureError(apiGet('/x', {}, 'tok', false));
     expect(err).toBeInstanceOf(AuthError);
     expect(err.statusCode).toBe(403);
     expect(err.errorCode).toBe('CROS-0002');
@@ -130,7 +140,7 @@ describe('FR3: handleStatus parses envelope from response body', () => {
           text: 'Internal ref DDF88BDA',
         }),
     });
-    const err = await apiPut('/x', {}, 'tok', false).catch((e) => e);
+    const err = await captureError(apiPut('/x', {}, 'tok', false));
     expect(err).toBeInstanceOf(ApiError);
     expect(err.statusCode).toBe(400);
     expect(err.errorCode).toBe('CROS-0400');
@@ -168,7 +178,7 @@ describe('FR4: handleStatus is defensive on bad bodies', () => {
       text: async () =>
         '<!doctype html><html><head><title>HTTP Status 500</title></head></html>',
     });
-    const err = await apiGet('/x', {}, 'tok', false).catch((e) => e);
+    const err = await captureError(apiGet('/x', {}, 'tok', false));
     expect(err).toBeInstanceOf(ApiError);
     expect(err.statusCode).toBe(500);
     expect(err.errorCode).toBeUndefined();
@@ -182,7 +192,7 @@ describe('FR4: handleStatus is defensive on bad bodies', () => {
       status: 502,
       text: async () => '',
     });
-    const err = await apiGet('/x', {}, 'tok', false).catch((e) => e);
+    const err = await captureError(apiGet('/x', {}, 'tok', false));
     expect(err).toBeInstanceOf(ApiError);
     expect(err.statusCode).toBe(502);
     expect(err.errorCode).toBeUndefined();
@@ -195,7 +205,7 @@ describe('FR4: handleStatus is defensive on bad bodies', () => {
       status: 422,
       text: async () => JSON.stringify({ message: 'oops', detail: 'thing' }),
     });
-    const err = await apiGet('/x', {}, 'tok', false).catch((e) => e);
+    const err = await captureError(apiGet('/x', {}, 'tok', false));
     expect(err).toBeInstanceOf(ApiError);
     expect(err.statusCode).toBe(422);
     expect(err.errorCode).toBeUndefined();
@@ -208,7 +218,7 @@ describe('FR4: handleStatus is defensive on bad bodies', () => {
       status: 400,
       text: async () => '{"errorCode":',
     });
-    const err = await apiGet('/x', {}, 'tok', false).catch((e) => e);
+    const err = await captureError(apiGet('/x', {}, 'tok', false));
     expect(err).toBeInstanceOf(ApiError);
     expect(err.statusCode).toBe(400);
     expect(err.errorCode).toBeUndefined();
@@ -220,7 +230,7 @@ describe('FR4: handleStatus is defensive on bad bodies', () => {
       status: 400,
       text: async () => JSON.stringify({ errorCode: '', type: 'ERROR', text: 'x' }),
     });
-    const err = await apiGet('/x', {}, 'tok', false).catch((e) => e);
+    const err = await captureError(apiGet('/x', {}, 'tok', false));
     expect(err).toBeInstanceOf(ApiError);
     expect(err.statusCode).toBe(400);
     expect(err.errorCode).toBeUndefined();
@@ -234,7 +244,7 @@ describe('FR4: handleStatus is defensive on bad bodies', () => {
       status: 400,
       text: async () => '[1,2,3]',
     });
-    const err = await apiGet('/x', {}, 'tok', false).catch((e) => e);
+    const err = await captureError(apiGet('/x', {}, 'tok', false));
     expect(err).toBeInstanceOf(ApiError);
     expect(err.statusCode).toBe(400);
     expect(err.errorCode).toBeUndefined();

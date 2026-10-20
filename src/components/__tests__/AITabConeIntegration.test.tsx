@@ -144,7 +144,7 @@ const MOCK_CONE_DATA = {
   isTargetAchievable: true,
 };
 
-const mockComputeAICone = jest.fn(() => MOCK_CONE_DATA);
+const mockComputeAICone = jest.fn((..._args: unknown[]) => MOCK_CONE_DATA);
 jest.mock('@/src/lib/aiCone', () => ({
   computeAICone: (...args: any[]) => mockComputeAICone(...args),
 }));
@@ -811,10 +811,12 @@ describe('AITab × AIConeChart — FR12 (02-safe-cone-scrub): animation gate int
     expect(interfaceMatch![0]).not.toMatch(/animDone/);
   });
 
-  it('SC12.I6 — source: GestureDetector in AIConeChart has enabled prop (gate present)', () => {
+  it('SC12.I6 — source: scrub gate is useScrubGesture({ enabled: size === "full" }), not a GestureDetector prop', () => {
     const coneSource = fs.readFileSync(CONE_CHART_FILE_INTEGRATION, 'utf8');
-    // Gate must be on GestureDetector — enabled={animDone && size === 'full'}
-    expect(coneSource).toMatch(/GestureDetector[\s\S]{0,200}enabled\s*=\s*\{/);
+    // 07-ci-typecheck-lint FR5d: RNGH GestureDetector has no `enabled` prop (it was
+    // silently ignored); the Pan gesture's .enabled() via useScrubGesture is the gate.
+    expect(coneSource).not.toMatch(/<GestureDetector\b[^>]*\benabled\s*=/);
+    expect(coneSource).toMatch(/useScrubGesture\(\{[\s\S]{0,200}\benabled\s*:\s*size\s*===\s*['"]full['"]/);
   });
 
   it('SC12.I7 — source: both useAnimatedReaction callbacks have !animDone guard', () => {

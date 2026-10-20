@@ -24,6 +24,13 @@ function makeSlot(overrides: Partial<WorkDiarySlot> = {}): WorkDiarySlot {
     status: 'APPROVED',
     memo: '',
     actions: [],
+    date: '',
+    time: '',
+    activityLevel: 0,
+    intensityScore: 0,
+    productivityCategory: 'UNCATEGORIZED',
+    activities: [],
+    secondBrainDeepDive: null,
     ...overrides,
   };
 }

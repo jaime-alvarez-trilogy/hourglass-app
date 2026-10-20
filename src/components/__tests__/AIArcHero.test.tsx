@@ -337,7 +337,7 @@ describe('arcPath — FR4: SVG arc path generation', () => {
   it('FR4.5 — arc coordinates are numeric (not NaN)', () => {
     const result = arcPath(90, 90, 80, 135, 270);
     const numbers = result.match(/-?[\d.]+/g) ?? [];
-    numbers.forEach(n => {
+    numbers.forEach((n: string) => {
       expect(isNaN(parseFloat(n))).toBe(false);
     });
   });

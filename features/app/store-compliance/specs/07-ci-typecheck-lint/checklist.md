@@ -151,7 +151,7 @@ Two PRs are recommended (see spec → Release & Merge Order):
 - [x] Commit: `fix(07-ci-typecheck-lint): FR5 notification behavior, role-refresh guard, dead tab/gesture props`
 
 ### FR6: Test and mock type errors (PR B)
-- [ ] Fix each file in the spec's FR6 table under its rules:
+- [x] Fix each file in the spec's FR6 table under its rules:
   - Complete fixtures first.
   - Casts only in tests and mocks.
   - `@ts-expect-error <reason>` only for deliberate bad input.
@@ -159,14 +159,14 @@ Two PRs are recommended (see spec → Release & Merge Order):
   - No production-type changes.
   - Stale-contract tests are updated to the current contract.
   - Duplicate keys keep the last-wins value.
-- [ ] Specifically confirm the stale-contract updates:
-  - [ ] `payments.test.ts` SC2.7 now uses `periodStartDate`/`periodEndDate`.
-  - [ ] `useAIInsights.test.ts` no longer passes `aiUsageSlots`.
-- [ ] `npm run typecheck` **exits 0**.
-- [ ] `git diff | grep -E "^\+.*@ts-(ignore|nocheck)"` returns nothing. Every added `@ts-expect-error` has a same-line reason.
-- [ ] Each FR6 file passes on its own, with a test count ≥ the Pre-flight baseline. Record any fixture completion that changed an outcome in Session Notes (there should be none).
-- [ ] `git diff --stat` shows no production file touched by this commit.
-- [ ] Commit: `test(07-ci-typecheck-lint): FR6 fix test and mock type errors`
+- [x] Specifically confirm the stale-contract updates:
+  - [x] `payments.test.ts` SC2.7 now uses `periodStartDate`/`periodEndDate`.
+  - [x] `useAIInsights.test.ts` no longer passes `aiUsageSlots`.
+- [x] `npm run typecheck` **exits 0**.
+- [x] `git diff | grep -E "^\+.*@ts-(ignore|nocheck)"` returns nothing. Every added `@ts-expect-error` has a same-line reason.
+- [x] Each FR6 file passes on its own, with a test count ≥ the Pre-flight baseline. Record any fixture completion that changed an outcome in Session Notes (there should be none).
+- [x] `git diff --stat` shows no production file touched by this commit.
+- [x] Commit: `test(07-ci-typecheck-lint): FR6 fix test and mock type errors`
 
 ### FR7: Lint (PR B)
 - [ ] `'` → `&apos;` at `app/(auth)/credentials.tsx:114`, `app/(auth)/setup.tsx:49`, `app/(tabs)/overview.tsx:649` and `app/+not-found.tsx:9`. No typographic `’`.
