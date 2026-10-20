@@ -102,11 +102,11 @@ Two PRs are recommended (see spec → Release & Merge Order):
 ## Phase 1.1: Implementation
 
 ### FR1: Hermes-safe log rotation (PR A)
-- [ ] Add the private `utf8ByteLength(s: string): number` to `src/lib/log.ts`: lazy or memoized `TextEncoder`, **no module-scope construction**, not exported.
-- [ ] Replace line 184 with `utf8ByteLength(lines[i]) + 1`. Change nothing else in `rotateIfNeeded`.
-- [ ] `grep -nw "Buffer" src/lib/log.ts __mocks__/expo-file-system/index.ts` returns nothing.
-- [ ] `npx jest src/lib/__tests__/log.test.ts` shows 28/28 green.
-- [ ] Commit: `fix(07-ci-typecheck-lint): FR1 Hermes-safe log rotation via TextEncoder`
+- [x] Add the private `utf8ByteLength(s: string): number` to `src/lib/log.ts`: lazy or memoized `TextEncoder`, **no module-scope construction**, not exported.
+- [x] Replace line 184 with `utf8ByteLength(lines[i]) + 1`. Change nothing else in `rotateIfNeeded`.
+- [x] `grep -nw "Buffer" src/lib/log.ts __mocks__/expo-file-system/index.ts` returns nothing.
+- [x] `npx jest src/lib/__tests__/log.test.ts` shows 28/28 green.
+- [x] Commit: `fix(07-ci-typecheck-lint): FR1 Hermes-safe log rotation via TextEncoder`
 
 ### FR2: Remove the out-of-repo smoke test (PR A)
 - [ ] `git rm src/components/NativeWindSmoke.tsx __tests__/components/NativeWindSmoke.test.tsx`
