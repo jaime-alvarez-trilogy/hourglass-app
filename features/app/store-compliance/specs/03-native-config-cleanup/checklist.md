@@ -156,14 +156,14 @@ All commands run from the app repo root `hourglassws/`. macOS has no `timeout` b
 - [ ] Commit if changes made: `fix(03-native-config-cleanup): strengthen test assertions`
 
 ### Final Verification
-- [ ] `npx jest __tests__/config src/__tests__/notifications src/__tests__/widgets native-tabs`: all green, same as the Phase 1.0 baseline
-- [ ] `npm test`: no new failures. The only allowed pre-existing failure is the out-of-repo `__tests__/components/NativeWindSmoke.test.tsx` (zero failures if spec 07 FR2 has merged)
-- [ ] The canonical introspection one-liner prints the expected post-spec JSON (spec 05's pre-flight reuses it)
-- [ ] Code follows existing patterns (static config tests sit beside other `__tests__/` suites; no comments beyond what the repo's CLAUDE.md "Comments" rule allows)
-- [ ] Hand-offs noted for later specs:
-  - [ ] spec 04: take the fingerprint baseline **after** this merges;
-  - [ ] spec 05: TestFlight silent-push smoke (already in spec 05 as smoke check 6);
-  - [ ] `ITMS-91053` processing-email check (spec.md Out of Scope #5). On 2026-10-19 it had **not** been placed anywhere. Run `grep -rln 'ITMS-91053' features/app/store-compliance/specs/05-release-build-18 features/app/store-compliance/OPS.md`. If it prints a file, the item has been placed. If it prints nothing, paste the item text from Out of Scope #5 into the PR description under "Open hand-offs" and report it to the orchestrator. Don't mark this spec complete while the hand-off is both unplaced and unreported
+- [x] `npx jest __tests__/config src/__tests__/notifications src/__tests__/widgets native-tabs`: all green, same as the Phase 1.0 baseline
+- [x] `npm test`: no new failures. The only allowed pre-existing failure is the out-of-repo `__tests__/components/NativeWindSmoke.test.tsx` (zero failures if spec 07 FR2 has merged)
+- [x] The canonical introspection one-liner prints the expected post-spec JSON (spec 05's pre-flight reuses it)
+- [x] Code follows existing patterns (static config tests sit beside other `__tests__/` suites; no comments beyond what the repo's CLAUDE.md "Comments" rule allows)
+- [x] Hand-offs noted for later specs:
+  - [x] spec 04: take the fingerprint baseline **after** this merges; (spec 04 spec.md Dependencies lists 03 as blocking)
+  - [x] spec 05: TestFlight silent-push smoke (already in spec 05 as smoke check 6);
+  - [x] `ITMS-91053` processing-email check (spec.md Out of Scope #5). On 2026-10-19 it had **not** been placed anywhere. Run `grep -rln 'ITMS-91053' features/app/store-compliance/specs/05-release-build-18 features/app/store-compliance/OPS.md`. If it prints a file, the item has been placed. If it prints nothing, paste the item text from Out of Scope #5 into the PR description under "Open hand-offs" and report it to the orchestrator. Don't mark this spec complete while the hand-off is both unplaced and unreported. **Placed:** the grep finds `05-release-build-18/spec.md` (FR7 Upload) and `checklist.md` (Phase 3.1)
 
 ---
 
@@ -182,3 +182,5 @@ All commands run from the app repo root `hourglassws/`. macOS has no `timeout` b
 Green sanity check: in a throwaway `cp -cR` clone in /tmp (since deleted), I applied the target `app.json` and dropped both packages from `package.json`. All 23 tests passed. Note: `npx jest __tests__/config` (no trailing slash) is a regex, so it also matches `__tests__/config-store.test.ts` and `config-types.test.ts`. Use `__tests__/config/` to target only these two suites. `tsc`: the static suite adds 0 errors; the introspection suite adds 3 (`child_process`, `path`, `__dirname`), as expected per Out of Scope #8 (deferred to spec 07). The worktree's own tsc baseline is 529. Full `npx jest --silent`: 4880 passed / 19 failed (18 new red + the pre-existing NativeWindSmoke).
 
 **2026-10-19 (Phase 1.1)**: The red-phase validator returned 0 findings, so the tests are unchanged. Applied FR1–FR4 to `app.json` and ran `npm uninstall expo-background-fetch expo-task-manager`. The lockfile diff is 33 deletions and 0 additions: the 2 root dependency lines, the `node_modules/expo-background-fetch`, `node_modules/expo-task-manager` and `node_modules/unimodules-app-loader` entries, and their nested dependency lines. `npx jest __tests__/config/`: 23/23 passed in about 1 s. The introspection one-liner prints the expected post-spec JSON exactly. `expo-doctor`: 19/20 checks passed. The only failure is the spec 06 package-version check, and neither removed package is listed. Scratch prebuild in a `cp -cR` clone under /tmp (with `.git` removed so git couldn't touch the worktree's gitdir; deleted afterwards): all plutil/grep checks passed (pbxproj count 4), the generated `PrivacyInfo.xcprivacy` matches the contract object, and prebuild reported "Updated package.json | no changes". Full `npx jest --silent`: 4898 passed / 1 failed (only the pre-existing NativeWindSmoke:202). Regression suites: 6/6, 420 tests. `tsc`: 532, the same before and after the `app.json` change. The only `__tests__/config/` errors are the 3 Node built-in errors deferred to spec 07.
+
+**2026-10-19 (Final Verification, implementer)**: Config + regression suites: 10 suites, 464 tests, all green. `npx jest --silent`: 4898 passed / 1 failed (only NativeWindSmoke:202). The introspection one-liner printed the expected JSON again. No changes under `app/`, `src/`, `components/`, `hooks/` or `server/`, and no `buildNumber` or `runtimeVersion` change. The `ITMS-91053` hand-off is placed in spec 05. Phase 1.2 Steps 0–3 need review agents, which the orchestrator runs separately, so they're still unticked.
