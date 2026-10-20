@@ -102,15 +102,15 @@ Commit message: `test(06-dependency-hygiene): add dependency guard tests (red)`.
 Do FR1–FR4 first, so the strict `postinstall` guards the FR5 refresh.
 
 ### FR1: Pin every patched package to its patch version
-- [ ] `npm install expo-widgets@55.0.5 --save-exact`
-- [ ] `node -p "require('./package.json').dependencies['expo-widgets']"` prints `55.0.5`.
-- [ ] `node -p "require('./package-lock.json').packages[''].dependencies['expo-widgets']"` prints `55.0.5`.
-- [ ] `git diff --stat -- patches/` is empty.
+- [x] `npm install expo-widgets@55.0.5 --save-exact`
+- [x] `node -p "require('./package.json').dependencies['expo-widgets']"` prints `55.0.5`.
+- [x] `node -p "require('./package-lock.json').packages[''].dependencies['expo-widgets']"` prints `55.0.5`.
+- [x] `git diff --stat -- patches/` is empty.
 
 ### FR2: A failed or mismatched patch fails the install
-- [ ] Set `scripts.postinstall` to `"patch-package --error-on-fail --error-on-warn"`.
-- [ ] `npm ci`: exit 0; output contains `expo-widgets@55.0.5 ✔` and `react-native-reanimated@4.2.1 ✔`; output does **not** contain `patch-package finished with`.
-- [ ] **Negative check** (touches only `node_modules`):
+- [x] Set `scripts.postinstall` to `"patch-package --error-on-fail --error-on-warn"`.
+- [x] `npm ci`: exit 0; output contains `expo-widgets@55.0.5 ✔` and `react-native-reanimated@4.2.1 ✔`; output does **not** contain `patch-package finished with`.
+- [x] **Negative check** (touches only `node_modules`):
   ```bash
   node -e "const f='node_modules/expo-widgets/package.json';const p=JSON.parse(require('fs').readFileSync(f,'utf8'));p.version='55.0.6';require('fs').writeFileSync(f,JSON.stringify(p,null,2))"
   npx patch-package --error-on-fail --error-on-warn; echo "exit=$?"   # expect exit=1 and "patch file version mismatch"
@@ -118,15 +118,15 @@ Do FR1–FR4 first, so the strict `postinstall` guards the FR5 refresh.
   ```
 
 ### FR3: Remove the unused dev tunnel helper
-- [ ] `npm uninstall @expo/ngrok`
-- [ ] `node -p "Object.keys(require('./package-lock.json').packages).filter(k=>k.startsWith('node_modules/@expo/ngrok')).length"` prints `0`.
-- [ ] `grep -rn ngrok app src components hooks scripts app.json eas.json metro.config.js babel.config.js` returns nothing.
+- [x] `npm uninstall @expo/ngrok`
+- [x] `node -p "Object.keys(require('./package-lock.json').packages).filter(k=>k.startsWith('node_modules/@expo/ngrok')).length"` prints `0`.
+- [x] `grep -rn ngrok app src components hooks scripts app.json eas.json metro.config.js babel.config.js` returns nothing.
 
 ### FR4: Keep `expo install` away from `expo-widgets`
-- [ ] Add `"expo": { "install": { "exclude": ["expo-widgets"] } }` to `package.json`.
-- [ ] `node -p "require('./package.json').expo.install.exclude"` prints `[ 'expo-widgets' ]`.
-- [ ] `npx jest __tests__/config/deps.test.ts`: FR1–FR4 tests pass. FR5 floors still fail, which is expected.
-- [ ] Commit: `chore(06-dependency-hygiene): pin patched deps, strict postinstall, drop ngrok, install.exclude`.
+- [x] Add `"expo": { "install": { "exclude": ["expo-widgets"] } }` to `package.json`.
+- [x] `node -p "require('./package.json').expo.install.exclude"` prints `[ 'expo-widgets' ]`.
+- [x] `npx jest __tests__/config/deps.test.ts`: FR1–FR4 tests pass. FR5 floors still fail, which is expected.
+- [x] Commit: `chore(06-dependency-hygiene): pin patched deps, strict postinstall, drop ngrok, install.exclude`.
 
 ### FR5: Refresh to the latest SDK 55 patch line
 - [ ] `npx expo install --fix`. It must finish without a postinstall failure.
