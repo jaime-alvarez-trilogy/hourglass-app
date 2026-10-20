@@ -10,55 +10,55 @@ All commands run from the app repo root `hourglassws/`. macOS has no `timeout` b
 ## Phase 1.0: Test Foundation
 
 ### Baseline (CLAUDE.md no-break ritual)
-- [ ] Run `npx jest src/__tests__/notifications src/__tests__/widgets native-tabs` and record the result (expect 6 suites green). Jest treats path args as regexes, so use `native-tabs`, not `app/(tabs)/…`
-- [ ] Record the baseline introspection with the canonical one-liner from spec.md → Interface Contracts. Expected today: `{"bg":["remote-notification","fetch"],"faceId":"Allow $(PRODUCT_NAME) to access your Face ID biometric data.","newArch":true,"edge":true,"bf":true,"tm":true,"ud":null}`
-- [ ] Confirm `npx jest --listTests __tests__/config` will list the new files once created. `testMatch` is `**/__tests__/**/*.test.ts`; `/server/` and `/node_modules/` are the only ignores
+- [x] Run `npx jest src/__tests__/notifications src/__tests__/widgets native-tabs` and record the result (expect 6 suites green). Jest treats path args as regexes, so use `native-tabs`, not `app/(tabs)/…`
+- [x] Record the baseline introspection with the canonical one-liner from spec.md → Interface Contracts. Expected today: `{"bg":["remote-notification","fetch"],"faceId":"Allow $(PRODUCT_NAME) to access your Face ID biometric data.","newArch":true,"edge":true,"bf":true,"tm":true,"ud":null}`
+- [x] Confirm `npx jest --listTests __tests__/config` will list the new files once created. `testMatch` is `**/__tests__/**/*.test.ts`; `/server/` and `/node_modules/` are the only ignores
 
 ### Shared test scaffolding (`__tests__/config/app-config.test.ts`, new)
-- [ ] Create the file per spec.md → Test-file contract: `import type { ExpoConfig } from 'expo/config'`, `import appJson from '@/app.json'`, `import pkg from '@/package.json'`, `const expo = appJson.expo as unknown as ExpoConfig`, and a module-level `pluginEntries(name)` helper
-- [ ] Wrap everything in `describe('app.json — 03 native config cleanup', …)` with one nested `describe` per FR, named with an `FRn:` prefix (e.g. `describe('FR2: no fetch background mode', …)`) so `npx jest … -t FR2` works. Specs 04 and 05 append sibling top-level `describe` blocks
-- [ ] Use `not.toHaveProperty('<key>')` for absence checks and `Object.keys(pkg.dependencies)` / `Object.keys(pkg.devDependencies)` for dependency checks. Don't use `fs` and don't import `package-lock.json`
+- [x] Create the file per spec.md → Test-file contract: `import type { ExpoConfig } from 'expo/config'`, `import appJson from '@/app.json'`, `import pkg from '@/package.json'`, `const expo = appJson.expo as unknown as ExpoConfig`, and a module-level `pluginEntries(name)` helper
+- [x] Wrap everything in `describe('app.json — 03 native config cleanup', …)` with one nested `describe` per FR, named with an `FRn:` prefix (e.g. `describe('FR2: no fetch background mode', …)`) so `npx jest … -t FR2` works. Specs 04 and 05 append sibling top-level `describe` blocks
+- [x] Use `not.toHaveProperty('<key>')` for absence checks and `Object.keys(pkg.dependencies)` / `Object.keys(pkg.devDependencies)` for dependency checks. Don't use `fs` and don't import `package-lock.json`
 
 ### FR1: Remove schema-invalid config keys
-- [ ] Test: `expo` has no `newArchEnabled` property
-- [ ] Test: `expo.android` has no `edgeToEdgeEnabled` property
-- [ ] Guard test: `expo.android?.predictiveBackGestureEnabled === false` (passes today; catches over-deletion)
+- [x] Test: `expo` has no `newArchEnabled` property
+- [x] Test: `expo.android` has no `edgeToEdgeEnabled` property
+- [x] Guard test: `expo.android?.predictiveBackGestureEnabled === false` (passes today; catches over-deletion)
 
 ### FR2: Remove the unused `fetch` background mode
-- [ ] Test: `expo.ios?.infoPlist?.UIBackgroundModes` deep-equals `['remote-notification']`
-- [ ] Test: neither `Object.keys(pkg.dependencies)` nor `Object.keys(pkg.devDependencies)` contains `expo-background-fetch`
-- [ ] Test: same for `expo-task-manager`
+- [x] Test: `expo.ios?.infoPlist?.UIBackgroundModes` deep-equals `['remote-notification']`
+- [x] Test: neither `Object.keys(pkg.dependencies)` nor `Object.keys(pkg.devDependencies)` contains `expo-background-fetch`
+- [x] Test: same for `expo-task-manager`
 
 ### FR3: Remove the Face ID usage description
-- [ ] Test: `pluginEntries('expo-secure-store')` has length 1 (catches a leftover string entry, which would win under run-once and bring the key back)
-- [ ] Test: that single entry deep-equals `['expo-secure-store', { faceIDPermission: false }]` (exact, so no `configureAndroidBackup` override)
-- [ ] Test: `expo.ios?.infoPlist` has no `NSFaceIDUsageDescription`
-- [ ] Guard test: `expo.ios?.infoPlist?.ITSAppUsesNonExemptEncryption === false` (passes today)
+- [x] Test: `pluginEntries('expo-secure-store')` has length 1 (catches a leftover string entry, which would win under run-once and bring the key back)
+- [x] Test: that single entry deep-equals `['expo-secure-store', { faceIDPermission: false }]` (exact, so no `configureAndroidBackup` override)
+- [x] Test: `expo.ios?.infoPlist` has no `NSFaceIDUsageDescription`
+- [x] Guard test: `expo.ios?.infoPlist?.ITSAppUsesNonExemptEncryption === false` (passes today)
 
 ### FR4: Declare the app-level privacy manifest
-- [ ] Test: `expo.ios?.privacyManifests` deep-equals the exact contract object in spec.md (declare it as a `const EXPECTED_PRIVACY_MANIFEST` in the test; array order matters)
-- [ ] Test: the `NSPrivacyAccessedAPICategoryUserDefaults` entry's reasons deep-equal `['CA92.1', '1C8F.1']`
-- [ ] Test: the `NSPrivacyAccessedAPICategorySystemBootTime` entry's reasons deep-equal `['35F9.1']`
-- [ ] Test: `NSPrivacyTracking === false` and `NSPrivacyTrackingDomains` deep-equals `[]`
-- [ ] Test: no `NSPrivacyAccessedAPIType` equals `NSPrivacyAccessedAPICategoryActiveKeyboards`
-- [ ] Test: `NSPrivacyCollectedDataTypes` has exactly one entry, `NSPrivacyCollectedDataTypeDeviceID`, with `Linked: false`, `Tracking: false`, purposes `['NSPrivacyCollectedDataTypePurposeAppFunctionality']`
+- [x] Test: `expo.ios?.privacyManifests` deep-equals the exact contract object in spec.md (declare it as a `const EXPECTED_PRIVACY_MANIFEST` in the test; array order matters)
+- [x] Test: the `NSPrivacyAccessedAPICategoryUserDefaults` entry's reasons deep-equal `['CA92.1', '1C8F.1']`
+- [x] Test: the `NSPrivacyAccessedAPICategorySystemBootTime` entry's reasons deep-equal `['35F9.1']`
+- [x] Test: `NSPrivacyTracking === false` and `NSPrivacyTrackingDomains` deep-equals `[]`
+- [x] Test: no `NSPrivacyAccessedAPIType` equals `NSPrivacyAccessedAPICategoryActiveKeyboards`
+- [x] Test: `NSPrivacyCollectedDataTypes` has exactly one entry, `NSPrivacyCollectedDataTypeDeviceID`, with `Linked: false`, `Tracking: false`, purposes `['NSPrivacyCollectedDataTypePurposeAppFunctionality']`
 
 ### FR5: Automated resolved-config regression guard (`__tests__/config/app-config-introspect.test.ts`, new)
-- [ ] Create the suite with `ROOT = path.resolve(__dirname, '../..')`. In `beforeAll(…, 60_000)`, run `execFileSync(process.execPath, [path.join(ROOT, 'node_modules/expo/bin/cli'), 'config', '--type', 'introspect', '--json'], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, EXPO_NO_TELEMETRY: '1' }, maxBuffer: 32 * 1024 * 1024 })` and `JSON.parse` the stdout. Type the result as `ExpoConfig & { _internal: { pluginHistory: Record<string, unknown> } }`. Don't catch errors: a CLI failure must fail the suite
-- [ ] Non-vacuity guard: `ios.infoPlist.ExpoWidgetsAppGroupIdentifier === 'group.com.jalvarez0907.hourglass.widgets'` (passes today)
-- [ ] Non-vacuity guard: `_internal.pluginHistory` has keys `expo-secure-store` and `expo-notifications` (passes today)
-- [ ] Test (FR2): `ios.infoPlist.UIBackgroundModes` deep-equals `['remote-notification']`
-- [ ] Test (FR2): `_internal.pluginHistory` has neither `expo-background-fetch` nor `expo-task-manager` as a key
-- [ ] Test (FR3): `ios.infoPlist.NSFaceIDUsageDescription` is `undefined`
-- [ ] Test (FR1): resolved config has no top-level `newArchEnabled` and no `android.edgeToEdgeEnabled`
-- [ ] Test (FR4): `ios.privacyManifests` deep-equals `appJson.expo.ios.privacyManifests`, and its UserDefaults reasons contain `1C8F.1`
+- [x] Create the suite with `ROOT = path.resolve(__dirname, '../..')`. In `beforeAll(…, 60_000)`, run `execFileSync(process.execPath, [path.join(ROOT, 'node_modules/expo/bin/cli'), 'config', '--type', 'introspect', '--json'], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, EXPO_NO_TELEMETRY: '1' }, maxBuffer: 32 * 1024 * 1024 })` and `JSON.parse` the stdout. Type the result as `ExpoConfig & { _internal: { pluginHistory: Record<string, unknown> } }`. Don't catch errors: a CLI failure must fail the suite
+- [x] Non-vacuity guard: `ios.infoPlist.ExpoWidgetsAppGroupIdentifier === 'group.com.jalvarez0907.hourglass.widgets'` (passes today)
+- [x] Non-vacuity guard: `_internal.pluginHistory` has keys `expo-secure-store` and `expo-notifications` (passes today)
+- [x] Test (FR2): `ios.infoPlist.UIBackgroundModes` deep-equals `['remote-notification']`
+- [x] Test (FR2): `_internal.pluginHistory` has neither `expo-background-fetch` nor `expo-task-manager` as a key
+- [x] Test (FR3): `ios.infoPlist.NSFaceIDUsageDescription` is `undefined`
+- [x] Test (FR1): resolved config has no top-level `newArchEnabled` and no `android.edgeToEdgeEnabled`
+- [x] Test (FR4): `ios.privacyManifests` deep-equals `appJson.expo.ios.privacyManifests`, and its UserDefaults reasons contain `1C8F.1`
 
 ### Red phase run
-- [ ] `npx jest __tests__/config`: every FR assertion fails and every guard passes (`predictiveBackGestureEnabled`, `ITSAppUsesNonExemptEncryption`, `ExpoWidgetsAppGroupIdentifier`, `pluginHistory` has `expo-secure-store`/`expo-notifications`). If a guard fails, fix the test before going on
-- [ ] Commit: `test(03-native-config-cleanup): add app config regression suites (red)`
+- [x] `npx jest __tests__/config`: every FR assertion fails and every guard passes (`predictiveBackGestureEnabled`, `ITSAppUsesNonExemptEncryption`, `ExpoWidgetsAppGroupIdentifier`, `pluginHistory` has `expo-secure-store`/`expo-notifications`). If a guard fails, fix the test before going on
+- [x] Commit: `test(03-native-config-cleanup): add app config regression suites (red)`
 
 ### FR6: Fix documentation drift
-- [ ] No Jest test (docs only). Verified by the grep commands in Phase 1.1 → FR6
+- [x] No Jest test (docs only). Verified by the grep commands in Phase 1.1 → FR6
 
 ---
 
@@ -174,3 +174,9 @@ All commands run from the app repo root `hourglassws/`. macOS has no `timeout` b
 **2026-10-19**: Spec drafted. Pre-verified in a /tmp scratch copy (repo untouched): the target `app.json` plus the 2 packages removed from `package.json` gives introspect `UIBackgroundModes: ["remote-notification"]`, no Face ID key, neither package in `pluginHistory`; expo-doctor 1.21.5 schema check passes (19/20); `expo prebuild -p ios --no-install` writes `ios/Hourglassxo/PrivacyInfo.xcprivacy` (lint OK, `1C8F.1` present, referenced in pbxproj). A probe test under the real Jest config confirmed `@/app.json` and `@/package.json` JSON imports work, and that the introspection subprocess runs in about 220 ms.
 
 **2026-10-19 (revision)**: A validator found that Out of Scope #5 deferred the widget-extension `ITMS-91053` check to spec 05, but spec 05 and OPS.md never mention it. Out of Scope #5 now calls it an open hand-off. It gives the exact item text, a decision rule and a recommended home (spec 05 checklist Phase 3.1, after `18 … VALID`). The Final Verification hand-off line gates on it with a grep. Also re-verified that RN's privacy aggregation skips non-`:application` targets, and that the `ExpoWidgets` podspec's resource bundle is empty.
+
+**2026-10-19 (Phase 1.0)**: Both suites written under `__tests__/config/`. Baseline: the 6 regression suites are green (420 tests), and the introspection one-liner matches the expected baseline JSON exactly. Red run (`npx jest __tests__/config/`): 18 failed / 5 passed. All 5 passes are expected: the 4 named guards (`predictiveBackGestureEnabled`, `ITSAppUsesNonExemptEncryption`, `ExpoWidgetsAppGroupIdentifier`, `pluginHistory` has secure-store + notifications), plus the static "`infoPlist` doesn't hard-code `NSFaceIDUsageDescription`" test. That last one is green by construction, because the key comes from the plugin and is never in `app.json`. Its red counterpart is the introspection FR3 test. Two choices to keep the red run honest:
+- The FR3 length-1 test also asserts that the single entry is a tuple. A bare `toHaveLength(1)` passes today, since today's lone entry is the string.
+- The ActiveKeyboards test also asserts the exact list of four categories. A bare `not.toContain` passes vacuously when there's no manifest.
+
+Green sanity check: in a throwaway `cp -cR` clone in /tmp (since deleted), I applied the target `app.json` and dropped both packages from `package.json`. All 23 tests passed. Note: `npx jest __tests__/config` (no trailing slash) is a regex, so it also matches `__tests__/config-store.test.ts` and `config-types.test.ts`. Use `__tests__/config/` to target only these two suites. `tsc`: the static suite adds 0 errors; the introspection suite adds 3 (`child_process`, `path`, `__dirname`), as expected per Out of Scope #8 (deferred to spec 07). The worktree's own tsc baseline is 529. Full `npx jest --silent`: 4880 passed / 19 failed (18 new red + the pre-existing NativeWindSmoke).
