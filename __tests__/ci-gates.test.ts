@@ -6,6 +6,7 @@
 // FR7: ESLint guard against the Node-only global `Buffer` in app code (static
 //      config check plus a probe that runs the real ESLint on snippets).
 // FR8: .github/workflows/test.yml `app-tests` gates on typecheck + lint + test.
+// 10-sdk-58-ios-27 FR1: every CI node-version is an even (LTS) major >= 22.
 //
 // Static fs reads only — the same pattern as the source-analysis tests in
 // app/(tabs)/__tests__/native-tabs.test.tsx. No new dependencies.
@@ -146,24 +147,25 @@ describe('07-ci-typecheck-lint — FR7: Buffer lint guard', () => {
 
 // ─── FR8: CI gates in app-tests ──────────────────────────────────────────────
 
-describe('07-ci-typecheck-lint — FR8: app-tests CI gates', () => {
-  const workflow = read('.github/workflows/test.yml');
+const WORKFLOW = read('.github/workflows/test.yml');
 
-  // Returns the text of a top-level job under `jobs:` (2-space indent), up to
-  // the next job key or end of file. null if the job is absent.
-  function jobBlock(name: string): string | null {
-    const lines = workflow.split('\n');
-    const start = lines.findIndex((l) => l === `  ${name}:`);
-    if (start === -1) return null;
-    let end = lines.length;
-    for (let i = start + 1; i < lines.length; i++) {
-      if (/^ {2}[A-Za-z0-9_-]+:\s*$/.test(lines[i]) || /^\S/.test(lines[i])) {
-        end = i;
-        break;
-      }
+// Returns the text of a top-level job under `jobs:` (2-space indent), up to
+// the next job key or end of file. null if the job is absent.
+function jobBlock(name: string): string | null {
+  const lines = WORKFLOW.split('\n');
+  const start = lines.findIndex((l) => l === `  ${name}:`);
+  if (start === -1) return null;
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^ {2}[A-Za-z0-9_-]+:\s*$/.test(lines[i]) || /^\S/.test(lines[i])) {
+      end = i;
+      break;
     }
-    return lines.slice(start, end).join('\n');
   }
+  return lines.slice(start, end).join('\n');
+}
+
+describe('07-ci-typecheck-lint — FR8: app-tests CI gates', () => {
 
   // Splits a job block into its `steps:` list items (6-space `- ` markers).
   function steps(block: string): string[] {
@@ -229,5 +231,37 @@ describe('07-ci-typecheck-lint — FR8: app-tests CI gates', () => {
     const block = jobBlock('server-tests');
     expect(block).not.toBeNull();
     expect(block).toContain('working-directory: server');
+  });
+});
+
+// ─── 10-sdk-58-ios-27 FR1: CI on Node 22 ─────────────────────────────────────
+
+describe('10-sdk-58-ios-27 — FR1: CI runs an even Node major >= 22', () => {
+  // Every `node-version:` value in the file, quotes stripped (e.g. '22' → 22, "22.x" → 22.x).
+  const nodeVersions = (text: string): string[] =>
+    [...text.matchAll(/^\s*node-version:\s*['"]?([^'"\s#]+)['"]?\s*(?:#.*)?$/gm)].map((m) => m[1]);
+
+  const major = (value: string): number => {
+    const m = /^(\d+)(?:\.(?:\d+|x))*$/.exec(value);
+    if (!m) throw new Error(`node-version is not a numeric major: "${value}"`);
+    return Number(m[1]);
+  };
+
+  it('at least one node-version exists, and every one is an even major >= 22', () => {
+    const values = nodeVersions(WORKFLOW);
+    expect(values.length).toBeGreaterThanOrEqual(1);
+    const bad = values.filter((v) => major(v) < 22 || major(v) % 2 !== 0);
+    expect({ values, bad }).toEqual({ values, bad: [] });
+  });
+
+  it.each(['app-tests', 'server-tests'])('%s sets a node-version', (job) => {
+    expect(nodeVersions(jobBlock(job) ?? '')).toHaveLength(1);
+  });
+
+  it('major() parses the shapes CI uses and rejects aliases', () => {
+    expect(major('22')).toBe(22);
+    expect(major('22.x')).toBe(22);
+    expect(major('22.13.1')).toBe(22);
+    expect(() => major('lts/*')).toThrow('not a numeric major');
   });
 });
