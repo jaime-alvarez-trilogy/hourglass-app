@@ -4,6 +4,7 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { WidgetData } from '../../widgets/types';
 
 // Mock expo-widgets — iOS-only native module (virtual so it doesn't need to exist on disk)
 jest.mock('expo-widgets', () => ({}), { virtual: true });
@@ -28,7 +29,6 @@ import type { AIWeekData } from '../../lib/ai';
 import type { CrossoverConfig } from '../../types/config';
 import type { ApprovalItem, ManualApprovalItem, OvertimeApprovalItem } from '../../lib/approvals';
 import type { ManualRequestEntry } from '../../types/requests';
-import type { WidgetData } from '../../widgets/types';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 

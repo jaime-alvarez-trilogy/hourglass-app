@@ -3,6 +3,9 @@
  * Tests for src/hooks/useWidgetSync.ts
  */
 
+import type { ManualApprovalItem } from '../../lib/approvals';
+import type { ManualRequestEntry } from '../../types/requests';
+
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
 jest.mock('../../widgets/bridge', () => ({
@@ -14,8 +17,6 @@ jest.mock('../../widgets/bridge', () => ({
 import { renderHook, act } from '@testing-library/react-native';
 import { useWidgetSync } from '../../hooks/useWidgetSync';
 import * as widgetsBridge from '../../widgets/bridge';
-import type { ManualApprovalItem } from '../../lib/approvals';
-import type { ManualRequestEntry } from '../../types/requests';
 
 const mockUpdateWidgetData = widgetsBridge.updateWidgetData as jest.Mock;
 

@@ -3,6 +3,8 @@
  * Tests for src/lib/widgetBridge.ts
  */
 
+import type { ApprovalItem } from '../../lib/approvals';
+
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
 jest.mock('../../widgets/bridge', () => ({
@@ -13,7 +15,6 @@ jest.mock('../../widgets/bridge', () => ({
 
 import { updateWidgetData } from '../../lib/widgetBridge';
 import * as widgetsBridge from '../../widgets/bridge';
-import type { ApprovalItem } from '../../lib/approvals';
 
 const mockRealUpdateWidgetData = widgetsBridge.updateWidgetData as jest.Mock;
 
