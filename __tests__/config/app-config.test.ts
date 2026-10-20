@@ -1,5 +1,6 @@
 import type { ExpoConfig } from 'expo/config';
 import appJson from '@/app.json';
+import easJson from '@/eas.json';
 import pkg from '@/package.json';
 
 type PrivacyManifest = NonNullable<NonNullable<ExpoConfig['ios']>['privacyManifests']>;
@@ -169,6 +170,28 @@ describe('app.json — 04 OTA lane', () => {
     it('expo.updates.url is the u.expo.dev URL for extra.eas.projectId', () => {
       expect(expo.extra?.eas?.projectId).toEqual(expect.any(String));
       expect(expo.updates?.url).toBe(`https://u.expo.dev/${expo.extra?.eas?.projectId}`);
+    });
+  });
+});
+
+describe('05-release-build-18', () => {
+  describe('FR1: build number with a pinned local version source', () => {
+    // Range-based on purpose: later native builds take the next unused number (19+).
+    it('ios.buildNumber is an integer string >= 18', () => {
+      const buildNumber = expo.ios?.buildNumber;
+      expect(typeof buildNumber).toBe('string');
+      expect(buildNumber).toMatch(/^\d+$/);
+      expect(Number(buildNumber)).toBeGreaterThanOrEqual(18);
+    });
+
+    it('expo.version is semver x.y.z', () => {
+      expect(expo.version).toMatch(/^\d+\.\d+\.\d+$/);
+    });
+
+    // toHaveProperty, not easJson.cli.appVersionSource: the inferred JSON type lacks the key
+    // until it is added, so a direct read would be TS2339.
+    it('eas.json pins cli.appVersionSource to local', () => {
+      expect(easJson.cli).toHaveProperty('appVersionSource', 'local');
     });
   });
 });
