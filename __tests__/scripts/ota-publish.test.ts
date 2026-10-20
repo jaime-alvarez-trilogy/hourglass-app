@@ -391,12 +391,13 @@ describe('FR3: scripts/ota-publish.sh', () => {
   // `channel` with `runtime: { id, version }` and `updateChannel` in `--json` output. The guard
   // reads `(b.runtime && b.runtime.version) ?? b.runtimeVersion`, so it works on both CLIs.
   describe('step 4: both eas-cli build JSON shapes (spec 10 FR1)', () => {
-    // eas-cli >= 22 shape: no top-level runtimeVersion or channel.
+    // eas-cli >= 22 shape (checked against eas-cli 25.3.0 `build:list --json`, 2026-10-20): no
+    // top-level runtimeVersion or channel; runtime and updateChannel are { id, ... } objects.
     const modernBuild = (version: string): Record<string, unknown> => {
       const b: Record<string, unknown> = {
         ...build(),
-        updateChannel: 'production',
-        runtime: { id: 'rt-0001', version },
+        updateChannel: { id: '019d6038-9c94-7833-be88-94fa6c2ba1aa', name: 'production' },
+        runtime: { id: '01a15889-0a75-7663-9449-cf5b2be4655e', version },
       };
       delete b.runtimeVersion;
       delete b.channel;
