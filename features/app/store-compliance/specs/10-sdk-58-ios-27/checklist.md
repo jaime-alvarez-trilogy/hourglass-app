@@ -76,12 +76,40 @@ Feature: `store-compliance`
     - Every fixture and unit case is green.
 
 ### FR2: Forward-compatible navigation, dead code and Skia
-- [ ] (C) Create `__tests__/config/sdk58-migration.test.ts` with the FR2 cases: no `useIsFocused` from `@react-navigation/native`, no `Skia.Path.Make()`, no `.copy().trim(`, and `components/haptic-tab.tsx` absent.
-- [ ] (C) `ScrubCursor.test.ts`: assert the `MakeFromSVGString` argument for `(scrubX=40, chartHeight=120, topPadding=8)` is `M 40 8 L 40 112`. Remove the `moveTo`/`lineTo` assertions.
-- [ ] (C) `AIArcHero*.test.tsx`: assert the fill `Path` gets `start={0}` and an `end` that is the sweep shared value.
-- [ ] (C) `src/hooks/__tests__/useStaggeredEntry.test.ts:132-135`: invert to `useIsFocused … from 'expo-router'`, and assert `@react-navigation` is absent.
-- [ ] (C) Record the current test counts of `FadeInScreen.test.tsx`, `index.test.tsx`, `indexConeIntegration.test.tsx`, `AITab.test.tsx` and `AITabConeIntegration.test.tsx`. Their mocks move in A.1, and the counts must not change.
-- [ ] (C) Run them. All of the new assertions are red. Record.
+- [x] (C) Create `__tests__/config/sdk58-migration.test.ts` with the FR2 cases: no `useIsFocused` from `@react-navigation/native`, no `Skia.Path.Make()`, no `.copy().trim(`, and `components/haptic-tab.tsx` absent.
+  - Done 2026-10-20: `describe('10 FR2/FR3/FR4 — source migrations')`, 11 cases. Each file is parsed with the TypeScript compiler (`ts.createSourceFile`), so a comment or string can't hit and a call split across lines can't slip past. The walk sees 150 files.
+    - **The walk (3):** at least 50 files, including 6 named known sites (`app/_layout.tsx`, the 3 hook sites, `ScrubCursor.ts`, `AIArcHero.tsx`); nothing from `__tests__`/`__mocks__`/`node_modules`/`*.test.*`; every file parses with 0 syntax errors.
+    - **Detector fixtures (4):** `moduleRefs` (named, aliased, namespace, re-export, `require` destructure and member); `useIsFocused` (named, `* as Nav` + `Nav.useIsFocused`, commented-out line ignored); `Skia.Path.Make` (split-line call flagged, `MakeFromSVGString` and comment ignored); copy-then-trim (chain flagged, the pre-FR2 AIArcHero shape flagged, `String.trim()` ignored).
+    - **FR2 (4), each with a positive control:** the 3 hook sites import `useIsFocused` from `'expo-router'`; `ScrubCursor.ts` and `AIArcHero.tsx` call `MakeFromSVGString`; no copy-then-trim; `haptic-tab.tsx` is absent and no module imports `…/haptic-tab`.
+  - **The copy/trim case is broader than the literal chain.** The pre-FR2 code was `const p = fullSkiaPath.copy(); p.trim(…)` (`AIArcHero.tsx:147-148`), which a literal `.copy().trim(` regex never matches, so that test would be green before the change. The detector also flags `.trim(` on a binding initialized from `.copy()`.
+- [x] (C) `ScrubCursor.test.ts`: assert the `MakeFromSVGString` argument for `(scrubX=40, chartHeight=120, topPadding=8)` is `M 40 8 L 40 112`. Remove the `moveTo`/`lineTo` assertions.
+  - Done 2026-10-20: `line path construction (10 FR2: MakeFromSVGString)` spies on the shared mock's `Skia.Path.MakeFromSVGString` (it calls through). Cases:
+    - exactly `'M 40 8 L 40 112'`, called once;
+    - `linePath` is the returned path;
+    - the top, bottom and x cases, now as string assertions;
+    - new: a `null` parse falls back to `'M 0 0'`.
+  - The `scrubX = chartWidth` edge case asserts `'M 300 10 L 300 190'`. The source-contract case requires `Skia.Path.MakeFromSVGString(`. No `moveTo`/`lineTo` assertion is left (`grep -n "linePath.moveTo\|linePath.lineTo"` → nothing). 18 → 19 tests.
+- [x] (C) `AIArcHero*.test.tsx`: assert the fill `Path` gets `start={0}` and an `end` that is the sweep shared value.
+  - Done 2026-10-20, render-level, in `AIArcHeroSkia.test.tsx`: new describe `AIArcHero — 10 FR2: fill Path trims via start/end props` (5 cases). The mock's `Path` is a function component, so `findAllByType` reads its props.
+    - Exactly 2 Paths: the track (`rgba(255,255,255,0.08)`), then the fill (`white`).
+    - Fill `start` is `0`.
+    - Fill `end` is an object whose `.value` is `0.75`, and `withSpring` was called with `(0.75, { mass: 1, stiffness: 80, damping: 12 })`.
+    - After a re-render with `aiPct: 40`, `end` is **the same object**, now with value `0.4`. So it's bound, not recomputed.
+    - The fill's `path` is the track's path object, and the track has no `start`/`end`.
+  - The file mocks Reanimated as `{ __esModule: true, ...jest.requireActual(…), withSpring: jest.fn(to => to) }`. Real Reanimated keeps shared-value identity, and the official `react-native-reanimated/mock` doesn't: it returns a new Proxy on every render, so it can't prove the binding. 40 → 45 tests.
+  - `AIArcHero.test.tsx`: FR1.6 and FR1.7 asserted the old mechanism (`useDerivedValue` and `.trim(` present). They're inverted (no `useDerivedValue(`, no `.trim(`, `start={0}` and `end={sweepProgress}` present). Still 52 tests.
+- [x] (C) `src/hooks/__tests__/useStaggeredEntry.test.ts:132-135`: invert to `useIsFocused … from 'expo-router'`, and assert `@react-navigation` is absent.
+  - Done 2026-10-20: `/useIsFocused.*from.*['"]expo-router['"]/` plus `not.toContain('@react-navigation')`. The test title says "react-navigation" without the `@`, so the FR2 success-criterion grep (`useIsFocused` + `@react-navigation` on one line) stays empty. Still 66 tests.
+- [x] (C) Record the current test counts of `FadeInScreen.test.tsx`, `index.test.tsx`, `indexConeIntegration.test.tsx`, `AITab.test.tsx` and `AITabConeIntegration.test.tsx`. Their mocks move in A.1, and the counts must not change.
+  - Baseline 2026-10-20 at `4c355ea` (`npx jest <files> --json`): `FadeInScreen` 20, `index` 61, `indexConeIntegration` 23, `AITab` 60, `AITabConeIntegration` 49. Also `useStaggeredEntry` 66, `ScrubCursor` 18, `AIArcHero` 52, `AIArcHeroSkia` 40 and `HapticTab` 14 (deleted in A.1). All green.
+  - Gotcha: jest reads path arguments as regexes, so `(tabs)` is a group. Pass `'app/\(tabs\)/__tests__/…'`.
+- [x] (C) Run them. All of the new assertions are red. Record.
+  - **Red, 2026-10-20**: 19 failed / 174 passed / 193 across the 5 files.
+    - `sdk58-migration.test.ts`: 4 failed / 7 passed / 11. The hits are exactly the known sites: `useIsFocused` at `FadeInScreen.tsx:18`, `useFocusKey.ts:2` and `useStaggeredEntry.ts:29`; `Make()` at `AIArcHero.tsx:131` and `ScrubCursor.ts:42`; copy-then-trim at `AIArcHero.tsx:148`; `haptic-tab.tsx` exists. The header comment `Path.copy().trim(…)` at `AIArcHero.tsx:7` isn't flagged. The walk and fixture cases are green.
+    - `ScrubCursor.test.ts`: 8 failed / 11 passed / 19 (`Received number of calls: 0`).
+    - `AIArcHero.test.tsx`: 2 failed / 50 passed / 52 (FR1.6, FR1.7).
+    - `AIArcHeroSkia.test.tsx`: 4 failed / 41 passed / 45 (`start`/`end` `undefined`, and the fill path isn't the track path). The 2-Paths case is green before the change.
+    - `useStaggeredEntry.test.ts`: 1 failed / 65 passed / 66 (the `expo-router` regex).
 
 ### FR3: `expo/fetch` readiness
 - [ ] (C) Add `makeExpoLikeResponse({ status, body, headers })` to a shared test helper. A second `text()`/`json()` call throws `TypeError("Failed to execute 'text' on 'Response': Response body is already used.")`.
@@ -103,6 +131,12 @@ Feature: `store-compliance`
 > - The exclude rule has positive and negative fixtures and can't pass on an empty list while patches exist.
 > - The Node case requires ≥ 1 value and a value per job.
 > - The ota-publish shape case proves the field is read (the mismatch is refused by name).
+>
+> 2026-10-20, FR2 run: the boxes stay open as well. Manual check of the FR2 tests:
+> - Every FR2 success criterion has a test or a recorded grep.
+> - The source walk can't pass vacuously. It asserts ≥ 50 files (150 today), the named known sites, and 0 parse errors. Each ban has a positive control on real files, plus fixtures that prove its detector fires.
+> - The copy/trim detector was widened so it is red on the real pre-FR2 code.
+> - The Skia mock change was shown to turn leftover mutation into a failing test (32 `is not a function` failures against the old implementation).
 
 - [ ] Run the `red-phase-test-validator` agent on `deps.test.ts`, `ci-gates.test.ts`, `ota-publish.test.ts`, `sdk58-migration.test.ts`, the ScrubCursor, AIArcHero and useStaggeredEntry tests, and the client tests.
 - [ ] Every FR1–FR3 success criterion has a test, or a recorded command check.
@@ -184,18 +218,39 @@ Feature: `store-compliance`
     - The criterion is reachable only after FR4's SDK 58 install, and FR4's own `--check` success criterion covers it.
 
 ### FR2
-- [ ] (C) `useIsFocused` from `'expo-router'` at `FadeInScreen.tsx:18`, `useFocusKey.ts:2` and `useStaggeredEntry.ts:29`.
-- [ ] (C) Test mocks:
+- [x] (C) `useIsFocused` from `'expo-router'` at `FadeInScreen.tsx:18`, `useFocusKey.ts:2` and `useStaggeredEntry.ts:29`.
+  - Done 2026-10-20: three one-line import changes. On SDK 55, expo-router 55.0.7's `useIsFocused` is a re-export of `@react-navigation/native`'s (`node_modules/expo-router/build/useIsFocused.js`), so runtime behavior is identical.
+- [x] (C) Test mocks:
   - In `app/(tabs)/__tests__/index.test.tsx:54`, `indexConeIntegration.test.tsx:45`, `src/components/__tests__/AITab.test.tsx:168` and `AITabConeIntegration.test.tsx:160`, move the `useIsFocused` stub into the existing `expo-router` mock and delete the `@react-navigation/native` mock.
   - In `FadeInScreen.test.tsx:22-24`, replace the `requireActual('@react-navigation/native')` mock with `jest.mock('expo-router', () => ({ useIsFocused: jest.fn(() => true) }))`.
   - Confirm each file's test count is unchanged.
-- [ ] (C) `git rm components/haptic-tab.tsx src/components/__tests__/HapticTab.test.tsx`.
-- [ ] (C) Skia sites:
+  - Done 2026-10-20. Each existing `expo-router` mock gained `useIsFocused: () => true`, and the four `@react-navigation/native` mocks are deleted. Three of them also stubbed `useNavigation`/`useRoute`; those went too, because no source file calls either (`grep -rn "useNavigation\|useRoute" app src components` → only `useRouter`). `FadeInScreen.test.tsx` now has exactly the spec's mock, and its header note was updated.
+  - Counts unchanged: `FadeInScreen` 20, `index` 61, `indexConeIntegration` 23, `AITab` 60, `AITabConeIntegration` 49, `useStaggeredEntry` 66.
+  - `grep -rn "useIsFocused" app src components | grep "@react-navigation"` → nothing (the pipeline exits 1).
+- [x] (C) `git rm components/haptic-tab.tsx src/components/__tests__/HapticTab.test.tsx`.
+  - Done 2026-10-20. Pre-check: `grep -rn "haptic-tab\|HapticTab" app src components hooks constants` → only the `app/(tabs)/_layout.tsx:12` comment ("HapticTab removed") and `native-tabs.test.tsx`'s negative assertions, all still valid.
+- [x] (C) Skia sites:
   - `ScrubCursor.ts` → `MakeFromSVGString`.
   - `AIArcHero.tsx:146-150` → `<Path start={0} end={sweepProgress}>`, with the `useDerivedValue` trim removed.
   - `AIArcHero.tsx:131` fallback → `?? Skia.Path.MakeFromSVGString('M 0 0')!`.
-- [ ] (C) Skia mock: add `MakeFromSVGString` and remove `moveTo` from the path stub.
-- [ ] (C) FR2 tests green. Three gates green.
+  - Done 2026-10-20.
+    - **`ScrubCursor.ts`:** `const linePath: SkPath = Skia.Path.MakeFromSVGString(\`M ${scrubX} ${topPadding} L ${scrubX} ${chartHeight - topPadding}\`) ?? Skia.Path.MakeFromSVGString('M 0 0')!`. The only caller is `AIConeChart.tsx:329` (`handleScrubIndex`, on the JS thread via `runOnJS`), so no worklet builds the string.
+    - **`AIArcHero.tsx`:** the `useDerivedValue` copy/trim is deleted. The fill is `<Path path={fullSkiaPath} start={0} end={sweepProgress} …>`, with stroke, cap, color and the `SweepGradient` child unchanged. The `:131` fallback is changed as specified.
+    - The Reanimated import is now `{ useSharedValue, withSpring }`: `useDerivedValue` and the unused default `Animated` are dropped. The header comments describe the new mechanism.
+    - **Types:** `PathProps.end` is `AnimatedProp<number>` (`number | { value: number }`, Skia 2.4.18 `Animations.d.ts`), so the shared value type-checks.
+    - **Same behavior on 2.4.18:** its `drawPath` (`sksg/Recorder/commands/Drawing.js:158-186`) clamps `start`/`end` to [0, 1], then runs `copy()` + `trim(start, end, false)` natively. That's the old worklet's trim, plus clamping for spring overshoot.
+- [x] (C) Skia mock: add `MakeFromSVGString` and remove `moveTo` from the path stub.
+  - Done 2026-10-20. `MakeFromSVGString` already returned a path stub (only its comment changed). `makeMockPath()` drops `moveTo`, **`lineTo` and `trim`**: all three are verified gone from `SkPath` in 2.14.0 (spec-research F2.4), so the mock matches the target API. The other stub methods are unverified, so they stay.
+  - **Proof it catches leftover mutation:** the pre-FR2 `AIArcHero.tsx` and `ScrubCursor.ts` were restored temporarily (`git show HEAD:…`) against the new mock and tests. Result: 32 failures, every one `linePath.moveTo is not a function` or `p.trim is not a function`. Then the new files were put back.
+  - **Collateral fix (not in the spec's file list):** `AIConeChart.test.tsx` SC2.1 and SC3.2 called `moveTo`/`lineTo` `.mockImplementation`/`.mockClear` on mock paths. Nothing asserted on those calls, because `buildActualPath` returns an SVG string. The dead lines were removed, SC3.2's title dropped "(moveTo called, no lineTo)", and the assertions are unchanged. Still 126 tests (`grep -cE "^\s*it\("` HEAD = now = 126).
+- [x] (C) FR2 tests green. Three gates green.
+  - Done 2026-10-20, final tree:
+    - `npm test` → **exit 0**, 181 suites / 5137 tests. That's FR1's 5134, minus 14 (`HapticTab`), plus 11 (`sdk58-migration`), 1 (`ScrubCursor`) and 5 (`AIArcHeroSkia`).
+    - `npm run typecheck` → **exit 0**.
+    - `npm run lint` → **exit 0**, `✖ 490 problems (0 errors, 490 warnings)`. FR1 had 499. The −9 are `HapticTab.test.tsx` −3 (deleted), `AIArcHero.tsx` −1 (unused `Animated`) and `AIConeChart.test.tsx` −5 (the dead spies). Per-file counts against `HEAD` (`git show HEAD:<f> | npx eslint --stdin`) rose in no touched file, and `sdk58-migration.test.ts` has 0.
+    - FR2 files: `sdk58-migration` 11/11, `ScrubCursor` 19/19, `AIArcHero` 52/52, `AIArcHeroSkia` 45/45, `AIConeChart` 126/126, plus the six count-locked files above.
+  - Nothing native changed: `git diff aade79b -- app.json` → empty, and FR2 doesn't touch `package.json` or `eas.json`. These JS changes are never OTA'd to 1.1.x from this branch.
+  - Commit `62df574` `refactor(10-sdk-58-ios-27): FR2 useIsFocused from expo-router, version-neutral Skia paths, drop haptic-tab`: tests and implementation together, green on all three gates. The red phase stayed local and was never committed on its own.
 
 ### FR3
 - [ ] (C) `parseBody`:
