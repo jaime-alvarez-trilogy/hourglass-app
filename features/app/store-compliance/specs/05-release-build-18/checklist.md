@@ -71,11 +71,15 @@ Feature: `store-compliance`
 ## Phase 1.1: Implementation (tracked repo)
 
 ### FR1: Build number 18 with a pinned local version source
-- [ ] `app.json`: `expo.ios.buildNumber` `"17"` → `"18"`. Change nothing else.
-- [ ] `eas.json`: add `"appVersionSource": "local"` inside `cli`. Keep `"version": ">= 18.0.0"`.
-- [ ] `npx jest __tests__/config/app-config.test.ts` → all pass (green).
-- [ ] `npx expo config --type public --json | node -e "const c=JSON.parse(require('fs').readFileSync(0));console.log(c.version,c.ios.buildNumber)"` → `1.1.0 18`
-- [ ] Commit: `chore(05-release-build-18): bump iOS build to 18, pin local version source`
+- [x] `app.json`: `expo.ios.buildNumber` `"17"` → `"18"`. Change nothing else.
+  - `git diff app.json` is the one-line `"buildNumber": "17"` → `"18"` change.
+- [x] `eas.json`: add `"appVersionSource": "local"` inside `cli`. Keep `"version": ">= 18.0.0"`.
+- [x] `npx jest __tests__/config/app-config.test.ts` → all pass (green).
+  - 2026-10-20: 23 passed / 23. `npx jest __tests__/scripts __tests__/config` (spec 04's suites that build their own app.json fixtures) → 99 passed / 99.
+- [x] `npx expo config --type public --json | node -e "const c=JSON.parse(require('fs').readFileSync(0));console.log(c.version,c.ios.buildNumber)"` → `1.1.0 18`
+  - 2026-10-20: printed `1.1.0 18`.
+- [x] Commit: `chore(05-release-build-18): bump iOS build to 18, pin local version source`
+  - Committed as `feat(05-release-build-18): …` (same subject). This run's commit rules allow only test/feat/fix/docs prefixes.
 
 ### FR6: Native release runbook and OPS.md ownership
 - [ ] Append `## Native release` to `docs/RELEASING.md` with the 10 subsections in the spec FR6 order: Pre-flight, App Store Connect prep (asc.js), Build, Upload, Attach and verify (asc.js), TestFlight smoke, User-only steps, Submit, Post-release, If something fails. Tag every step `(C)` or `(J)`.
