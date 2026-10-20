@@ -120,13 +120,13 @@ All commands run from the app repo root `hourglassws/`. macOS has no `timeout` b
 - [x] Commit: `fix(03-native-config-cleanup): drop fetch background mode, Face ID string and invalid keys; add privacy manifest`
 
 ### FR6: Fix documentation drift
-- [ ] `TECH_STACK.md:10`: architecture row → `New Architecture (mandatory on SDK 55 / RN 0.83; there is no app.json toggle)`
-- [ ] `TECH_STACK.md:11`: React Compiler row → `Disabled (\`experiments.reactCompiler: false\`)` (matches `app.json:115`)
-- [ ] `TECH_STACK.md:144-145`: delete the `expo-background-fetch` and `expo-task-manager` rows; under the table, add the silent-push-only sentence from spec.md FR6
-- [ ] `CLAUDE.md:69`: `Expo SDK 54, React Native 0.81.5` → `Expo SDK 55, React Native 0.83`
-- [ ] Each of these prints nothing: `grep -n 'newArchEnabled: true' TECH_STACK.md`; `grep -nE '^\| \*\*expo-(background-fetch|task-manager)\*\*' TECH_STACK.md`; `grep -n 'reactCompiler: true' TECH_STACK.md`; `grep -nE 'SDK 54|0\.81\.5' CLAUDE.md`
-- [ ] `grep -n 'Expo SDK 55, React Native 0.83' CLAUDE.md` matches line 69
-- [ ] Commit: `docs(03-native-config-cleanup): fix TECH_STACK and CLAUDE.md drift`
+- [x] `TECH_STACK.md:10`: architecture row → `New Architecture (mandatory on SDK 55 / RN 0.83; there is no app.json toggle)`
+- [x] `TECH_STACK.md:11`: React Compiler row → `Disabled (\`experiments.reactCompiler: false\`)` (matches `app.json:115`)
+- [x] `TECH_STACK.md:144-145`: delete the `expo-background-fetch` and `expo-task-manager` rows; under the table, add the silent-push-only sentence from spec.md FR6
+- [x] `CLAUDE.md:69`: `Expo SDK 54, React Native 0.81.5` → `Expo SDK 55, React Native 0.83`
+- [x] Each of these prints nothing: `grep -n 'newArchEnabled: true' TECH_STACK.md`; `grep -nE '^\| \*\*expo-(background-fetch|task-manager)\*\*' TECH_STACK.md`; `grep -n 'reactCompiler: true' TECH_STACK.md`; `grep -nE 'SDK 54|0\.81\.5' CLAUDE.md`
+- [x] `grep -n 'Expo SDK 55, React Native 0.83' CLAUDE.md` matches line 69
+- [x] Commit: `docs(03-native-config-cleanup): fix TECH_STACK and CLAUDE.md drift`
 
 ---
 

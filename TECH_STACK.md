@@ -7,8 +7,8 @@
 | **Expo SDK** | ~55.0.0 |
 | **React Native** | 0.83.2 |
 | **React** | 19.2.0 |
-| **Architecture** | New Architecture enabled (`newArchEnabled: true`) |
-| **React Compiler** | Enabled (`experiments.reactCompiler: true`) |
+| **Architecture** | New Architecture (mandatory on SDK 55 / RN 0.83; there is no app.json toggle) |
+| **React Compiler** | Disabled (`experiments.reactCompiler: false`) |
 | **Bundle ID (iOS)** | `com.jalvarez0907.hourglass` |
 | **Bundle ID (Android)** | `com.jalvarez0907.hourglass` |
 | **EAS Project ID** | `4ad8a6bd-aec2-45a5-935f-5598d47b605d` |
@@ -141,8 +141,8 @@ All type uses **Inter** (single-family system, v1.1). Hierarchy via weight + let
 | Library | Version | Role |
 |---|---|---|
 | **expo-notifications** | ~55.0.13 | Push notifications (silent ping → data refresh) |
-| **expo-background-fetch** | ~55.0.10 | Background task scheduling |
-| **expo-task-manager** | ~55.0.10 | Background task registration |
+
+Background execution is silent-push only (`UIBackgroundModes: ["remote-notification"]`). Adding `expo-background-fetch` or `expo-task-manager` re-injects the `fetch` mode through their auto-applied config plugins (guarded by `__tests__/config/`).
 
 ---
 
