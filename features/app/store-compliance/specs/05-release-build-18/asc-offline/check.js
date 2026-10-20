@@ -335,6 +335,11 @@ function makeCases(files) {
     t.has(/create-version <x\.y\.z>/, 'out', 'the getLatestVersion / getEditableAppInfo "run create-version" message');
     ownRefusal(t);
   };
+  const argvRefusal = (message) => (r, t) => {
+    t.has(message);
+    if (r.requests.length) t.fail(`expected no request at all, got ${show(r.requests.map((e) => `${e.method} ${e.path}`))}`);
+    if (r.dryLines.length) t.fail(`expected no [dry-run] lines (refused before the dispatcher), got ${show(r.dryLines)}`);
+  };
   const allPagesRequested = (r, t) => {
     for (const u of Object.values(F.URLS)) {
       const p = new URL(u).pathname;
@@ -576,6 +581,82 @@ function makeCases(files) {
         t.has(/^Feedback email: jaime\.alvarez@trilogy\.com$/m, 'stdout');
         t.has(new RegExp(`^Privacy policy URL: ${reEscape(F.DEAD_URL)}$`, 'm'), 'stdout');
       },
+    },
+    // Argument errors (review finding, 2026-10-20). Only the exact `--dry-run` turns dry-run on, so a
+    // mistyped flag that fell through as a positional ran the command live. Main must refuse it before
+    // the dispatcher: exit 1, no request of any kind (not even the bundle-id GET), no [dry-run] lines.
+    ...[
+      ['FR2.20', 'disable-public-link --dryrun', ['disable-public-link', '--dryrun'], 'today'],
+      ['FR2.21', 'disable-public-link --dry-run=1', ['disable-public-link', '--dry-run=1'], 'today'],
+      ['FR2.22', 'disable-public-link -n', ['disable-public-link', '-n'], 'today'],
+      ['FR2.23', 'disable-public-link —dry-run (em dash from smart punctuation)', ['disable-public-link', '—dry-run'], 'today'],
+      ['FR2.24', 'create-version 1.1.0 -n', ['create-version', '1.1.0', '-n'], 'today'],
+      ['FR2.25', 'create-version 1.1.0 --dryrun', ['create-version', '1.1.0', '--dryrun'], 'today'],
+      ['FR2.26', 'remove-public-link-testers --dryrun (not read as a tester id)', ['remove-public-link-testers', '--dryrun'], 'today'],
+      ['FR2.27', 'submit-app-review bld-18 --dryrun', ['submit-app-review', 'bld-18', '--dryrun'], 'post-live'],
+    ].map(([id, what, args, scenario]) => ({
+      id,
+      title: `unknown option refused before any request: ${what}`,
+      scenario,
+      args,
+      exit: 1,
+      check: argvRefusal(`Unknown option: ${args[args.length - 1]}`),
+    })),
+    {
+      id: 'FR2.28',
+      title: 'list-testers --type PUBLIC_LINK (space, no "=") is refused, not a full listing',
+      scenario: 'today',
+      args: ['list-testers', '--type', 'PUBLIC_LINK'],
+      exit: 1,
+      check: argvRefusal('--type needs a value: --type=PUBLIC_LINK|EMAIL'),
+    },
+    {
+      id: 'FR2.29',
+      title: 'list-testers --type= (empty) is refused',
+      scenario: 'today',
+      args: ['list-testers', '--type='],
+      exit: 1,
+      check: argvRefusal('--type needs a value: --type=PUBLIC_LINK|EMAIL'),
+    },
+    {
+      id: 'FR2.30',
+      title: 'an extra argument on a command that takes none is refused: disable-public-link dry-run',
+      scenario: 'today',
+      args: ['disable-public-link', 'dry-run'],
+      exit: 1,
+      check: argvRefusal('Unexpected argument for disable-public-link: dry-run'),
+    },
+    {
+      id: 'FR2.31',
+      title: 'an extra argument after the one a command reads is refused: attach-build bld-18 bld-17 --dry-run',
+      scenario: 'v110-build18',
+      args: ['attach-build', 'bld-18', 'bld-17', '--dry-run'],
+      exit: 1,
+      check: argvRefusal('Unexpected argument for attach-build: bld-17'),
+    },
+    {
+      id: 'FR2.32',
+      title: '--type on a command that does not read it is refused: disable-public-link --type=PUBLIC_LINK',
+      scenario: 'today',
+      args: ['disable-public-link', '--type=PUBLIC_LINK', '--dry-run'],
+      exit: 1,
+      check: argvRefusal('disable-public-link does not take --type'),
+    },
+    {
+      id: 'FR2.33',
+      title: '--file on a command that does not read it is refused: set-review-notes --file <path>',
+      scenario: 'v110-fresh',
+      args: ['set-review-notes', '--file', files.whatsNewPadded, '--dry-run'],
+      exit: 1,
+      check: argvRefusal('set-review-notes does not take --file'),
+    },
+    {
+      id: 'FR2.34',
+      title: 'known options still parse: set-whats-new --file=<path> --dry-run previews one PATCH',
+      scenario: 'v110-fresh',
+      args: ['set-whats-new', `--file=${files.whatsNewPadded}`, '--dry-run'],
+      exit: 0,
+      writes: [whatsNewWrite(F.WHATS_NEW_110)],
     },
 
     // ── FR3: public-link lockdown ──
