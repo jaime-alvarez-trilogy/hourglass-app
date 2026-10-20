@@ -124,16 +124,16 @@ Two PRs are recommended (see spec → Release & Merge Order):
 - [x] Commit: `build(07-ci-typecheck-lint): FR3 node types and typecheck script`
 
 ### FR4: Mechanical production type fixes (PR B)
-- [ ] 14 files in `src/components/`: `JSX.Element` → `React.JSX.Element`.
-- [ ] `SkeletonLoader.tsx`: `width?: DimensionValue`.
-- [ ] `AIRingChart.tsx:59`: `(timingChartFill.duration ?? 0) + animDelay`.
-- [ ] `FloatingPillTabBar.tsx:133`: `(badge ?? 0) > 0`.
-- [ ] `components/parallax-scroll-view.tsx` and `hooks/use-theme-color.ts`: `scheme === 'dark' ? 'dark' : 'light'`.
-- [ ] `components/ui/icon-symbol.tsx`: `MAPPING … as const satisfies Record<string, MaterialIconName>`. `IconSymbolName = keyof typeof MAPPING`.
-- [ ] No `any`, `as unknown as`, `@ts-ignore` or `@ts-expect-error` in these production files (check with `git diff`).
-- [ ] `npx jest hooks/__tests__/use-theme-color.test.ts` is green. The existing tests for the touched components are green.
-- [ ] Typecheck count drops by 22.
-- [ ] Commit: `fix(07-ci-typecheck-lint): FR4 React 19 / RN 0.83 type drift`
+- [x] 14 files in `src/components/`: `JSX.Element` → `React.JSX.Element`.
+- [x] `SkeletonLoader.tsx`: `width?: DimensionValue`.
+- [x] `AIRingChart.tsx:59`: `(timingChartFill.duration ?? 0) + animDelay`.
+- [x] `FloatingPillTabBar.tsx:133`: `(badge ?? 0) > 0`.
+- [x] `components/parallax-scroll-view.tsx` and `hooks/use-theme-color.ts`: `scheme === 'dark' ? 'dark' : 'light'`.
+- [x] `components/ui/icon-symbol.tsx`: `MAPPING … as const satisfies Record<string, MaterialIconName>`. `IconSymbolName = keyof typeof MAPPING`.
+- [x] No `any`, `as unknown as`, `@ts-ignore` or `@ts-expect-error` in these production files (check with `git diff`).
+- [x] `npx jest hooks/__tests__/use-theme-color.test.ts` is green. The existing tests for the touched components are green.
+- [x] Typecheck count drops by 22.
+- [x] Commit: `fix(07-ci-typecheck-lint): FR4 React 19 / RN 0.83 type drift`
 
 ### FR5: Behavioural-surface production fixes (PR B)
 - [ ] `app/_layout.tsx:48-54`: return `{ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }`.

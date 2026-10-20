@@ -92,7 +92,7 @@ export default function Card({
   style,
   testID,
   children,
-}: CardProps): JSX.Element {
+}: CardProps): React.JSX.Element {
   // ── glass={false}: flat legacy render ───────────────────────────────────────
   if (!glass) {
     const flatBase = elevated

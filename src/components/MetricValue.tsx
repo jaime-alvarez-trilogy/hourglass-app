@@ -62,7 +62,7 @@ export default function MetricValue({
   precision = 1,
   colorClass = 'text-textPrimary',
   sizeClass = 'text-4xl',
-}: MetricValueProps): JSX.Element {
+}: MetricValueProps): React.JSX.Element {
   // opacity 0 → 1 via timingChartFill — same "data landing on truth" feel as count-up
   // but entirely on the UI thread (useAnimatedStyle), zero JS per frame.
   const displayValue = useSharedValue(0);
