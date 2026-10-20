@@ -10,30 +10,30 @@ Ships in: **build 18 (v1.1.0)**. Blocks: `05-release-build-18`. Blocked by: `01-
 ## Phase 1.0: Test Foundation
 
 ### Baseline (before writing anything)
-- [ ] Run `npx jest app/__tests__/modal src/lib/__tests__/colors.test.ts src/components/__tests__/TouchAndNavigation.test.tsx` and record the pass count. Expected on 2026-10-19: the 5 `modal*` suites (35 tests) pass, plus the two source-analysis suites.
-- [ ] Run `npx tsc --noEmit -p . 2>&1 | grep -c "error TS"` and record the baseline (529 on 2026-10-19).
-- [ ] Run `npx eslint app/modal.tsx` and confirm exit 0.
+- [x] Run `npx jest app/__tests__/modal src/lib/__tests__/colors.test.ts src/components/__tests__/TouchAndNavigation.test.tsx` and record the pass count. Expected on 2026-10-19: the 5 `modal*` suites (35 tests) pass, plus the two source-analysis suites.
+- [x] Run `npx tsc --noEmit -p . 2>&1 | grep -c "error TS"` and record the baseline (529 on 2026-10-19). **Recorded in the `legal` worktree after spec 01: 552** (15 of the extra errors come from spec 01's `__tests__/scripts/check-legal-pages.test.ts`). Phase 1.1's "≤ baseline" gate uses 552.
+- [x] Run `npx eslint app/modal.tsx` and confirm exit 0.
 
 ### FR1: Legal URL constants
 Test file: `src/lib/__tests__/legalLinks.test.ts`.
-- [ ] FR1.1: `PRIVACY_POLICY_URL` `toBe('https://jaime-alvarez-trilogy.github.io/hourglass-app/privacy-policy.html')`.
-- [ ] FR1.2: `SUPPORT_URL` `toBe('https://jaime-alvarez-trilogy.github.io/hourglass-app/support.html')`.
-- [ ] FR1.3: both constants start with `https://jaime-alvarez-trilogy.github.io/hourglass-app/` and contain no whitespace.
+- [x] FR1.1: `PRIVACY_POLICY_URL` `toBe('https://jaime-alvarez-trilogy.github.io/hourglass-app/privacy-policy.html')`.
+- [x] FR1.2: `SUPPORT_URL` `toBe('https://jaime-alvarez-trilogy.github.io/hourglass-app/support.html')`.
+- [x] FR1.3: both constants start with `https://jaime-alvarez-trilogy.github.io/hourglass-app/` and contain no whitespace.
 
 ### FR2: `formatBuildInfo`
 Same file.
-- [ ] FR2.1: full input (`'1.1.0'`, `'18'`, `'0f3c9a12-3456-4abc-8def-1234567890ab'`, `false`) `toEqual({ versionLine: 'Version 1.1.0 (18)', updateLine: 'Update: 0f3c9a12' })`.
-- [ ] FR2.2: same input with `isEmbeddedLaunch: true` gives `'Update: embedded'` (non-null `updateId` is ignored).
-- [ ] FR2.3: `it.each([null, undefined, ''])` for `updateId`, not embedded, gives `'Update: embedded'`.
-- [ ] FR2.4: `updateId: 'abc'` gives `'Update: abc'`.
-- [ ] FR2.5: `it.each([undefined, null, ''])` for `version` with `buildNumber: '18'` gives `'Version unknown (18)'`.
-- [ ] FR2.6: `version` and `buildNumber` both undefined give `'Version unknown'`.
-- [ ] FR2.7: `it.each([undefined, null, ''])` for `buildNumber` with `version: '1.1.0'` gives `'Version 1.1.0'` (no parentheses).
-- [ ] FR2.8: an `Object.freeze`d input doesn't throw, and two calls return deep-equal results.
+- [x] FR2.1: full input (`'1.1.0'`, `'18'`, `'0f3c9a12-3456-4abc-8def-1234567890ab'`, `false`) `toEqual({ versionLine: 'Version 1.1.0 (18)', updateLine: 'Update: 0f3c9a12' })`.
+- [x] FR2.2: same input with `isEmbeddedLaunch: true` gives `'Update: embedded'` (non-null `updateId` is ignored).
+- [x] FR2.3: `it.each([null, undefined, ''])` for `updateId`, not embedded, gives `'Update: embedded'`.
+- [x] FR2.4: `updateId: 'abc'` gives `'Update: abc'`.
+- [x] FR2.5: `it.each([undefined, null, ''])` for `version` with `buildNumber: '18'` gives `'Version unknown (18)'`.
+- [x] FR2.6: `version` and `buildNumber` both undefined give `'Version unknown'`.
+- [x] FR2.7: `it.each([undefined, null, ''])` for `buildNumber` with `version: '1.1.0'` gives `'Version 1.1.0'` (no parentheses).
+- [x] FR2.8: an `Object.freeze`d input doesn't throw, and two calls return deep-equal results.
 
 ### FR3: About section rendering
 Test file: `app/__tests__/modal-about.test.tsx`.
-- [ ] Set up mocks:
+- [x] Set up mocks:
   - Copy the mock block from `app/__tests__/modal-debug-log.test.tsx:11-98`.
   - Replace `useConfig` with a mutable `mockConfig`.
   - Add `expo-web-browser`, including `WebBrowserPresentationStyle: { AUTOMATIC: 'automatic' }`.
@@ -41,36 +41,36 @@ Test file: `app/__tests__/modal-about.test.tsx`.
   - Add `expo-updates` as `__esModule` with getters over a mutable `mockUpdates`.
   - Add `expo-application` as `__esModule` with a `nativeApplicationVersion` getter over a mutable `mockApplication` (default `'1.1.0'`).
   - Reset all mutable mocks in `beforeEach`.
-- [ ] Do not import `fs`, `path` or `__dirname`. Do not use `jest.resetModules` or `jest.isolateModules`. Do not index `mock.calls[n][m]`.
-- [ ] Add the helpers: async `renderModal()` (`await act(async () => create(...))`), `textsInOrder()`, and `pressable(testID)` (first node with that testID and a function `onPress`).
-- [ ] FR3.1: with a non-manager config, `About`, `Privacy Policy` and `Support` texts and an `about-version` node render.
-- [ ] FR3.2: with a manager config (`isManager: true`), the same elements render.
-- [ ] FR3.3: with `mockConfig = null`, the same elements render and there is no `Config Debug` text.
-- [ ] FR3.4: set `process.env.EXPO_PUBLIC_DEV_USERNAME = 'someone@example.com'` and restore it in `finally`. Text order is `Debug Log` < `About` < `Dev Options` < `Sign Out`.
-- [ ] FR3.5: the last node with `onPress` has a descendant Text `Sign Out`. This guards the `modal-signout.test.tsx` invariant.
-- [ ] FR3.6: `about-privacy` and `about-support` have `accessibilityRole === 'link'`.
+- [x] Do not import `fs`, `path` or `__dirname`. Do not use `jest.resetModules` or `jest.isolateModules`. Do not index `mock.calls[n][m]`.
+- [x] Add the helpers: async `renderModal()` (`await act(async () => create(...))`), `textsInOrder()`, and `pressable(testID)` (first node with that testID and a function `onPress`).
+- [x] FR3.1: with a non-manager config, `About`, `Privacy Policy` and `Support` texts and an `about-version` node render.
+- [x] FR3.2: with a manager config (`isManager: true`), the same elements render.
+- [x] FR3.3: with `mockConfig = null`, the same elements render and there is no `Config Debug` text.
+- [x] FR3.4: set `process.env.EXPO_PUBLIC_DEV_USERNAME = 'someone@example.com'` and restore it in `finally`. Text order is `Debug Log` < `About` < `Dev Options` < `Sign Out`.
+- [x] FR3.5: the last node with `onPress` has a descendant Text `Sign Out`. This guards the `modal-signout.test.tsx` invariant.
+- [x] FR3.6: `about-privacy` and `about-support` have `accessibilityRole === 'link'`.
 
 ### FR4: Opening links
 Same file. Spy on `Linking.openURL` and `Alert.alert` and restore them in `afterEach`.
-- [ ] FR4.1: pressing `about-privacy` calls `openBrowserAsync` once, `toHaveBeenCalledWith(PRIVACY_POLICY_URL, { presentationStyle: 'automatic' })`. `Linking.openURL` is not called.
-- [ ] FR4.2: pressing `about-support` gives `toHaveBeenCalledWith(SUPPORT_URL, { presentationStyle: 'automatic' })`.
-- [ ] FR4.3: when `openBrowserAsync` resolves `{ type: 'locked' }`, neither `Linking.openURL` nor `Alert.alert` is called.
-- [ ] FR4.4: when `openBrowserAsync` rejects, `Linking.openURL` is called once with `PRIVACY_POLICY_URL`.
-- [ ] FR4.5: when both reject, `await expect(onPress()).resolves.toBeUndefined()` passes and `Alert.alert` `toHaveBeenCalledWith('Could not open link', SUPPORT_URL)`.
-- [ ] FR4.6: with `useQA: true`, `about-privacy` still opens `PRIVACY_POLICY_URL`.
+- [x] FR4.1: pressing `about-privacy` calls `openBrowserAsync` once, `toHaveBeenCalledWith(PRIVACY_POLICY_URL, { presentationStyle: 'automatic' })`. `Linking.openURL` is not called.
+- [x] FR4.2: pressing `about-support` gives `toHaveBeenCalledWith(SUPPORT_URL, { presentationStyle: 'automatic' })`.
+- [x] FR4.3: when `openBrowserAsync` resolves `{ type: 'locked' }`, neither `Linking.openURL` nor `Alert.alert` is called.
+- [x] FR4.4: when `openBrowserAsync` rejects, `Linking.openURL` is called once with `PRIVACY_POLICY_URL`.
+- [x] FR4.5: when both reject, `await expect(onPress()).resolves.toBeUndefined()` passes and `Alert.alert` `toHaveBeenCalledWith('Could not open link', SUPPORT_URL)`.
+- [x] FR4.6: with `useQA: true`, `about-privacy` still opens `PRIVACY_POLICY_URL`.
 
 ### FR5: Build info wiring
 Same file.
-- [ ] FR5.1: with `nativeApplicationVersion '1.1.0'`, `expoConfig {version '1.1.0', ios {buildNumber '18'}}`, `platform {ios {buildNumber '18'}}`, `updateId '0f3c9a12-…'` and not embedded, `about-version` contains `Version 1.1.0 (18)` and `Update: 0f3c9a12`.
-- [ ] FR5.2: native wins. With `platform '18'` and `expoConfig '17'`, the row reads `Version 1.1.0 (18)`.
-- [ ] FR5.3: fallback. With `platform: undefined` and `expoConfig '17'`, the row reads `Version 1.1.0 (17)`.
-- [ ] FR5.4: with `isEmbeddedLaunch: true`, the row reads `Update: embedded`.
-- [ ] FR5.5: with `nativeApplicationVersion: null`, `expoConfig: null` and `platform '18'`, the row reads `Version unknown (18)`.
-- [ ] FR5.6: OTA from a bumped tree. With `nativeApplicationVersion '1.1.0'`, `platform '18'`, `expoConfig {version '1.1.1', ios {buildNumber '19'}}`, `updateId '0f3c9a12-…'` and not embedded, the row reads `Version 1.1.0 (18)` / `Update: 0f3c9a12`, and no Text under `about-version` contains `1.1.1` or `19`.
-- [ ] FR5.7: version fallback. With `nativeApplicationVersion: null`, `expoConfig.version '1.1.1'` and `platform '18'`, the row reads `Version 1.1.1 (18)`.
+- [x] FR5.1: with `nativeApplicationVersion '1.1.0'`, `expoConfig {version '1.1.0', ios {buildNumber '18'}}`, `platform {ios {buildNumber '18'}}`, `updateId '0f3c9a12-…'` and not embedded, `about-version` contains `Version 1.1.0 (18)` and `Update: 0f3c9a12`.
+- [x] FR5.2: native wins. With `platform '18'` and `expoConfig '17'`, the row reads `Version 1.1.0 (18)`.
+- [x] FR5.3: fallback. With `platform: undefined` and `expoConfig '17'`, the row reads `Version 1.1.0 (17)`.
+- [x] FR5.4: with `isEmbeddedLaunch: true`, the row reads `Update: embedded`.
+- [x] FR5.5: with `nativeApplicationVersion: null`, `expoConfig: null` and `platform '18'`, the row reads `Version unknown (18)`.
+- [x] FR5.6: OTA from a bumped tree. With `nativeApplicationVersion '1.1.0'`, `platform '18'`, `expoConfig {version '1.1.1', ios {buildNumber '19'}}`, `updateId '0f3c9a12-…'` and not embedded, the row reads `Version 1.1.0 (18)` / `Update: 0f3c9a12`, and no Text under `about-version` contains `1.1.1` or `19`.
+- [x] FR5.7: version fallback. With `nativeApplicationVersion: null`, `expoConfig.version '1.1.1'` and `platform '18'`, the row reads `Version 1.1.1 (18)`.
 
 ### FR6: Quality gates
-- [ ] Confirm red phase:
+- [x] Confirm red phase:
   - `npx jest src/lib/__tests__/legalLinks.test.ts` fails because `@/src/lib/legalLinks` can't be found.
   - `npx jest app/__tests__/modal-about.test.tsx` fails because `About` / `about-privacy` are missing.
   - Every pre-existing suite in the regression set is still green.
@@ -214,3 +214,21 @@ Same file.
 - `expo-constants` exposes only `CFBundleVersion` natively (`EXConstantsService.m:51,59`). It has no native marketing version.
 - A probe under `jest-expo/node` (in this spec folder, deleted after) showed unmocked `nativeApplicationVersion` / `nativeBuildVersion` = `null`, `expoConfig.version` = `'1.1.0'`, and `Constants.platform` undefined.
 - The only `package.json`-derived fingerprint sources are `packageJson:scripts` and `react-native`'s own `package.json` (`@expo/fingerprint/build/sourcer/{Bare,Sourcer}.js`), so declaring the dependency doesn't add a hashed input.
+
+**2026-10-19 (Phase 1.0)**: Tests written and committed (red phase). The Test Design Validation gate (`red-phase-test-validator`) is still open and is run by the orchestrator.
+- Baseline (`legal` worktree, after spec 01): regression set 7 suites / 78 tests green (5 `modal*` suites / 35 tests). `tsc` 552 errors. `npx eslint app/modal.tsx` exits 0.
+- `src/lib/__tests__/legalLinks.test.ts` (FR1–FR2: 18 tests) fails as expected: `Could not locate module @/src/lib/legalLinks`.
+- `app/__tests__/modal-about.test.tsx` (FR3–FR5: 19 tests) loads cleanly. All 19 fail on missing behaviour: `About` text absent, or `No pressable with testID "about-privacy"/"about-support"`, or `No node with testID "about-version"`. No syntax, import or mock-hoisting errors.
+- Regression set after adding the tests: 78 pre-existing tests still green. Full suite: 4942 passed, 20 failed (19 new + the known `NativeWindSmoke` failure).
+- New TS errors: only TS2307 for the missing `@/src/lib/legalLinks` in `legalLinks.test.ts`, which clears once the module exists. `modal-about.test.tsx` has 0 TS errors and 0 lint errors (5 `no-require-imports` warnings, the same pattern as the other modal tests).
+- Design choices:
+  - `modal-about.test.tsx` declares its own `PRIVACY_POLICY_URL` / `SUPPORT_URL` literals instead of importing `@/src/lib/legalLinks`. The suite then fails because About is missing rather than at import, and it proves the modal opens the exact published URLs.
+  - FR3.5 also asserts that `about-privacy` and `about-support` come before the last `onPress` node. Without that, it is just an invariant that already holds today.
+  - FR3.1 additionally checks that the texts sit inside `about-section` and that `about-version` has no `onPress` (UI contract).
+- Satisfiability check: a throwaway spec-conformant implementation (reverted, never committed) turned all 37 new tests green, with the full regression set at 115/115. Mutations of it were each caught:
+  - Version or build number read from `expoConfig` first → FR5.6 (and FR5.2/FR5.7) fail.
+  - Block-body `onPress` → FR4.5 fails.
+  - A copied `EXPO_OS` gate → FR4.1–FR4.6 fail.
+  - No Alert fallback → FR4.5 fails.
+  - About gated on `config` → FR3.3 fails.
+  - About moved below Sign Out → FR3.4 and FR3.5 fail.
