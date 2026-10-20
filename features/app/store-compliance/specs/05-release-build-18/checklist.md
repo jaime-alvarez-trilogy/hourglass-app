@@ -82,14 +82,14 @@ Feature: `store-compliance`
   - Committed as `feat(05-release-build-18): …` (same subject). This run's commit rules allow only test/feat/fix/docs prefixes.
 
 ### FR6: Native release runbook and OPS.md ownership
-- [ ] Append `## Native release` to `docs/RELEASING.md` with the 10 subsections in the spec FR6 order: Pre-flight, App Store Connect prep (asc.js), Build, Upload, Attach and verify (asc.js), TestFlight smoke, User-only steps, Submit, Post-release, If something fails. Tag every step `(C)` or `(J)`.
-- [ ] Pre-flight lists:
+- [x] Append `## Native release` to `docs/RELEASING.md` with the 10 subsections in the spec FR6 order: Pre-flight, App Store Connect prep (asc.js), Build, Upload, Attach and verify (asc.js), TestFlight smoke, User-only steps, Submit, Post-release, If something fails. Tag every step `(C)` or `(J)`.
+- [x] Pre-flight lists:
   - `npx jest --runInBand` (0 failures, always required).
   - `npm run typecheck` and `npm run lint`, marked "when present": they must exit 0 once spec 07 PR B has merged, and before that they're recorded as `skipped: 07 PR B pending`.
   - `npx expo config --type introspect`, `npx expo-doctor`, `scripts/check-legal-pages.sh`.
   - A clean pushed tree.
   - The agreement check `node .appstore/asc.js builds` (J accepts in ASC → Business if it returns 403).
-- [ ] App Store Connect prep comes **before** Build, and says why: the public link is off before the build lands in TestFlight (OPS O6), and `set-urls`' 200 check fails fast before a long build. It lists, in order and each `--dry-run` first:
+- [x] App Store Connect prep comes **before** Build, and says why: the public link is off before the build lands in TestFlight (OPS O6), and `set-urls`' 200 check fails fast before a long build. It lists, in order and each `--dry-run` first:
   1. `disable-public-link`
   2. `remove-public-link-testers`
   3. `create-version <x.y.z>`
@@ -97,23 +97,27 @@ Feature: `store-compliance`
   5. `set-social-media-age-rating`
   6. `set-whats-new --file <path>`
   7. `set-review-notes`
-- [ ] Build lists `eas build -p ios --profile production` on **EAS cloud, never `--local`**, with both reasons:
+- [x] Build lists `eas build -p ios --profile production` on **EAS cloud, never `--local`**, with both reasons:
   - (1) No EAS build record, which spec 04's guard and runbook A and spec 06's `build-<N>` tag need.
   - (2) A local build uses this Mac's Xcode (27.0) instead of the EAS image, and SDK 55 must not be built against the iOS 27 SDK.
-- [ ] Build records the EAS build id (required), `gitCommitHash` and the iOS runtime from `npx expo-updates runtimeversion:resolve --platform ios`. Before Upload, it checks `eas build:list --platform ios --status finished --channel production --app-build-version <N> --limit 1 --json --non-interactive`: same id, `gitCommitHash` = pushed HEAD, `runtimeVersion` = the local resolve. No `npx expo-fingerprint` and no bare `@expo/fingerprint` CLI.
-- [ ] Upload lists `eas submit -p ios --profile production --latest` (no `--path <ipa>` variant), waits for `VALID`, then the **(J) ITMS-91053 check**. Copy the spec FR7 Upload text, written for build N with build N−1's email as the baseline, with all three branches: widget extension only → don't block, follow up; main app binary → add the reason, rebuild with the next number; never `VALID` → stop and escalate.
-- [ ] Attach and verify lists `attach-build <buildId>` once the build is `VALID` (dry-run first), then `check-submission`.
-- [ ] States that asc.js and `eas submit` run from the main checkout only (`.appstore/` is gitignored).
-- [ ] TestFlight smoke lists the 8 checks from spec.md. User-only steps: App Privacy label (OPS O5), agreement acceptance, demo-account sign-in, internal group if missing.
-- [ ] Submit says `node .appstore/asc.js submit-app-review <buildId>` (dry-run first) or the ASC button, `(J)` decision only after the smoke test passes. Post-release links spec 04 runbook A, then OPS O8–O10.
-- [ ] "If something fails":
+- [x] Build records the EAS build id (required), `gitCommitHash` and the iOS runtime from `npx expo-updates runtimeversion:resolve --platform ios`. Before Upload, it checks `eas build:list --platform ios --status finished --channel production --app-build-version <N> --limit 1 --json --non-interactive`: same id, `gitCommitHash` = pushed HEAD, `runtimeVersion` = the local resolve. No `npx expo-fingerprint` and no bare `@expo/fingerprint` CLI.
+- [x] Upload lists `eas submit -p ios --profile production --latest` (no `--path <ipa>` variant), waits for `VALID`, then the **(J) ITMS-91053 check**. Copy the spec FR7 Upload text, written for build N with build N−1's email as the baseline, with all three branches: widget extension only → don't block, follow up; main app binary → add the reason, rebuild with the next number; never `VALID` → stop and escalate.
+- [x] Attach and verify lists `attach-build <buildId>` once the build is `VALID` (dry-run first), then `check-submission`.
+- [x] States that asc.js and `eas submit` run from the main checkout only (`.appstore/` is gitignored).
+- [x] TestFlight smoke lists the 8 checks from spec.md. User-only steps: App Privacy label (OPS O5), agreement acceptance, demo-account sign-in, internal group if missing.
+- [x] Submit says `node .appstore/asc.js submit-app-review <buildId>` (dry-run first) or the ASC button, `(J)` decision only after the smoke test passes. Post-release links spec 04 runbook A, then OPS O8–O10.
+- [x] "If something fails":
   - Take the next unused build number, never reuse one.
   - Re-attach the newer build.
   - Handle a review rejection in Resolution Center; set-* commands work on rejected states.
-- [ ] What's New guidance: changes since the last live build, nothing about disabled features (e.g. Org scope).
-- [ ] Run the Phase 1.0 grep commands. All match.
-- [ ] `diff <(head -n $(wc -l < /tmp/releasing-before.md) docs/RELEASING.md) /tmp/releasing-before.md` → no output (spec 04 content unchanged).
-- [ ] Commit: `docs(05-release-build-18): add native release runbook`
+- [x] What's New guidance: changes since the last live build, nothing about disabled features (e.g. Org scope).
+- [x] Run the Phase 1.0 grep commands. All match.
+  - 2026-10-20: `^## Native release` → line 120 (1 match). `^### ` → spec 04's A–E (22–101), then Pre-flight 128, App Store Connect prep (asc.js) 140, Build 167, Upload 181, Attach and verify (asc.js) 192, TestFlight smoke 197, User-only steps 210, Submit 217, Post-release 223, If something fails 228.
+  - Section-scoped `--dry-run` → 4. `main checkout` → 2. Section-scoped `runtimeversion:resolve --platform ios` → 1. `expo-fingerprint` → nothing. `ITMS-91053` → line 186 only, and the Upload-scoped awk count is 1, the before-section count 0. Build-scoped `app-build-version` → 1. `eas submit.*--path` → nothing (the file has no `--path` at all).
+  - All 9 non-asc.js commands from the FR6 success criteria appear verbatim. The seven pre-build asc.js commands are under App Store Connect prep, `attach-build` and `check-submission` under Attach and verify, and `submit-app-review` under Submit.
+  - Every numbered step starts with `(C)` or `(J)`. The App Privacy label, agreement acceptance, ITMS-91053 check, the 8 smoke checks and the submit decision are `(J)`. The only untagged list lines are the section's 3 rules, the two reasons lists, the What's New guidance and the three ITMS-91053 branches.
+- [x] `diff <(head -n $(wc -l < /tmp/releasing-before.md) docs/RELEASING.md) /tmp/releasing-before.md` → no output (spec 04 content unchanged).
+- [x] Commit: `docs(05-release-build-18): add native release runbook`
 - [ ] `features/app/store-compliance/OPS.md` → "Before build 18 is submitted" (spec FR6 "OPS.md ownership"):
   - O3 → `(C)`: `node .appstore/asc.js set-social-media-age-rating`, dry-run first (spec 05 FR5). J does it in the ASC UI only if the command refuses (`socialMedia not exposed by the API`) or the rating isn't 4+ / Brazil L afterwards. Keep "if locked, do it on the 1.1.0 version record".
   - O4 → `(C)`: `node .appstore/asc.js set-urls`, dry-run first (spec 05 FR5). It refuses until the spec 01 URLs return 200. Marketing = `…/hourglass-app/`. J does it in the UI only on an ASC API error.
