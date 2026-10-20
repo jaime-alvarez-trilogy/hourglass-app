@@ -81,79 +81,79 @@ Same file.
 
 ⚠️ **Validate test design BEFORE implementing.** Weak tests lead to weak implementation.
 
-- [ ] Run `red-phase-test-validator` agent
-- [ ] All FR success criteria have test coverage (FR1–FR5 via jest; FR6 via the commands in Phase 1.1 / Final Verification)
-- [ ] Assertions are specific: exact strings and `toHaveBeenCalledWith` with exact URL and options, not just "exists" or "doesn't throw"
-- [ ] Mocks return realistic data matching the interface contracts: a lowercase UUID `updateId`, string build numbers, `WebBrowserResult` shapes (`{ type: 'dismiss' | 'locked' }`), and `presentationStyle: 'automatic'`
-- [ ] `expo-application` / `expo-constants` / `expo-updates` mocks are `__esModule` + getter-backed, so per-test mutation actually reaches the modal
-- [ ] FR5.6 and FR5.7 use a `nativeApplicationVersion` that differs from `expoConfig.version`, so each test proves which source the row reads
-- [ ] Fix any issues identified before proceeding
+- [x] Run `red-phase-test-validator` agent
+- [x] All FR success criteria have test coverage (FR1–FR5 via jest; FR6 via the commands in Phase 1.1 / Final Verification)
+- [x] Assertions are specific: exact strings and `toHaveBeenCalledWith` with exact URL and options, not just "exists" or "doesn't throw"
+- [x] Mocks return realistic data matching the interface contracts: a lowercase UUID `updateId`, string build numbers, `WebBrowserResult` shapes (`{ type: 'dismiss' | 'locked' }`), and `presentationStyle: 'automatic'`
+- [x] `expo-application` / `expo-constants` / `expo-updates` mocks are `__esModule` + getter-backed, so per-test mutation actually reaches the modal
+- [x] FR5.6 and FR5.7 use a `nativeApplicationVersion` that differs from `expoConfig.version`, so each test proves which source the row reads
+- [x] Fix any issues identified before proceeding
 
 ---
 
 ## Phase 1.1: Implementation
 
 ### FR1: Legal URL constants
-- [ ] Create `src/lib/legalLinks.ts` with `PRIVACY_POLICY_URL` and `SUPPORT_URL`, using the exact literals from the spec.
-- [ ] Verify purity: `grep -nE "^\s*import " src/lib/legalLinks.ts` prints nothing.
-- [ ] Run `npx jest src/lib/__tests__/legalLinks.test.ts -t FR1`. It passes.
+- [x] Create `src/lib/legalLinks.ts` with `PRIVACY_POLICY_URL` and `SUPPORT_URL`, using the exact literals from the spec.
+- [x] Verify purity: `grep -nE "^\s*import " src/lib/legalLinks.ts` prints nothing.
+- [x] Run `npx jest src/lib/__tests__/legalLinks.test.ts -t FR1`. It passes.
 
 ### FR2: `formatBuildInfo`
-- [ ] In `src/lib/legalLinks.ts`, export `BuildInfoInput` (`version`, `buildNumber` and `updateId` typed `string | null | undefined`; `isEmbeddedLaunch: boolean`) and `BuildInfo`.
-- [ ] Implement `formatBuildInfo`:
+- [x] In `src/lib/legalLinks.ts`, export `BuildInfoInput` (`version`, `buildNumber` and `updateId` typed `string | null | undefined`; `isEmbeddedLaunch: boolean`) and `BuildInfo`.
+- [x] Implement `formatBuildInfo`:
   - Empty values (`null`, `undefined`, `''`) count as absent.
   - `isEmbeddedLaunch` takes precedence over `updateId`.
   - The update id is `slice(0, 8)`.
-- [ ] Add a 2–3 line JSDoc to `formatBuildInfo` (per the `hourglassws/CLAUDE.md` comment rule).
-- [ ] Run `npx jest src/lib/__tests__/legalLinks.test.ts`. All tests pass.
+- [x] Add a 2–3 line JSDoc to `formatBuildInfo` (per the `hourglassws/CLAUDE.md` comment rule).
+- [x] Run `npx jest src/lib/__tests__/legalLinks.test.ts`. All tests pass.
 
 ### FR4: `openLegalLink` (implement before the JSX that calls it)
-- [ ] In `app/modal.tsx`, add `Linking` to the existing `react-native` import on line 4.
-- [ ] Add `import { openBrowserAsync, WebBrowserPresentationStyle } from 'expo-web-browser';`.
-- [ ] Add the module-scope, unexported `async function openLegalLink(url: string): Promise<void>`, placed above `export default function ModalScreen()`. Its flow:
+- [x] In `app/modal.tsx`, add `Linking` to the existing `react-native` import on line 4.
+- [x] Add `import { openBrowserAsync, WebBrowserPresentationStyle } from 'expo-web-browser';`.
+- [x] Add the module-scope, unexported `async function openLegalLink(url: string): Promise<void>`, placed above `export default function ModalScreen()`. Its flow:
   1. `openBrowserAsync(url, { presentationStyle: WebBrowserPresentationStyle.AUTOMATIC })`. Any resolved result means done.
   2. On reject, `Linking.openURL(url)`.
   3. If that also rejects, `Alert.alert('Could not open link', url)`.
-- [ ] No `EXPO_OS` / `Platform.OS` gate.
+- [x] No `EXPO_OS` / `Platform.OS` gate.
 
 ### FR5: Build info wiring
-- [ ] Run `npx expo install expo-application`. Confirm it wrote `"expo-application": "~55.0.10"`, and that `npm ls expo-application` still shows a single 55.0.10 (no reinstall, no other lockfile churn).
-- [ ] Add the imports:
+- [x] Run `npx expo install expo-application`. Confirm it wrote `"expo-application": "~55.0.10"`, and that `npm ls expo-application` still shows a single 55.0.10 (no reinstall, no other lockfile churn).
+- [x] Add the imports:
   - `import * as Application from 'expo-application';`
   - `import Constants from 'expo-constants';`
   - `import * as Updates from 'expo-updates';`
   - `import { PRIVACY_POLICY_URL, SUPPORT_URL, formatBuildInfo } from '@/src/lib/legalLinks';`
-- [ ] Inside `ModalScreen` (at render time, not module scope), compute `const buildInfo = formatBuildInfo({ ... })` with these fields:
+- [x] Inside `ModalScreen` (at render time, not module scope), compute `const buildInfo = formatBuildInfo({ ... })` with these fields:
   - `version: Application.nativeApplicationVersion ?? Constants.expoConfig?.version`. Native first: under OTA, `expoConfig` is the publishing tree's config, and spec 04 skips `ExpoConfigVersions`.
   - `buildNumber: Constants.platform?.ios?.buildNumber ?? Constants.expoConfig?.ios?.buildNumber`
   - `updateId: Updates.updateId`
   - `isEmbeddedLaunch: Updates.isEmbeddedLaunch`
 
 ### FR3: About section
-- [ ] Insert the About JSX **between** the Debug Log box's closing `</View>` (currently line 254) and `{config && isMe && (` (currently line 256). Do not put it directly above Sign Out.
-- [ ] Build the section:
+- [x] Insert the About JSX **between** the Debug Log box's closing `</View>` (currently line 254) and `{config && isMe && (` (currently line 256). Do not put it directly above Sign Out.
+- [x] Build the section:
   - `View testID="about-section" style={styles.aboutBox}` with a `Text` heading `About`.
   - `TouchableOpacity testID="about-privacy" accessibilityRole="link" onPress={() => openLegalLink(PRIVACY_POLICY_URL)}` containing `Privacy Policy`.
   - `TouchableOpacity testID="about-support" accessibilityRole="link" onPress={() => openLegalLink(SUPPORT_URL)}` containing `Support`.
   - `View testID="about-version"` containing `buildInfo.versionLine` and a muted `buildInfo.updateLine`.
-- [ ] Add the styles `aboutBox`, `aboutTitle`, `aboutRow` (`minHeight: 44`), `aboutRowLabel`, `aboutVersion` and `aboutUpdate`:
+- [x] Add the styles `aboutBox`, `aboutTitle`, `aboutRow` (`minHeight: 44`), `aboutRowLabel`, `aboutVersion` and `aboutUpdate`:
   - `aboutBox` and `aboutTitle` mirror `debugLogBox` and `debugLogTitle`.
   - Text colors use `colors.*` tokens.
   - Do not use `'#0D1117'`.
-- [ ] Run `npx jest app/__tests__/modal-about.test.tsx`. All tests pass.
+- [x] Run `npx jest app/__tests__/modal-about.test.tsx`. All tests pass.
 
 ### FR6: Quality gates and docs
-- [ ] Update `docs/ARCHITECTURE.md:267` (Settings row) to add: "About" section (Privacy Policy, Support, version/update row) visible to **all users**, store-compliance spec 02.
-- [ ] Add `| **expo-application** | ~55.0.10 | Native app version (Settings → About) |` to the `TECH_STACK.md` Utilities table, next to `expo-constants`.
-- [ ] Run the regression set: `npx jest app/__tests__/modal src/lib/__tests__/legalLinks.test.ts src/lib/__tests__/colors.test.ts src/components/__tests__/TouchAndNavigation.test.tsx`. Everything is green. `git diff --stat -- app/__tests__/modal.test.tsx app/__tests__/modal-signout.test.tsx app/__tests__/modal-debug-log.test.tsx app/__tests__/modal-auth-cache.test.tsx app/__tests__/modal.colorSemantics.test.tsx src/components/__tests__/TouchAndNavigation.test.tsx src/lib/__tests__/colors.test.ts` is empty.
-- [ ] Typecheck: `npx tsc --noEmit -p . 2>&1 | grep -E "^(app/modal\.tsx|src/lib/legalLinks\.ts|src/lib/__tests__/legalLinks\.test\.ts|app/__tests__/modal-about\.test\.tsx)\("` prints nothing, and the total `error TS` count is ≤ the recorded baseline.
-- [ ] Lint: `npx eslint app/modal.tsx src/lib/legalLinks.ts src/lib/__tests__/legalLinks.test.ts app/__tests__/modal-about.test.tsx` exits 0.
-- [ ] Dependency diff is only `expo-application`:
+- [x] Update `docs/ARCHITECTURE.md:267` (Settings row) to add: "About" section (Privacy Policy, Support, version/update row) visible to **all users**, store-compliance spec 02.
+- [x] Add `| **expo-application** | ~55.0.10 | Native app version (Settings → About) |` to the `TECH_STACK.md` Utilities table, next to `expo-constants`.
+- [x] Run the regression set: `npx jest app/__tests__/modal src/lib/__tests__/legalLinks.test.ts src/lib/__tests__/colors.test.ts src/components/__tests__/TouchAndNavigation.test.tsx`. Everything is green. `git diff --stat -- app/__tests__/modal.test.tsx app/__tests__/modal-signout.test.tsx app/__tests__/modal-debug-log.test.tsx app/__tests__/modal-auth-cache.test.tsx app/__tests__/modal.colorSemantics.test.tsx src/components/__tests__/TouchAndNavigation.test.tsx src/lib/__tests__/colors.test.ts` is empty.
+- [x] Typecheck: `npx tsc --noEmit -p . 2>&1 | grep -E "^(app/modal\.tsx|src/lib/legalLinks\.ts|src/lib/__tests__/legalLinks\.test\.ts|app/__tests__/modal-about\.test\.tsx)\("` prints nothing, and the total `error TS` count is ≤ the recorded baseline.
+- [x] Lint: `npx eslint app/modal.tsx src/lib/legalLinks.ts src/lib/__tests__/legalLinks.test.ts app/__tests__/modal-about.test.tsx` exits 0.
+- [x] Dependency diff is only `expo-application`:
   - `node -p "require('./package.json').dependencies['expo-application']"` prints `~55.0.10`.
   - `node -p "require('./package-lock.json').packages['node_modules/expo-application'].version"` prints `55.0.10`.
   - `git diff -U0 "$(git merge-base HEAD main)" -- package.json package-lock.json | grep -E '^[+-][^+-]'` prints exactly two `+` lines, both adding `"expo-application": "~55.0.10",`.
-- [ ] Autolinking unchanged: `npx expo-modules-autolinking search --platform apple --json` still lists `expo-application` (39 modules on 2026-10-19).
-- [ ] Config introspection: `npx expo config --type public --json` shows `version` `1.1.0`, `ios.buildNumber` (`17` until spec 05), and `plugins` including `expo-web-browser`.
+- [x] Autolinking unchanged: `npx expo-modules-autolinking search --platform apple --json` still lists `expo-application` (39 modules on 2026-10-19).
+- [x] Config introspection: `npx expo config --type public --json` shows `version` `1.1.0`, `ios.buildNumber` (`17` until spec 05), and `plugins` including `expo-web-browser`.
 
 ---
 
@@ -232,3 +232,30 @@ Same file.
   - No Alert fallback → FR4.5 fails.
   - About gated on `config` → FR3.3 fails.
   - About moved below Sign Out → FR3.4 and FR3.5 fail.
+
+**2026-10-19 (Phase 1.1)**: Implemented FR1–FR6. The orchestrator's `red-phase-test-validator` run returned no findings, so no test changes were needed. The Test Design Validation items were re-checked against both test files before being ticked.
+- `src/lib/legalLinks.ts`: no imports. It has the two URL constants, `BuildInfoInput` / `BuildInfo`, and `formatBuildInfo` with a 3-line JSDoc.
+- `app/modal.tsx`:
+  - `Linking` was added to the `react-native` import, plus the imports for `expo-application`, `expo-constants`, `expo-updates`, `expo-web-browser` and `legalLinks`.
+  - `openLegalLink` is module scope, above `ModalScreen`, and not exported. It has no `EXPO_OS` gate.
+  - `buildInfo` is computed at render time. Version and build are read native first.
+  - The About JSX sits between Debug Log and Dev Options.
+  - It uses exactly six new style keys: `aboutBox`, `aboutTitle`, `aboutRow` (`minHeight: 44`), `aboutRowLabel`, `aboutVersion`, `aboutUpdate`. `aboutTitle` mirrors `debugLogTitle`'s `#8B949E`. The row and version text use `colors.textPrimary`, `colors.textSecondary` and `colors.textMuted`.
+- **Gotcha: `npx expo install expo-application` (online) wrote `~55.0.19` and upgraded `node_modules` to 55.0.19.**
+  - Cause: the online versions API is newer than the local `expo/bundledNativeModules.json` (`~55.0.10`, expo 55.0.7).
+  - Fix:
+    1. Reverted `package.json` / `package-lock.json`.
+    2. Restored `node_modules/expo-application` at 55.0.10 with an APFS clone from main's `node_modules`.
+    3. Re-ran `EXPO_OFFLINE=1 npx expo install expo-application`. That wrote `~55.0.10`, kept 55.0.10, and the diff is exactly the two required `+` lines.
+  - **Spec 06 / any rebase re-run must use `EXPO_OFFLINE=1`** (or accept 55.0.19 deliberately).
+- Verification:
+  - Regression set: 9 suites / 115 tests green (78 pre-existing + 37 new). The 7 pre-existing test files are unmodified.
+  - Full `npx jest --silent`: 4979 passed / 1 failed (only `NativeWindSmoke.test.tsx`, the known baseline failure).
+  - `tsc`: 552 errors (≤ 552 baseline; the TS2307 for `legalLinks` cleared). 0 errors in the four touched files.
+  - `eslint` on the four files: exit 0, 0 errors. There are 5 `no-require-imports` warnings in `modal-about.test.tsx`.
+  - `npx expo lint`: 9 errors / 499 warnings (main baseline 9 / 494; the +5 are those test warnings).
+  - `package.json` dependency is `~55.0.10`, the lockfile has 55.0.10, and `npm ls` shows a single `expo-application@55.0.10` deduped under `expo-notifications`.
+  - Autolinking: 39 apple modules, including `expo-application` 55.0.10.
+  - `expo config`: `version` 1.1.0, `ios.buildNumber` 17, `plugins` includes `expo-web-browser`.
+  - Release gate curl: both URLs return `404` (spec 01 not deployed yet; expected).
+- Left for the orchestrator: Phase 1.2 review agents, the manual dev-client check, the release-gate curl (needs spec 01's deploy), and the spec 04 handoff flag.
