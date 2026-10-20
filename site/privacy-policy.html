@@ -124,13 +124,13 @@
 <body>
   <div class="container">
 
-    <a class="logo" href="#">
+    <a class="logo" href="./">
       <div class="logo-mark">⏳</div>
       <span class="logo-name">Hourglass</span>
     </a>
 
     <h1>Privacy Policy</h1>
-    <p class="subtitle">Last updated: April 8, 2026</p>
+    <p class="subtitle">Last updated: October 19, 2026</p>
 
     <div class="highlight">
       <p><strong>Summary:</strong> Hourglass is an internal tool for Crossover employees. Your credentials stay on your device. We do not collect, store, or share your personal data on any external server.</p>
@@ -157,7 +157,7 @@
 
     <h2>4. Data We Do Not Collect</h2>
     <ul>
-      <li>We do not operate any user accounts or databases</li>
+      <li>We do not operate user accounts, and we do not store your Crossover credentials or work data on any server</li>
       <li>We do not collect analytics, crash reports, or usage telemetry</li>
       <li>We do not use advertising SDKs or tracking libraries</li>
       <li>We do not sell, rent, or share any personal data with third parties</li>
@@ -166,21 +166,26 @@
 
     <h2>5. Background Refresh</h2>
     <p>Hourglass uses a lightweight background ping mechanism to keep your home screen widget up to date. This service sends a silent push notification to your device to trigger a local data refresh. No personal data is transmitted as part of this process — the notification contains no payload other than a refresh signal.</p>
+    <p>If you allow notifications, the app registers an anonymous device push token with Expo's push notification service and with this refresh service; the token contains no personal data and is not linked to your identity or your Crossover account.</p>
 
-    <h2>6. Permissions</h2>
+    <h2>6. Data Retention and Deletion</h2>
+    <p>Your credentials and cached work data are kept only on your device. Signing out deletes your saved credentials and the app's cached work data. Home screen widgets may continue to show the last data they received until you delete the app. If you delete the app without signing out, iOS may keep your saved credentials in the device Keychain, so sign out first to remove them.</p>
+    <p>The refresh service stores only the anonymous push token and the time it was last registered. When you sign out, the app asks the refresh service to delete the token. Tokens that Expo's push service reports as no longer registered are deleted automatically.</p>
+
+    <h2>7. Permissions</h2>
     <p>The app may request the following device permissions:</p>
     <ul>
       <li><strong>Notifications:</strong> To deliver reminders about approval deadlines and weekly summaries. You can disable these at any time in iOS Settings.</li>
       <li><strong>Background App Refresh:</strong> To keep widget data current.</li>
     </ul>
 
-    <h2>7. Children's Privacy</h2>
+    <h2>8. Children's Privacy</h2>
     <p>This app is intended for working adults who are Crossover employees. It is not directed at children under the age of 13 and we do not knowingly collect data from minors.</p>
 
-    <h2>8. Changes to This Policy</h2>
+    <h2>9. Changes to This Policy</h2>
     <p>If this policy is updated, the revised version will be posted at this URL with an updated date. Continued use of the app after any changes constitutes acceptance of the updated policy.</p>
 
-    <h2>9. Contact</h2>
+    <h2>10. Contact</h2>
     <p>For questions about this privacy policy, reach out to:</p>
     <p>
       Jaime Alvarez<br />

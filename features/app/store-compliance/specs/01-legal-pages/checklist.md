@@ -88,39 +88,39 @@ Harness: a Node `http` server on `127.0.0.1:0` per case, the script run via `chi
 ## Phase 1.1: Implementation
 
 ### FR1: Corrected privacy policy
-- [ ] `git mv privacy-policy.html site/privacy-policy.html` (creates `site/`)
-- [ ] Logo `href="#"` → `href="./"` (L127)
-- [ ] Subtitle → `Last updated: {merge date, Month D, YYYY}` (L133)
-- [ ] Replace §4 bullet 1 (L160) with the contract text
-- [ ] Add the §5 contract sentence as a second `<p>` after L168
-- [ ] Insert the new `<h2>6. Data Retention and Deletion</h2>` block verbatim before the current `<h2>6. Permissions</h2>`
-- [ ] Renumber Permissions → 7, Children's Privacy → 8, Changes to This Policy → 9, Contact → 10
-- [ ] Verify: `git diff -M --cached --summary` (or after commit, `git show -M --summary HEAD`) shows `rename privacy-policy.html => site/privacy-policy.html (NN%)` with NN ≥ 80
-- [ ] Verify: `git diff -M --cached -- site/privacy-policy.html` touches only the lines above. Summary box, §1–§3, §4 bullets 2–5, existing §5 paragraph, Permissions list, contact block, footer and `<style>` are unchanged.
-- [ ] FR1 tests pass
+- [x] `git mv privacy-policy.html site/privacy-policy.html` (creates `site/`)
+- [x] Logo `href="#"` → `href="./"` (L127)
+- [x] Subtitle → `Last updated: {merge date, Month D, YYYY}` (L133)
+- [x] Replace §4 bullet 1 (L160) with the contract text
+- [x] Add the §5 contract sentence as a second `<p>` after L168
+- [x] Insert the new `<h2>6. Data Retention and Deletion</h2>` block verbatim before the current `<h2>6. Permissions</h2>`
+- [x] Renumber Permissions → 7, Children's Privacy → 8, Changes to This Policy → 9, Contact → 10
+- [x] Verify: `git diff -M --cached --summary` (or after commit, `git show -M --summary HEAD`) shows `rename privacy-policy.html => site/privacy-policy.html (NN%)` with NN ≥ 80
+- [x] Verify: `git diff -M --cached -- site/privacy-policy.html` touches only the lines above. Summary box, §1–§3, §4 bullets 2–5, existing §5 paragraph, Permissions list, contact block, footer and `<style>` are unchanged.
+- [x] FR1 tests pass
 
 ### FR2: Support page
-- [ ] Create `site/support.html`: copy the policy's `<head>`, `<style>` (plus an optional `h3` rule), logo (`href="./"`) and footer, then add the support contract body verbatim
-- [ ] FR2 tests pass
+- [x] Create `site/support.html`: copy the policy's `<head>`, `<style>` (plus an optional `h3` rule), logo (`href="./"`) and footer, then add the support contract body verbatim
+- [x] FR2 tests pass
 
 ### FR3: Landing page
-- [ ] Create `site/index.html` with `<title>Hourglass</title>` and the landing contract body; no App Store or TestFlight link
-- [ ] FR3 tests pass
+- [x] Create `site/index.html` with `<title>Hourglass</title>` and the landing contract body; no App Store or TestFlight link
+- [x] FR3 tests pass
 
 ### FR4: Static-site constraints
-- [ ] Confirm no `<script>`, `<link>`, `<img>`, `src=` or root-absolute/absolute `href` in any page; remove any stray `.DS_Store` from `site/`
-- [ ] Open all three files directly in a browser (`open site/index.html`) and check they render with the dark palette and that the links navigate between pages
-- [ ] FR4 tests pass
+- [x] Confirm no `<script>`, `<link>`, `<img>`, `src=` or root-absolute/absolute `href` in any page; remove any stray `.DS_Store` from `site/`
+- [x] Open all three files directly in a browser (`open site/index.html`) and check they render with the dark palette and that the links navigate between pages
+- [x] FR4 tests pass
 
 ### FR5: Pages workflow
-- [ ] Create `.github/workflows/pages.yml` verbatim from the spec's workflow contract
-- [ ] Verify the YAML parses: `node -e "require('yaml').parse(require('fs').readFileSync('.github/workflows/pages.yml','utf8'))"` exits 0 (local manual check only)
-- [ ] FR5 tests pass
+- [x] Create `.github/workflows/pages.yml` verbatim from the spec's workflow contract
+- [x] Verify the YAML parses: `node -e "require('yaml').parse(require('fs').readFileSync('.github/workflows/pages.yml','utf8'))"` exits 0 (local manual check only)
+- [x] FR5 tests pass
 
 ### FR6: Check script
-- [ ] Create `scripts/check-legal-pages.sh` per the check script contract (bash 3.2-compatible; `curl -sS --max-time 20 -o "$tmp" -w '%{http_code}'` with `|| true` so transport errors yield `000`; no `-L`; `mktemp -d` + `trap 'rm -rf "$tmpdir"' EXIT`; `?cb=$(date +%s)` probe on non-200; O2 hint printed at most once)
-- [ ] `chmod +x scripts/check-legal-pages.sh`, then confirm `git ls-files -s scripts/check-legal-pages.sh` shows `100755` after `git add`
-- [ ] Local prefix dry run on macOS `/bin/bash` 3.2 (proves FR4's relative links and FR6 end to end):
+- [x] Create `scripts/check-legal-pages.sh` per the check script contract (bash 3.2-compatible; `curl -sS --max-time 20 -o "$tmp" -w '%{http_code}'` with `|| true` so transport errors yield `000`; no `-L`; `mktemp -d` + `trap 'rm -rf "$tmpdir"' EXIT`; `?cb=$(date +%s)` probe on non-200; O2 hint printed at most once)
+- [x] `chmod +x scripts/check-legal-pages.sh`, then confirm `git ls-files -s scripts/check-legal-pages.sh` shows `100755` after `git add`
+- [x] Local prefix dry run on macOS `/bin/bash` 3.2 (proves FR4's relative links and FR6 end to end):
   ```bash
   TMP=$(mktemp -d) && ln -s "$PWD/site" "$TMP/hourglass-app"
   python3 -m http.server 8765 --bind 127.0.0.1 --directory "$TMP" >/dev/null 2>&1 & PID=$!
@@ -130,12 +130,12 @@ Harness: a Node `http` server on `127.0.0.1:0` per case, the script run via `chi
   kill $PID; rm -rf "$TMP"
   ```
 - [ ] Run against production now (Pages is still disabled): `scripts/check-legal-pages.sh; echo "exit=$?"` → 3× `FAIL …: HTTP 404`, the OPS O2 hint, `exit=1`. This confirms the hint path against the real host.
-- [ ] FR6 tests pass
+- [x] FR6 tests pass
 
 ### FR7: Rollout preparation
-- [ ] Run `npx jest __tests__/site __tests__/scripts` and confirm everything is green
-- [ ] Commit implementation: `feat(01-legal-pages): add GitHub Pages legal site, deploy workflow and check script`
-- [ ] Add a Session Notes entry saying the first push-triggered `pages.yml` run on `main` is expected to fail at `Setup Pages`
+- [x] Run `npx jest __tests__/site __tests__/scripts` and confirm everything is green
+- [x] Commit implementation: `feat(01-legal-pages): add GitHub Pages legal site, deploy workflow and check script`
+- [x] Add a Session Notes entry saying the first push-triggered `pages.yml` run on `main` is expected to fail at `Setup Pages`
 
 ---
 
@@ -194,3 +194,13 @@ Harness: a Node `http` server on `127.0.0.1:0` per case, the script run via `chi
 <!-- Add notes as you work -->
 
 **2026-10-19**: Spec and checklist drafted. Pages baseline at drafting time: `has_pages:false`, `GET /pages` → 404, all three target URLs → 404 (a cached 404 was observed with `age: 3021`). The `github-pages` environment already exists, with a branch policy allowing `main` and `gh-pages`.
+
+**2026-10-19 (implementation, Phases 1.0–1.1)**: Red phase committed with 67 tests across the three new suites. All 67 failed for the right reason: the site pages, `pages.yml` and the script didn't exist yet (`site/<page> does not exist`, `pages.yml does not exist`, execFile `ENOENT`), and the repo-root `privacy-policy.html` was still present. There were no syntax or import errors. After implementation all 67 pass. Full suite: 4942 passed / 1 failed. The failure is the known baseline `NativeWindSmoke.test.tsx:202`, which spec 07 deletes.
+- Tests beyond the checklist minimum: (1) the policy's unchanged sections (§1–§3, §7–§10 bodies) compared verbatim; (2) a sha256 guard on the policy `<style>` block, so it stays byte-identical; (3) support/landing `<p>` copy compared verbatim against the contract; (4) the support/landing `<style>` must equal the policy's apart from an optional `h3` rule, and the footer must be identical on all pages; (5) FR6 extras: an exact PASS/FAIL line format, the final summary line, the O2 hint printed exactly once, `missing "Data Retention"` (d2), the `?cb=<epoch>` probe format, no request to `/index.html` on a 301, and temp-dir cleanup on passing and failing runs (k), with a snapshot taken mid-run to prove `$TMPDIR` is actually used.
+- `Last updated: October 19, 2026` is the implementation date. **If the merge to `main` lands on a later day, bump the subtitle to the merge date** (FR1). The tests accept any valid date after April 8, 2026.
+- Rename similarity: `rename privacy-policy.html => site/privacy-policy.html (82%)`. The policy diff touches only the contract lines.
+- Local prefix dry run (`python3 -m http.server` + symlink, macOS `/bin/bash` 3.2.57): `/hourglass-app` and `/hourglass-app/` both gave 3× PASS with exit 0. `/nope` gave 3× `FAIL …: HTTP 404`, the O2 hint once, and exit 1. Two args gave usage and exit 2. Python's server returns 301 for `/hourglass-app` without the slash, the same as the Pages behaviour the script avoids by always requesting `$BASE/`.
+- Browser check: all three pages were rendered with macOS Quick Look (WebKit). They show the dark palette, green links and the logo. Link targets are proven by the FR4 resolution test and the HTTP dry run.
+- `npx tsc --noEmit`: 552 errors, against the 526 baseline. All 26 new ones are the existing "no node types" class (TS2307 `fs`/`path`/`http`…, TS2304 `__dirname`, plus the TS7006/TS2694 cascades), which every existing `fs`-based test already has. The three new files type-check clean under `npx tsc --noEmit --types jest,node`, which simulates spec 07 FR3. `npx expo lint`: 9 errors / 494 warnings, unchanged.
+- **Expected after merge (FR7):** the first push-triggered `pages.yml` run on `main` will fail at `Setup Pages` (`Get Pages site failed`), because Pages isn't enabled yet. That's expected, not a regression. Enable Pages (OPS O2), then re-run with `workflow_dispatch`.
+- Not run here (orchestrator / post-merge): the FR7 baseline `gh api`/curl reads in Phase 1.0, the production run of the script in Phase 1.1 FR6, the agent-based gates (red-phase-test-validator, Phase 1.2 review agents), and all of Phase 1.3.
