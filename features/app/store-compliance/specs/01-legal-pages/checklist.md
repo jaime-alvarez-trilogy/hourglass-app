@@ -12,55 +12,55 @@ Feature: `store-compliance`
 ## Phase 1.0: Test Foundation
 
 ### FR1: Corrected privacy policy (`__tests__/site/legal-pages.test.ts`)
-- [ ] `test(FR1)` Repo-root `privacy-policy.html` doesn't exist, and `site/privacy-policy.html` exists. Paths come from `path.resolve(__dirname, '../..', …)`, following the pattern in `__tests__/approval-card.test.tsx:13-14,74`.
-- [ ] `test(FR1)` The parsed `<h2>` list equals, in order: `1. About This App`, `2. Information We Access`, `3. How Your Data Is Stored`, `4. Data We Do Not Collect`, `5. Background Refresh`, `6. Data Retention and Deletion`, `7. Permissions`, `8. Children's Privacy`, `9. Changes to This Policy`, `10. Contact`.
-- [ ] `test(FR1)` The file doesn't contain `user accounts or databases`. It does contain `We do not operate user accounts, and we do not store your Crossover credentials or work data on any server`.
-- [ ] `test(FR1)` §5 (the text between the `5.` and `6.` headings) has exactly 2 `<p>` elements. The second equals the contract sentence verbatim (`If you allow notifications, the app registers an anonymous device push token with Expo's push notification service and with this refresh service; the token contains no personal data and is not linked to your identity or your Crossover account.`).
-- [ ] `test(FR1)` §6 contains both contract paragraphs verbatim.
-- [ ] `test(FR1)` Unchanged guards. The file still contains the original summary sentence `We do not collect, store, or share your personal data on any external server.`, the §3 sentence `They are never transmitted to any server operated by this application.`, §4 bullets 2–5 verbatim, `Jaime Alvarez`, `mailto:jaime.alvarez@trilogy.com`, and the original footer text.
-- [ ] `test(FR1)` The subtitle matches `/Last updated: (January|…|December) \d{1,2}, 20\d{2}/` and isn't `April 8, 2026`.
+- [x] `test(FR1)` Repo-root `privacy-policy.html` doesn't exist, and `site/privacy-policy.html` exists. Paths come from `path.resolve(__dirname, '../..', …)`, following the pattern in `__tests__/approval-card.test.tsx:13-14,74`.
+- [x] `test(FR1)` The parsed `<h2>` list equals, in order: `1. About This App`, `2. Information We Access`, `3. How Your Data Is Stored`, `4. Data We Do Not Collect`, `5. Background Refresh`, `6. Data Retention and Deletion`, `7. Permissions`, `8. Children's Privacy`, `9. Changes to This Policy`, `10. Contact`.
+- [x] `test(FR1)` The file doesn't contain `user accounts or databases`. It does contain `We do not operate user accounts, and we do not store your Crossover credentials or work data on any server`.
+- [x] `test(FR1)` §5 (the text between the `5.` and `6.` headings) has exactly 2 `<p>` elements. The second equals the contract sentence verbatim (`If you allow notifications, the app registers an anonymous device push token with Expo's push notification service and with this refresh service; the token contains no personal data and is not linked to your identity or your Crossover account.`).
+- [x] `test(FR1)` §6 contains both contract paragraphs verbatim.
+- [x] `test(FR1)` Unchanged guards. The file still contains the original summary sentence `We do not collect, store, or share your personal data on any external server.`, the §3 sentence `They are never transmitted to any server operated by this application.`, §4 bullets 2–5 verbatim, `Jaime Alvarez`, `mailto:jaime.alvarez@trilogy.com`, and the original footer text.
+- [x] `test(FR1)` The subtitle matches `/Last updated: (January|…|December) \d{1,2}, 20\d{2}/` and isn't `April 8, 2026`.
 
 ### FR2: Support page (`__tests__/site/legal-pages.test.ts`)
-- [ ] `test(FR2)` The `mailto:` value in `support.html` equals the `mailto:` value in `privacy-policy.html`, and both equal `jaime.alvarez@trilogy.com`.
-- [ ] `test(FR2)` It contains `href="privacy-policy.html"`.
-- [ ] `test(FR2)` The `<h3>` texts are exactly `How do I sign in?`, `Why is my widget empty or out of date?`, `How do I sign out or remove my data?`, in that order.
-- [ ] `test(FR2)` The sign-out answer contains `gear icon`, `Settings`, `Sign Out` and `before deleting the app`.
-- [ ] `test(FR2)` It contains no `<form`, `<input` or `<script`.
+- [x] `test(FR2)` The `mailto:` value in `support.html` equals the `mailto:` value in `privacy-policy.html`, and both equal `jaime.alvarez@trilogy.com`.
+- [x] `test(FR2)` It contains `href="privacy-policy.html"`.
+- [x] `test(FR2)` The `<h3>` texts are exactly `How do I sign in?`, `Why is my widget empty or out of date?`, `How do I sign out or remove my data?`, in that order.
+- [x] `test(FR2)` The sign-out answer contains `gear icon`, `Settings`, `Sign Out` and `before deleting the app`.
+- [x] `test(FR2)` It contains no `<form`, `<input` or `<script`.
 
 ### FR3: Landing page (`__tests__/site/legal-pages.test.ts`)
-- [ ] `test(FR3)` It contains `href="privacy-policy.html"` and `href="support.html"`.
-- [ ] `test(FR3)` It doesn't contain `apps.apple.com`, `testflight` or `itms` (case-insensitive).
+- [x] `test(FR3)` It contains `href="privacy-policy.html"` and `href="support.html"`.
+- [x] `test(FR3)` It doesn't contain `apps.apple.com`, `testflight` or `itms` (case-insensitive).
 
 ### FR4: Static-site constraints (`__tests__/site/legal-pages.test.ts`, parameterized over all 3 files)
-- [ ] `test(FR4)` Each file starts with `<!DOCTYPE html>` and has `<html lang="en">`, `<meta charset="UTF-8" />`, the viewport meta and a non-empty `<title>`. The three titles are all different.
-- [ ] `test(FR4)` Each file has exactly one `<style>` block, and no `<link`, `<script`, `<iframe`, `<img` or `src=`.
-- [ ] `test(FR4)` Every `href` is either `mailto:` or relative. Reject `^/`, `^https?:` and `^//`.
-- [ ] `test(FR4)` Every relative `.html` href resolves to an existing file in `site/`.
-- [ ] `test(FR4)` The logo anchor is `<a class="logo" href="./">` on every page.
-- [ ] `test(FR4)` `fs.readdirSync('site')` with dotfiles filtered out, sorted, equals `['index.html', 'privacy-policy.html', 'support.html']`.
+- [x] `test(FR4)` Each file starts with `<!DOCTYPE html>` and has `<html lang="en">`, `<meta charset="UTF-8" />`, the viewport meta and a non-empty `<title>`. The three titles are all different.
+- [x] `test(FR4)` Each file has exactly one `<style>` block, and no `<link`, `<script`, `<iframe`, `<img` or `src=`.
+- [x] `test(FR4)` Every `href` is either `mailto:` or relative. Reject `^/`, `^https?:` and `^//`.
+- [x] `test(FR4)` Every relative `.html` href resolves to an existing file in `site/`.
+- [x] `test(FR4)` The logo anchor is `<a class="logo" href="./">` on every page.
+- [x] `test(FR4)` `fs.readdirSync('site')` with dotfiles filtered out, sorted, equals `['index.html', 'privacy-policy.html', 'support.html']`.
 
 ### FR5: Pages workflow (`__tests__/site/pages-workflow.test.ts`)
-- [ ] `test(FR5)` The push trigger has `branches: [main]` and paths containing `'site/**'` and `'.github/workflows/pages.yml'`. `workflow_dispatch:` is present.
-- [ ] `test(FR5)` `pull_request` doesn't appear anywhere in the file (this also covers `pull_request_target`).
-- [ ] `test(FR5)` Permissions include `contents: read`, `pages: write` and `id-token: write`.
-- [ ] `test(FR5)` `group: pages` and `cancel-in-progress: false` are present.
-- [ ] `test(FR5)` `name: github-pages` and `url: ${{ steps.deployment.outputs.page_url }}` are present.
-- [ ] `test(FR5)` `uses: actions/checkout@v\d+`, `actions/configure-pages@v\d+`, `actions/upload-pages-artifact@v\d+` and `actions/deploy-pages@v\d+` appear in that order (ascending `indexOf`).
-- [ ] `test(FR5)` `path: site` matches `/^\s*path:\s*['"]?site['"]?\s*$/m`, and `path: .` is absent.
-- [ ] `test(FR5)` `id: deployment` is present and `enablement` is absent.
+- [x] `test(FR5)` The push trigger has `branches: [main]` and paths containing `'site/**'` and `'.github/workflows/pages.yml'`. `workflow_dispatch:` is present.
+- [x] `test(FR5)` `pull_request` doesn't appear anywhere in the file (this also covers `pull_request_target`).
+- [x] `test(FR5)` Permissions include `contents: read`, `pages: write` and `id-token: write`.
+- [x] `test(FR5)` `group: pages` and `cancel-in-progress: false` are present.
+- [x] `test(FR5)` `name: github-pages` and `url: ${{ steps.deployment.outputs.page_url }}` are present.
+- [x] `test(FR5)` `uses: actions/checkout@v\d+`, `actions/configure-pages@v\d+`, `actions/upload-pages-artifact@v\d+` and `actions/deploy-pages@v\d+` appear in that order (ascending `indexOf`).
+- [x] `test(FR5)` `path: site` matches `/^\s*path:\s*['"]?site['"]?\s*$/m`, and `path: .` is absent.
+- [x] `test(FR5)` `id: deployment` is present and `enablement` is absent.
 
 ### FR6: Check script (`__tests__/scripts/check-legal-pages.test.ts`)
 Harness: a Node `http` server on `127.0.0.1:0` per case, the script run via `child_process.execFile` (timeout 15 s), a Jest per-test timeout of 20 s, and the server closed in `afterEach`. Combined stdout+stderr is used for message assertions. No real network.
-- [ ] `test(FR6)` (a) The real `site/` files are served under `/hourglass-app/` (with `/hourglass-app/` → `index.html`). Running against `http://127.0.0.1:<port>/hourglass-app` exits 0, and stdout contains `PASS index`, `PASS privacy` and `PASS support`.
-- [ ] `test(FR6)` (b) Same as (a) with a trailing-slash base (`…/hourglass-app/`): exits 0.
-- [ ] `test(FR6)` (c) Every path returns 404: exits 1, and the output contains `OPS O2` and `build_type=workflow`.
-- [ ] `test(FR6)` (d) The privacy fixture body contains `user accounts or databases`: exits 1, prints `FAIL privacy`, and still prints `PASS index` and `PASS support` (all checks run).
-- [ ] `test(FR6)` (e) The support fixture has no `mailto:jaime.alvarez@trilogy.com`: exits 1 with `FAIL support`.
-- [ ] `test(FR6)` (f) `/hourglass-app/` returns 301 with a `Location` header: exits 1 with `FAIL index` (redirects aren't followed).
-- [ ] `test(FR6)` (g) The exact path returns 404 but the same path with `?cb=` returns 200: exits 1, the output contains `cached`, and it doesn't contain `OPS O2`.
-- [ ] `test(FR6)` (h) Closed port (listen on :0, read the port, close): exits 1, the output contains `000`, and the process exits normally rather than hanging.
-- [ ] `test(FR6)` (i) Two arguments: exits 2.
-- [ ] `test(FR6)` (j) `fs.statSync(script).mode & 0o111` is non-zero, and the first line is `#!/usr/bin/env bash`.
+- [x] `test(FR6)` (a) The real `site/` files are served under `/hourglass-app/` (with `/hourglass-app/` → `index.html`). Running against `http://127.0.0.1:<port>/hourglass-app` exits 0, and stdout contains `PASS index`, `PASS privacy` and `PASS support`.
+- [x] `test(FR6)` (b) Same as (a) with a trailing-slash base (`…/hourglass-app/`): exits 0.
+- [x] `test(FR6)` (c) Every path returns 404: exits 1, and the output contains `OPS O2` and `build_type=workflow`.
+- [x] `test(FR6)` (d) The privacy fixture body contains `user accounts or databases`: exits 1, prints `FAIL privacy`, and still prints `PASS index` and `PASS support` (all checks run).
+- [x] `test(FR6)` (e) The support fixture has no `mailto:jaime.alvarez@trilogy.com`: exits 1 with `FAIL support`.
+- [x] `test(FR6)` (f) `/hourglass-app/` returns 301 with a `Location` header: exits 1 with `FAIL index` (redirects aren't followed).
+- [x] `test(FR6)` (g) The exact path returns 404 but the same path with `?cb=` returns 200: exits 1, the output contains `cached`, and it doesn't contain `OPS O2`.
+- [x] `test(FR6)` (h) Closed port (listen on :0, read the port, close): exits 1, the output contains `000`, and the process exits normally rather than hanging.
+- [x] `test(FR6)` (i) Two arguments: exits 2.
+- [x] `test(FR6)` (j) `fs.statSync(script).mode & 0o111` is non-zero, and the first line is `#!/usr/bin/env bash`.
 
 ### FR7: Rollout readiness (no Jest; verified by commands)
 - [ ] Baseline: `gh api repos/jaime-alvarez-trilogy/hourglass-app/pages` returns 404 and `gh api repos/jaime-alvarez-trilogy/hourglass-app --jq .has_pages` prints `false`. Record both in the Session Notes so FR7 can show the before/after.
@@ -68,7 +68,7 @@ Harness: a Node `http` server on `127.0.0.1:0` per case, the script run via `chi
 - [ ] Confirm the deploy target's branch policy allows `main`: `gh api repos/jaime-alvarez-trilogy/hourglass-app/environments/github-pages/deployment-branch-policies --jq '.branch_policies[].name'` includes `main`.
 
 ### Red phase
-- [ ] Run `npx jest __tests__/site __tests__/scripts`. All new tests fail because `site/`, `pages.yml` and the script don't exist yet. Commit: `test(01-legal-pages): add failing tests for legal pages, workflow and check script`.
+- [x] Run `npx jest __tests__/site __tests__/scripts`. All new tests fail because `site/`, `pages.yml` and the script don't exist yet. Commit: `test(01-legal-pages): add failing tests for legal pages, workflow and check script`.
 
 ---
 
@@ -77,10 +77,10 @@ Harness: a Node `http` server on `127.0.0.1:0` per case, the script run via `chi
 ⚠️ **Validate test design BEFORE implementing.** Weak tests lead to weak implementation.
 
 - [ ] Run `red-phase-test-validator` agent
-- [ ] All FR success criteria have test coverage (FR1–FR6 in Jest; FR4/FR6 also by the manual dry run; FR7 by Phase 1.3 commands)
-- [ ] Assertions are specific (exact contract strings, ordered heading lists, exit codes), not just "exists" or "doesn't throw"
-- [ ] HTTP fixtures return realistic data matching the check script contract: real `site/` files for the happy path, and single-defect variants for the failure cases
-- [ ] No test touches the real network or depends on Pages being enabled
+- [x] All FR success criteria have test coverage (FR1–FR6 in Jest; FR4/FR6 also by the manual dry run; FR7 by Phase 1.3 commands)
+- [x] Assertions are specific (exact contract strings, ordered heading lists, exit codes), not just "exists" or "doesn't throw"
+- [x] HTTP fixtures return realistic data matching the check script contract: real `site/` files for the happy path, and single-defect variants for the failure cases
+- [x] No test touches the real network or depends on Pages being enabled
 - [ ] Fix any issues identified before proceeding
 
 ---
