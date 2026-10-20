@@ -20,6 +20,12 @@ const EXPECTED_PRIVACY_MANIFEST: PrivacyManifest = {
       NSPrivacyCollectedDataTypeTracking: false,
       NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
     },
+    {
+      NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeCrashData',
+      NSPrivacyCollectedDataTypeLinked: false,
+      NSPrivacyCollectedDataTypeTracking: false,
+      NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
+    },
   ],
   NSPrivacyAccessedAPITypes: [
     {
@@ -136,15 +142,19 @@ describe('app.json — 03 native config cleanup', () => {
       expect(categories).not.toContain('NSPrivacyAccessedAPICategoryActiveKeyboards');
     });
 
-    it('collects only Device ID, not linked, not tracking, for app functionality', () => {
-      expect(expo.ios?.privacyManifests?.NSPrivacyCollectedDataTypes).toEqual([
-        {
-          NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeDeviceID',
+    // Device ID: the anonymous push token and EAS-Client-ID (policy §5). Crash Data: expo-updates
+    // sends the previous launch's fatal error to EAS Update in the Expo-Fatal-Error header
+    // (FileDownloader.swift, ErrorRecovery.consumeErrorLog), which policy §5 discloses. Both must
+    // match the App Privacy label (OPS O5).
+    it('collects only Device ID and Crash Data, not linked, not tracking, for app functionality', () => {
+      expect(expo.ios?.privacyManifests?.NSPrivacyCollectedDataTypes).toEqual(
+        ['NSPrivacyCollectedDataTypeDeviceID', 'NSPrivacyCollectedDataTypeCrashData'].map((type) => ({
+          NSPrivacyCollectedDataType: type,
           NSPrivacyCollectedDataTypeLinked: false,
           NSPrivacyCollectedDataTypeTracking: false,
           NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
-        },
-      ]);
+        })),
+      );
     });
   });
 });

@@ -21,6 +21,7 @@ import { useConfig } from '@/src/hooks/useConfig';
 import { colors } from '@/src/lib/colors';
 import { PRIVACY_POLICY_URL, SUPPORT_URL, formatBuildInfo } from '@/src/lib/legalLinks';
 import { log } from '@/src/lib/log';
+import { clearWidgetData } from '@/src/widgets/bridge';
 import * as Sharing from 'expo-sharing';
 
 // Store-compliance spec 02 FR4: in-app Safari sheet, then external Safari, then
@@ -90,6 +91,11 @@ export default function ModalScreen() {
           // 05-cache-hygiene FR2: clear TanStack in-memory cache and cancel notifications
           try { queryClient.clear(); } catch { /* non-blocking */ }
           try { await Notifications.cancelAllScheduledNotificationsAsync(); } catch { /* non-blocking */ }
+          // The iOS widget timeline lives in App Group UserDefaults, which clearAll() doesn't
+          // touch: replace it with the signed-out snapshot (after queryClient.clear so no
+          // widget sync re-writes it). Then empty the local debug log.
+          try { await clearWidgetData(); } catch { /* non-blocking */ }
+          try { await log.clear(); } catch { /* non-blocking */ }
           router.replace('/(auth)/welcome');
         },
       },

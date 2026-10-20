@@ -203,14 +203,14 @@ Worked example: for build 18, OPS O6 closed after steps 1–2, O4 after step 4 a
 3. (J) Approvals: approve one QA item, then reject one with a reason.
 4. (J) Settings → About: Privacy Policy and Support open in the in-app browser and load. The version row reads `Version <x.y.z> (<N>)` and `Update: embedded` (worked example: `Version 1.1.0 (18)`).
 5. (J) Widgets: add small, medium and large. They show data, and tapping one opens the app.
-6. (J) Silent push: within 30 min of a cron tick (`server/cron.ts`, which has no HTTP trigger), the widget timestamp updates.
+6. (J) Widget refresh on open: after step 3 changes the pending count, open the app, let Home load, then go to the home screen. The widget shows the new values. Don't wait for a cron tick: the silent push doesn't refresh the widget in this build. `addNotificationReceivedListener` only hears foreground `willPresent`, and there's no `registerTaskAsync` task (policy §5 says so).
 7. (J) A local deadline notification fires, and tapping it routes correctly.
-8. (J) Sign Out clears data. (C) reads `curl -s https://dynamic-balance-production-1696.up.railway.app/health` right before and right after: `tokenCount` drops by 1. Repeat once if other users make the result ambiguous.
+8. (J) Sign Out clears data, and the widgets switch to the empty signed-out view (0.0h, $0, no names or pending items). (C) reads `curl -s https://dynamic-balance-production-1696.up.railway.app/health` right before and right after: `tokenCount` drops by 1. Repeat once if other users make the result ambiguous.
 
 ### User-only steps
 
 1. (J) Accept Apple's updated agreement (Account Holder only: ASC → Business) whenever asc.js or `eas submit` reports `403 FORBIDDEN.REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED`.
-2. (J) App Privacy label (OPS O5): Identifiers → Device ID, App Functionality, Not Linked to You, Not Used for Tracking. The public ASC API doesn't expose it.
+2. (J) App Privacy label (OPS O5): Identifiers → Device ID and Diagnostics → Crash Data, each App Functionality, Not Linked to You, Not Used for Tracking. They match `ios.privacyManifests` in `app.json` and policy §5 (Crash Data is expo-updates' `Expo-Fatal-Error` header). The public ASC API doesn't expose it.
 3. (J) Confirm that the demo account in App Review Information signs in on the new build.
 4. (J) If `disable-public-link` showed no internal group, create one in ASC → TestFlight and add yourself. Internal testing needs no Beta App Review.
 

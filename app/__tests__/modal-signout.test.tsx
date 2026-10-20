@@ -27,12 +27,28 @@ const mockUnregisterPushToken = jest.fn(async () => {
 const mockClearAll = jest.fn(async () => {
   callOrder.push('clearAll');
 });
-const mockReplace = jest.fn();
+const mockReplace = jest.fn(() => {
+  callOrder.push('router.replace');
+});
+const mockClearWidgetData = jest.fn(async () => {
+  callOrder.push('clearWidgetData');
+});
+const mockLogClear = jest.fn(async () => {
+  callOrder.push('log.clear');
+});
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
 jest.mock('@/src/lib/pushToken', () => ({
   unregisterPushToken: mockUnregisterPushToken,
+}));
+
+jest.mock('@/src/widgets/bridge', () => ({
+  clearWidgetData: mockClearWidgetData,
+}));
+
+jest.mock('@/src/lib/log', () => ({
+  log: { clear: mockLogClear, info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
 
 jest.mock('@/src/store/config', () => ({
@@ -220,5 +236,71 @@ describe('FR4: unregisterPushToken before clearAll in handleSignOut', () => {
     await triggerSignOut();
 
     expect(mockReplace).toHaveBeenCalledWith('/(auth)/welcome');
+  });
+});
+
+describe('sign-out clears the iOS widget timeline and the debug log', () => {
+  let alertSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    callOrder.length = 0;
+    mockUnregisterPushToken.mockImplementation(async () => {
+      callOrder.push('unregisterPushToken');
+    });
+    mockClearAll.mockImplementation(async () => {
+      callOrder.push('clearAll');
+    });
+    mockReplace.mockImplementation(() => {
+      callOrder.push('router.replace');
+    });
+    mockClearWidgetData.mockImplementation(async () => {
+      callOrder.push('clearWidgetData');
+    });
+    mockLogClear.mockImplementation(async () => {
+      callOrder.push('log.clear');
+    });
+    alertSpy = jest.spyOn(Alert, 'alert');
+  });
+
+  afterEach(() => {
+    alertSpy.mockRestore();
+  });
+
+  it('calls clearWidgetData and log.clear after clearAll and before navigating away', async () => {
+    const triggerSignOut = renderAndGetSignOut(alertSpy);
+    await triggerSignOut();
+
+    expect(mockClearWidgetData).toHaveBeenCalledTimes(1);
+    expect(mockLogClear).toHaveBeenCalledTimes(1);
+    const clearAllIdx = callOrder.indexOf('clearAll');
+    const widgetIdx = callOrder.indexOf('clearWidgetData');
+    const logIdx = callOrder.indexOf('log.clear');
+    const replaceIdx = callOrder.indexOf('router.replace');
+    expect(clearAllIdx).toBeGreaterThan(-1);
+    expect(widgetIdx).toBeGreaterThan(clearAllIdx);
+    expect(logIdx).toBeGreaterThan(clearAllIdx);
+    expect(replaceIdx).toBeGreaterThan(widgetIdx);
+    expect(replaceIdx).toBeGreaterThan(logIdx);
+  });
+
+  it('still navigates to welcome when clearWidgetData and log.clear reject', async () => {
+    mockClearWidgetData.mockRejectedValueOnce(new Error('widget'));
+    mockLogClear.mockRejectedValueOnce(new Error('fs'));
+
+    const triggerSignOut = renderAndGetSignOut(alertSpy);
+    await triggerSignOut();
+
+    expect(mockReplace).toHaveBeenCalledWith('/(auth)/welcome');
+  });
+
+  it('source: handleSignOut calls clearWidgetData after queryClient.clear()', () => {
+    const source = fs.readFileSync(MODAL_FILE, 'utf8');
+    const body = source.slice(source.indexOf('async function handleSignOut'));
+    const qcIdx = body.indexOf('queryClient.clear()');
+    const widgetIdx = body.indexOf('clearWidgetData()');
+    expect(qcIdx).toBeGreaterThan(-1);
+    expect(widgetIdx).toBeGreaterThan(qcIdx);
+    expect(source).toContain("from '@/src/widgets/bridge'");
   });
 });

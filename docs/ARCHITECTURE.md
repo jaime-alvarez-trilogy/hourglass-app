@@ -101,6 +101,8 @@ None. No custom `setNotificationCategoryAsync` registrations, no actionable appr
 
 Silent push wakes the app, which fetches fresh data and updates the widget without rendering React.
 
+> **Not wired on iOS (build-18 re-review, 2026-10-20).** The design below is intended, but on iOS §2.2 step 1 never happens. `addNotificationReceivedListener` fires only from `UNUserNotificationCenter` `willPresent`. The server's content-available push goes to `didReceiveRemoteNotification`, and expo-notifications forwards that only to a `Notifications.registerTaskAsync` task. The app has no such task, and no `expo-task-manager` (store-compliance spec 03). So today the widget refreshes only from `useWidgetSync` while the app is open. Between opens, WidgetKit replays the last 96-entry timeline, with only urgency recomputed. Sign-out replaces that timeline through `clearWidgetData()`.
+
 ### 2.1 Server side (Railway)
 
 - **Sender** — `server/push.ts:34-83`. `sendPushBatch()` chunks tokens into batches of ≤100, posts to `https://exp.host/--/api/v2/push/send` with `data: { type: 'bg_refresh' }` and `_contentAvailable: true`. Returns sent/failed counts plus `DeviceNotRegistered` tokens for cleanup.

@@ -479,12 +479,12 @@ For every asc.js step: (1) `--dry-run` → paste the transcript; (2) live run �
 - [ ] 3. Approve one QA item; reject one with a reason: pass/fail
 - [ ] 4. Settings → About: Privacy Policy and Support open in the in-app browser and load; row reads `Version 1.1.0 (18)` / `Update: embedded`: pass/fail
 - [ ] 5. Widgets small, medium and large show data; tap opens the app: pass/fail
-- [ ] 6. Within 30 min of a cron tick, the widget timestamp updates (silent push without `fetch`): pass/fail
+- [ ] 6. After step 3, open the app and let Home load: the widget shows the new values (the silent push doesn't refresh the widget (no `registerTaskAsync` task; `addNotificationReceivedListener` only hears foreground `willPresent`), so don't wait for a cron tick; re-review 2026-10-20): pass/fail
 - [ ] 7. Local deadline notification fires; tap routes correctly: pass/fail
-- [ ] 8. Sign Out clears data; `curl -s https://dynamic-balance-production-1696.up.railway.app/health` `tokenCount` before ______ / after ______ (drop of 1): pass/fail
+- [ ] 8. Sign Out clears data and the widgets show the empty signed-out view (0.0h, $0, no names); `curl -s https://dynamic-balance-production-1696.up.railway.app/health` `tokenCount` before ______ / after ______ (drop of 1): pass/fail
 
 ### User-only steps (J)
-- [ ] App Privacy label (OPS O5): Identifiers → Device ID, App Functionality, Not Linked to You, Not Used for Tracking
+- [ ] App Privacy label (OPS O5): Identifiers → Device ID and Diagnostics → Crash Data, each App Functionality, Not Linked to You, Not Used for Tracking
 - [ ] Demo account in App Review Information signs in on build 18
 
 ### Stop point

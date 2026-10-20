@@ -116,8 +116,12 @@ const S4_BULLETS_2_TO_5 = [
   'We do not export your data to any external system',
 ];
 
-const S5_ORIGINAL_P =
-  'Hourglass uses a lightweight background ping mechanism to keep your home screen widget up to date. This service sends a silent push notification to your device to trigger a local data refresh. No personal data is transmitted as part of this process — the notification contains no payload other than a refresh signal.';
+// The relay does send a content-available push, but nothing on iOS acts on it: the JS listener
+// (addNotificationReceivedListener, src/notifications/handler.ts) only fires from willPresent, and
+// the background path needs a registerTaskAsync task, which the app doesn't have. So the widget
+// refreshes only when the app is open, and §5 must not claim otherwise.
+const S5_RELAY_P =
+  'Hourglass includes a lightweight background ping service that sends a silent push notification to your device as a refresh signal. No personal data is transmitted as part of this process — the notification contains no payload other than a refresh signal. The app does not currently refresh data when it receives this signal: your home screen widget updates when you open the app, and between opens it shows the last data the app fetched.';
 
 const S5_NEW_P =
   "If you allow notifications, the app registers an anonymous device push token with Expo's push notification service and with this refresh service; the token contains no personal data and is not linked to your identity or your Crossover account.";
@@ -128,8 +132,11 @@ const S5_NEW_P =
 const S5_UPDATES_P =
   "Each time the app starts, it also checks Expo's update service (EAS Update) for a newer version of the app's code. That request includes a random installation identifier created by the app, the platform, the app's runtime version, release channel and current update ID, and, if the app hit a fatal error while starting on a previous launch, a short description of that error. It does not include your Crossover credentials or work data, and the identifier is not linked to your Crossover account.";
 
+// Sign-out runs clearWidgetData() (src/widgets/bridge.ts) from 1.1.0, which replaces the iOS widget
+// timeline in App Group UserDefaults; earlier builds left it. Team photos load through RN <Image>,
+// whose NSURLCache entries sign-out can't clear from JS.
 const S6_PARAGRAPHS = [
-  "Your credentials and cached work data are kept only on your device. Signing out deletes your saved credentials and the app's cached work data. Home screen widgets may continue to show the last data they received until you delete the app. If you delete the app without signing out, iOS may keep your saved credentials in the device Keychain, so sign out first to remove them.",
+  "Your credentials and cached work data are kept only on your device. Signing out deletes your saved credentials and the app's cached work data. In version 1.1.0 and later, signing out also clears the data shown in home screen widgets; in earlier versions, widgets may continue to show the last data they received until you delete the app. Profile photos shown in the app may stay in the iOS image cache until iOS clears it or you delete the app. If you delete the app without signing out, iOS may keep your saved credentials in the device Keychain, so sign out first to remove them.",
   "The refresh service stores only the anonymous push token and the time it was last registered. When you sign out, the app asks the refresh service to delete the token. Tokens that Expo's push service reports as no longer registered are deleted automatically.",
 ];
 
@@ -154,12 +161,11 @@ const UNCHANGED_SECTIONS: Record<string, string> = {
   '3. How Your Data Is Stored': `
     <p>Your credentials are stored exclusively on your device using the platform's secure storage (iOS Keychain via Expo SecureStore). They are never transmitted to any server operated by this application.</p>
     <p>Work data may be temporarily cached on your device to allow the app and home screen widgets to display information when offline. This cache is stored locally and is never uploaded or shared.</p>
-    <p>If you are a manager, the team data listed in section 2 is cached on your device in the same way as your own work data, and signing out deletes it from the app's cache.</p>`,
+    <p>If you are a manager, the team data listed in section 2 is cached on your device in the same way as your own work data. Signing out deletes it from the app's cache and, in version 1.1.0 and later, from home screen widgets. Profile photos may stay in the iOS image cache until iOS clears it or you delete the app (see section 6).</p>`,
   '7. Permissions': `
     <p>The app may request the following device permissions:</p>
     <ul>
       <li><strong>Notifications:</strong> To deliver reminders about approval deadlines and weekly summaries. You can disable these at any time in iOS Settings.</li>
-      <li><strong>Background App Refresh:</strong> To keep widget data current.</li>
     </ul>`,
   "8. Children's Privacy": `
     <p>This app is intended for working adults who are Crossover employees. It is not directed at children under the age of 13 and we do not knowingly collect data from minors.</p>`,
@@ -196,8 +202,8 @@ const SUPPORT_PARAGRAPHS = [
   'Help with Hourglass',
   'Hourglass shows your tracked hours, earnings, AI usage and team approval requests from your Crossover account, in the app and in home screen widgets. It is an internal tool for Crossover employees and requires an active Crossover account.',
   'Use the same email and password you use for Crossover. Your credentials are stored only on your device, in the iOS Keychain, and are sent only to Crossover.',
-  'Widgets show data after you sign in and open the app at least once. After that, the widget updates when you open the app and in the background when iOS allows it.',
-  "Tap the gear icon on the Home screen to open Settings, then tap Sign Out. This deletes your saved credentials and the app's cached data from your device. Sign out before deleting the app to make sure your saved credentials are removed.",
+  'Widgets show data after you sign in and open the app at least once. After that, the widget updates each time you open the app. Between opens it shows the last data the app fetched, so open Hourglass to bring it up to date.',
+  "Tap the gear icon on the Home screen to open Settings, then tap Sign Out. This deletes your saved credentials and the app's cached work data from your device. In version 1.1.0 and later, it also clears your home screen widgets. Profile photos may stay in the iOS image cache until iOS clears it or you delete the app. Sign out before deleting the app to make sure your saved credentials are removed.",
   'For help or to report a problem, email:',
   'Jaime Alvarez jaime.alvarez@trilogy.com',
   'Read the Privacy Policy to see what data Hourglass accesses and how it is stored.',
@@ -229,13 +235,39 @@ describe('FR1: corrected privacy policy at site/privacy-policy.html', () => {
     expect(bullets).toEqual([NEW_S4_BULLET_1, ...S4_BULLETS_2_TO_5]);
   });
 
-  it('FR1: §5 keeps its original paragraph, then the push-token and update-check paragraphs', () => {
+  it('FR1: §5 is the relay paragraph (no widget-refresh claim), then the push-token and update-check paragraphs', () => {
     const html = readSite('privacy-policy.html');
     const paragraphs = innerAll(section(html, '5. '), 'p').map(squash);
     expect(paragraphs).toHaveLength(3);
-    expect(paragraphs[0]).toBe(S5_ORIGINAL_P);
+    expect(paragraphs[0]).toBe(S5_RELAY_P);
     expect(paragraphs[1]).toBe(S5_NEW_P);
     expect(paragraphs[2]).toBe(S5_UPDATES_P);
+  });
+
+  it('FR1: no page claims the silent push refreshes the widget in the background', () => {
+    const policy = textOf(readSite('privacy-policy.html'));
+    const support = textOf(readSite('support.html'));
+    for (const claim of [
+      'to keep your home screen widget up to date',
+      'to trigger a local data refresh',
+      'Background App Refresh',
+      'To keep widget data current',
+    ]) {
+      expect(policy).not.toContain(claim);
+    }
+    expect(support).not.toContain('in the background');
+  });
+
+  it('FR1: every sign-out claim carries the widget caveat', () => {
+    const s3 = textOf(section(readSite('privacy-policy.html'), '3. '));
+    const support = textOf(
+      innerAll(readSite('support.html').split('<h3>How do I sign out or remove my data?</h3>')[1], 'p')[0],
+    );
+    for (const text of [s3, support]) {
+      expect(text).toContain('version 1.1.0 and later');
+      expect(text).toContain('home screen widgets');
+      expect(text).toContain('iOS image cache');
+    }
   });
 
   it('FR1: new §6 "Data Retention and Deletion" contains both contract paragraphs verbatim', () => {
@@ -289,6 +321,49 @@ describe('FR1: corrected privacy policy at site/privacy-policy.html', () => {
   it('FR1: <h1> is still "Privacy Policy"', () => {
     const html = readSite('privacy-policy.html');
     expect(innerAll(html, 'h1').map(textOf)).toEqual(['Privacy Policy']);
+  });
+});
+
+// ===========================================================================
+// FR1: policy disclosures, privacy manifest and App Privacy label plan agree
+// ===========================================================================
+
+// Apple's App Privacy label names for each NSPrivacyCollectedDataType the manifest declares.
+const LABEL_NAMES: Record<string, string> = {
+  NSPrivacyCollectedDataTypeDeviceID: 'Device ID',
+  NSPrivacyCollectedDataTypeCrashData: 'Crash Data',
+};
+
+describe('FR1: policy §5, app.json privacy manifest and the O5 label plan agree', () => {
+  const manifestTypes = (): string[] => {
+    const app = JSON.parse(fs.readFileSync(path.join(ROOT, 'app.json'), 'utf8'));
+    return app.expo.ios.privacyManifests.NSPrivacyCollectedDataTypes.map(
+      (t: { NSPrivacyCollectedDataType: string }) => t.NSPrivacyCollectedDataType,
+    );
+  };
+
+  it('each data type §5 discloses is declared in the manifest', () => {
+    const s5 = textOf(section(readSite('privacy-policy.html'), '5. '));
+    const types = manifestTypes();
+    // Anonymous push token and the EAS-Client-ID installation identifier → Device ID.
+    expect(s5).toContain('push token');
+    expect(s5).toContain('installation identifier');
+    expect(types).toContain('NSPrivacyCollectedDataTypeDeviceID');
+    // Expo-Fatal-Error header sent to EAS Update after a failed start → Crash Data.
+    expect(s5).toContain('fatal error');
+    expect(types).toContain('NSPrivacyCollectedDataTypeCrashData');
+  });
+
+  it.each([
+    ['features/app/store-compliance/OPS.md', /\*\*O5 \(J\)[^\n]*/],
+    ['docs/RELEASING.md', /^2\. \(J\) App Privacy label[^\n]*/m],
+  ])('%s: the App Privacy label step names every manifest data type', (file, re) => {
+    const line = fs.readFileSync(path.join(ROOT, file), 'utf8').match(re)?.[0] ?? '';
+    expect(line).not.toBe('');
+    for (const type of manifestTypes()) {
+      expect(LABEL_NAMES[type]).toBeDefined();
+      expect(line).toContain(LABEL_NAMES[type]);
+    }
   });
 });
 

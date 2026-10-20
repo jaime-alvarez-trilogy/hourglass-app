@@ -9,8 +9,10 @@
 # Checks (all run, fixed order; redirects are never followed and count as failures):
 #   index    GET $BASE/                     200; links to privacy-policy.html and support.html
 #   privacy  GET $BASE/privacy-policy.html  200; has "Data Retention" and "push token";
-#                                           not "user accounts or databases"
-#   support  GET $BASE/support.html         200; has the contact mailto and a policy link
+#                                           not "user accounts or databases" and not the
+#                                           pre-1.1.0 "keep your home screen widget up to date"
+#   support  GET $BASE/support.html         200; has the contact mailto and a policy link;
+#                                           not "in the background when iOS allows it"
 #
 # On a non-200, the URL is re-requested with ?cb=<epoch>. A 200 there means the Pages CDN
 # is serving a cached response; otherwise Pages is probably not enabled/deployed (OPS O2).
@@ -117,10 +119,12 @@ check index "$BASE/" \
 check privacy "$BASE/privacy-policy.html" \
   '+Data Retention' \
   '+push token' \
-  '-user accounts or databases'
+  '-user accounts or databases' \
+  '-to keep your home screen widget up to date'
 check support "$BASE/support.html" \
   '+mailto:jaime.alvarez@trilogy.com' \
-  '+href="privacy-policy.html"'
+  '+href="privacy-policy.html"' \
+  '-in the background when iOS allows it'
 
 if [ "$failures" -eq 0 ]; then
   echo "All legal page checks passed for $BASE"

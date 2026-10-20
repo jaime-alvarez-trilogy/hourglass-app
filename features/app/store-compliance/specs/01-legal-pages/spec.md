@@ -33,7 +33,7 @@
 
 4. **App privacy manifest (`PrivacyInfo.xcprivacy`).** **Deferred to 03-native-config-cleanup.**
 
-5. **Broader policy rewrite.** This covers the summary box, §1–§3, §4 bullets 2–5, the existing §5 sentences and the Permissions list (including the "Background App Refresh" line, which stays accurate because iOS gates silent-push wake-ups on that setting). **Descoped.** These statements are accurate (the relay is an anonymous ping relay, and the token isn't personal data). The research proposed softening the summary box ("drop 'on any external server'"). This spec drops that edit to keep the policy diff minimal, because the sentence isn't false.
+5. **Broader policy rewrite.** This covers the summary box, §1–§3, §4 bullets 2–5, the existing §5 sentences and the Permissions list (including the "Background App Refresh" line, which stays accurate because iOS gates silent-push wake-ups on that setting; **re-review 2026-10-20:** it wasn't accurate, because no push reaches JS in the background (see spec 03 FR2 correction), so the line was removed and §5's first paragraph reworded). **Descoped.** These statements are accurate (the relay is an anonymous ping relay, and the token isn't personal data). The research proposed softening the summary box ("drop 'on any external server'"). This spec drops that edit to keep the policy diff minimal, because the sentence isn't false.
 
 6. **Clearing the iOS widget's App Group data on sign-out.** **Descoped** (it's a behavior change, not a text fix). `clearAll()` (`src/store/config.ts:72-99`) doesn't touch the App Group timeline written by `src/widgets/bridge.ts:867-905`. The new §6 is worded to match current behavior and doesn't claim the widget is cleared.
 
@@ -408,14 +408,14 @@ Every user-facing statement added by this spec traces to current code.
 | §5: token contains no personal data and isn't linked to identity | `server/db.ts:19-24`; project memory "push relay privacy scope" (verified 2026-09-22) |
 | §6: credentials and cache kept only on device | `src/store/config.ts:10-21,51-65` (SecureStore); AsyncStorage keys `:75-94`; App Group `src/widgets/bridge.ts:867-905` |
 | §6: sign-out deletes credentials and cached work data | `app/modal.tsx:54-64` → `clearAll()` `src/store/config.ts:72-99` + `queryClient.clear()` |
-| §6: widgets may keep the last data | Nothing clears the App Group on sign-out (`clearAll` has no widget call; `useWidgetSync.ts:42-43` no-ops on null config) |
+| §6: widgets cleared on sign-out from 1.1.0; earlier versions may keep the last data | `app/modal.tsx` `handleSignOut` → `clearWidgetData()` (`src/widgets/bridge.ts`) after `queryClient.clear()`. Builds before 1.1.0 had no widget call (`useWidgetSync.ts:42-43` no-ops on null config) |
 | §6: Keychain may persist after app deletion | iOS Keychain semantics; `config.ts` deletes credentials only in `clearAll()`, with no reinstall cleanup |
 | §6: relay stores only token + last-registered time | `server/db.ts:19-24,32-35` (`updated_at` set on upsert) |
 | §6: sign-out *asks* the service to delete the token | `modal.tsx:54` → `pushToken.ts:64-75` (best effort; failure only warns) → `server/index.ts:27-35` |
 | §6: tokens reported as no longer registered are deleted automatically | `server/push.ts:71-73` → `server/cron.ts:29-32` (every 30 min, `cron.ts:39`) |
 | Support: gear icon → Settings → Sign Out | `app/(tabs)/index.tsx:325-330`; `app/modal.tsx:180,290` |
 | Support: credentials sent only to Crossover | Policy §3 (unchanged); `src/store/config.ts` `getApiBase` → `api.crossover.com` (`__tests__/env-urls.test.ts`) |
-| Support: widget needs sign-in + one app open; updates in background when iOS allows | `src/hooks/useWidgetSync.ts:3,42-43`; `docs/ARCHITECTURE.md` §2.2 (silent push → `updateWidgetData`) |
+| Support: widget needs sign-in + one app open; updates when the app is open | `src/hooks/useWidgetSync.ts:3,42-43`. The silent push never reaches `handleBackgroundPush` (spec 03 FR2 correction), so the earlier "in the background when iOS allows it" was removed |
 
 ### Data Flow
 
@@ -468,8 +468,8 @@ Run only the new suites while iterating: `npx jest __tests__/site __tests__/scri
 | `github-pages` environment branch policy changed to exclude `main` | Deploy fails with "not allowed to deploy to github-pages". Fix the policy with `gh api repos/…/environments/github-pages/deployment-branch-policies`. Current policy allows `main` (verified). |
 | Sign-out while offline | `/unregister` fails silently, but the local token is removed (`pushToken.ts:70-78`). The policy says the app "asks" the service to delete the token, and stale tokens are pruned once Expo reports them unregistered. |
 | Keychain credentials survive app deletion | The policy and support page tell users to sign out first. No code change (Out of Scope 7). |
-| Widget keeps its last snapshot after sign-out | The policy says so explicitly. No code change (Out of Scope 6). |
-| Policy vs. nutrition label | §5/§6 disclose the push token, consistent with O5's Device ID (Not Linked, App Functionality) declaration and spec 03's manifest (`NSPrivacyCollectedDataTypeDeviceID`, not linked). |
+| Widget keeps its last snapshot after sign-out | The policy says so explicitly. No code change (Out of Scope 6). **Re-review 2026-10-20:** sign-out now calls `clearWidgetData()` (`src/widgets/bridge.ts`), which replaces the iOS timeline with a signed-out snapshot, and the copy says so for version 1.1.0 and later. Team photos in RN's image cache may remain, and the copy says that too. |
+| Policy vs. nutrition label | §5/§6 disclose the push token, consistent with O5's Device ID (Not Linked, App Functionality) declaration and spec 03's manifest (`NSPrivacyCollectedDataTypeDeviceID`, not linked). §5's update-check paragraph discloses the `Expo-Fatal-Error` startup error, so O5 and the manifest also declare Crash Data (re-review 2026-10-20). `legal-pages.test.ts` cross-checks §5, `app.json` and the O5/RELEASING label lines. |
 | Concurrent deploys | `concurrency: pages` with `cancel-in-progress: false` queues the later run. |
 | Fork PRs | No `pull_request` trigger, so they can't deploy. Jest content tests still run on PRs via `test.yml`. |
 

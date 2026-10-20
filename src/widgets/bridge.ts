@@ -2,6 +2,7 @@
 // updateWidgetData — called by app after each data refresh
 // buildTimelineEntries — generates iOS timeline entries with countdown accuracy
 // readWidgetData — read by Android widget task handler
+// clearWidgetData — sign-out: replaces the iOS timeline with an empty signed-out snapshot
 // Extended in 08-widget-enhancements: buildDailyEntries, formatApprovalItems, formatMyRequests
 
 import { Platform } from 'react-native';
@@ -833,6 +834,44 @@ const WIDGET_LAYOUT_JS = `(function(props, env) {
   return medium;
 })`;
 
+// ─── iOS widget handle ────────────────────────────────────────────────────────
+
+type CreateWidget = (...args: unknown[]) => { updateTimeline: (entries: unknown[]) => void };
+
+/**
+ * expo-widgets' createWidget, or null when the native module isn't compiled in
+ * (Expo Go, simulator dev builds without the widget target, tests).
+ */
+function loadCreateWidget(): CreateWidget | null {
+  // Guard: check if the native module is available before requiring expo-widgets.
+  // requireOptionalNativeModule returns null if the module isn't compiled in
+  // (New Architecture / TurboModules safe — NativeModules registry is old-arch only).
+  if (!requireOptionalNativeModule('ExpoWidgets')) {
+    console.log('[bridge] iOS widget skipped (native module unavailable)');
+    return null;
+  }
+  let createWidget: CreateWidget | undefined;
+  try {
+    // expo-widgets is iOS-only and only available in native dev/prod builds.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('expo-widgets') as { createWidget?: CreateWidget } | undefined;
+    createWidget = mod?.createWidget;
+  } catch {
+    // Module not compiled in (Expo Go / simulator) — skip silently
+    console.log('[bridge] iOS widget skipped (expo-widgets unavailable in dev)');
+    return null;
+  }
+  if (!createWidget) {
+    console.log('[bridge] iOS widget skipped (expo-widgets unavailable in dev)');
+    return null;
+  }
+  return createWidget;
+}
+
+// Bumped by clearWidgetData. updateWidgetData awaits AsyncStorage before its iOS write, so a
+// call already in flight when the user signs out would otherwise put their data back.
+let widgetWriteEpoch = 0;
+
 // ─── FR1: updateWidgetData ────────────────────────────────────────────────────
 
 /**
@@ -859,36 +898,23 @@ export async function updateWidgetData(
   myRequests?: ManualRequestEntry[],
   prevWeekSnapshot?: { hours: number; earnings: number } | null,
 ): Promise<void> {
+  const epoch = widgetWriteEpoch;
   const data = buildWidgetData(hoursData, aiData, pendingCount, config, approvalItems ?? [], myRequests ?? [], Date.now(), prevWeekSnapshot);
 
   // Android: write snapshot to AsyncStorage for task handler to read
   await AsyncStorage.setItem(WIDGET_DATA_KEY, JSON.stringify(data));
 
+  // Signed out while the write above was pending: undo it and skip the iOS write.
+  if (epoch !== widgetWriteEpoch) {
+    try { await AsyncStorage.removeItem(WIDGET_DATA_KEY); } catch { /* best effort */ }
+    return;
+  }
+
   // iOS: store layout string + timeline entries in App Group UserDefaults,
   // then signal WidgetKit to reload.
   if (Platform.OS === 'ios') {
-    // Guard: check if the native module is available before requiring expo-widgets.
-    // requireOptionalNativeModule returns null if the module isn't compiled in
-    // (New Architecture / TurboModules safe — NativeModules registry is old-arch only).
-    if (!requireOptionalNativeModule('ExpoWidgets')) {
-      console.log('[bridge] iOS widget skipped (native module unavailable)');
-      return;
-    }
-    let createWidget: ((...args: unknown[]) => { updateTimeline: (entries: unknown[]) => void }) | undefined;
-    try {
-      // expo-widgets is iOS-only and only available in native dev/prod builds.
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const mod = require('expo-widgets') as { createWidget?: (...args: unknown[]) => { updateTimeline: (entries: unknown[]) => void } } | undefined;
-      createWidget = mod?.createWidget;
-    } catch {
-      // Module not compiled in (Expo Go / simulator) — skip silently
-      console.log('[bridge] iOS widget skipped (expo-widgets unavailable in dev)');
-      return;
-    }
-    if (!createWidget) {
-      console.log('[bridge] iOS widget skipped (expo-widgets unavailable in dev)');
-      return;
-    }
+    const createWidget = loadCreateWidget();
+    if (!createWidget) return;
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const widget = createWidget('HourglassWidget', WIDGET_LAYOUT_JS as any);
@@ -898,5 +924,64 @@ export async function updateWidgetData(
     } catch (err) {
       console.error('[bridge] iOS widget update failed:', err);
     }
+  }
+}
+
+// ─── Sign-out: clearWidgetData ────────────────────────────────────────────────
+
+/**
+ * The empty snapshot the widget shows after sign-out: zero hours and earnings, no
+ * deadline countdown, no daily bars, no approval items or request memos.
+ * Same shape as buildWidgetData's no-hoursData branch, with no config input.
+ */
+export function buildSignedOutWidgetData(now: number = Date.now()): WidgetData {
+  return {
+    hours: '0.0',
+    hoursDisplay: '0.0h',
+    earnings: '$0',
+    earningsRaw: 0,
+    today: '0.0h',
+    hoursRemaining: '',
+    aiPct: 'N/A',
+    brainlift: '0.0h',
+    deadline: 0,
+    urgency: 'none',
+    pendingCount: 0,
+    isManager: false,
+    cachedAt: now,
+    useQA: false,
+    daily: [],
+    approvalItems: [],
+    myRequests: [],
+    actionBg: '',
+    paceBadge: 'none',
+    weekDeltaHours: '',
+    weekDeltaEarnings: '',
+    brainliftTarget: '5h',
+    todayDelta: '',
+  };
+}
+
+/**
+ * Called on sign-out. clearAll() removes the Android 'widget_data' key, but the iOS
+ * timeline lives in App Group UserDefaults, outside AsyncStorage. Left alone it keeps
+ * showing the signed-out user's hours and earnings, their request memos and, for
+ * managers, direct reports' names and hours. This overwrites it with a single
+ * signed-out entry. Never throws.
+ */
+export async function clearWidgetData(): Promise<void> {
+  widgetWriteEpoch++;
+  try { await AsyncStorage.removeItem(WIDGET_DATA_KEY); } catch { /* clearAll removes it too */ }
+
+  if (Platform.OS !== 'ios') return;
+  const createWidget = loadCreateWidget();
+  if (!createWidget) return;
+  try {
+    const widget = createWidget('HourglassWidget', WIDGET_LAYOUT_JS);
+    const now = Date.now();
+    widget.updateTimeline([{ date: new Date(now), props: buildSignedOutWidgetData(now) }]);
+    console.log('[bridge] widget timeline cleared');
+  } catch (err) {
+    console.error('[bridge] iOS widget clear failed:', err);
   }
 }

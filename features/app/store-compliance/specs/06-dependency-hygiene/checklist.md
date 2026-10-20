@@ -258,7 +258,7 @@ Follow `docs/RELEASING.md` §Native (spec 05) as written: its order, its owner t
   - [ ] Approve one QA item; reject one with a reason
   - [ ] Settings → About: Privacy Policy and Support open in the in-app browser. The version row reads `Version <version> (<N>)` with `Update: embedded`.
   - [ ] Widgets: add small, medium and large; each shows data; tapping one opens the app (expo-widgets 55.0.5 on the newer expo-modules-core)
-  - [ ] Silent push: within 30 min of a server cron tick, the widget timestamp updates (expo-notifications moved; `server/` has no manual trigger route)
+  - [ ] Widget refresh on open: opening the app updates the widget (the silent push doesn't refresh the widget (no `registerTaskAsync` task; `addNotificationReceivedListener` only hears foreground `willPresent`), so don't wait for a cron tick)
   - [ ] A local deadline notification fires, and tapping it routes correctly
   - [ ] Sign Out clears data, and the relay token is removed
 

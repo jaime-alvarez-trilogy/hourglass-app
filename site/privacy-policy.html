@@ -155,7 +155,7 @@
     <h2>3. How Your Data Is Stored</h2>
     <p>Your credentials are stored exclusively on your device using the platform's secure storage (iOS Keychain via Expo SecureStore). They are never transmitted to any server operated by this application.</p>
     <p>Work data may be temporarily cached on your device to allow the app and home screen widgets to display information when offline. This cache is stored locally and is never uploaded or shared.</p>
-    <p>If you are a manager, the team data listed in section 2 is cached on your device in the same way as your own work data, and signing out deletes it from the app's cache.</p>
+    <p>If you are a manager, the team data listed in section 2 is cached on your device in the same way as your own work data. Signing out deletes it from the app's cache and, in version 1.1.0 and later, from home screen widgets. Profile photos may stay in the iOS image cache until iOS clears it or you delete the app (see section 6).</p>
 
     <h2>4. Data We Do Not Collect</h2>
     <ul>
@@ -167,19 +167,18 @@
     </ul>
 
     <h2>5. Background Refresh</h2>
-    <p>Hourglass uses a lightweight background ping mechanism to keep your home screen widget up to date. This service sends a silent push notification to your device to trigger a local data refresh. No personal data is transmitted as part of this process — the notification contains no payload other than a refresh signal.</p>
+    <p>Hourglass includes a lightweight background ping service that sends a silent push notification to your device as a refresh signal. No personal data is transmitted as part of this process — the notification contains no payload other than a refresh signal. The app does not currently refresh data when it receives this signal: your home screen widget updates when you open the app, and between opens it shows the last data the app fetched.</p>
     <p>If you allow notifications, the app registers an anonymous device push token with Expo's push notification service and with this refresh service; the token contains no personal data and is not linked to your identity or your Crossover account.</p>
     <p>Each time the app starts, it also checks Expo's update service (EAS Update) for a newer version of the app's code. That request includes a random installation identifier created by the app, the platform, the app's runtime version, release channel and current update ID, and, if the app hit a fatal error while starting on a previous launch, a short description of that error. It does not include your Crossover credentials or work data, and the identifier is not linked to your Crossover account.</p>
 
     <h2>6. Data Retention and Deletion</h2>
-    <p>Your credentials and cached work data are kept only on your device. Signing out deletes your saved credentials and the app's cached work data. Home screen widgets may continue to show the last data they received until you delete the app. If you delete the app without signing out, iOS may keep your saved credentials in the device Keychain, so sign out first to remove them.</p>
+    <p>Your credentials and cached work data are kept only on your device. Signing out deletes your saved credentials and the app's cached work data. In version 1.1.0 and later, signing out also clears the data shown in home screen widgets; in earlier versions, widgets may continue to show the last data they received until you delete the app. Profile photos shown in the app may stay in the iOS image cache until iOS clears it or you delete the app. If you delete the app without signing out, iOS may keep your saved credentials in the device Keychain, so sign out first to remove them.</p>
     <p>The refresh service stores only the anonymous push token and the time it was last registered. When you sign out, the app asks the refresh service to delete the token. Tokens that Expo's push service reports as no longer registered are deleted automatically.</p>
 
     <h2>7. Permissions</h2>
     <p>The app may request the following device permissions:</p>
     <ul>
       <li><strong>Notifications:</strong> To deliver reminders about approval deadlines and weekly summaries. You can disable these at any time in iOS Settings.</li>
-      <li><strong>Background App Refresh:</strong> To keep widget data current.</li>
     </ul>
 
     <h2>8. Children's Privacy</h2>

@@ -222,6 +222,38 @@ describe('FR6: scripts/check-legal-pages.sh', () => {
     expect(run.stdoutLines).toContain('PASS support');
   });
 
+  // Build-18 re-review: the silent push never reaches JS on iOS, so a deployed page that still
+  // promises background widget refresh is stale.
+  it('FR6 (d3): privacy body still claims the push keeps the widget up to date → FAIL privacy', async () => {
+    const stale = readSitePage('privacy-policy.html').replace(
+      'Hourglass includes a lightweight background ping service',
+      'Hourglass uses a lightweight background ping mechanism to keep your home screen widget up to date. Hourglass includes a lightweight background ping service',
+    );
+    expect(stale).toContain('to keep your home screen widget up to date');
+    const srv = await startServer(sitePages({ 'privacy-policy.html': stale }));
+    const run = await runScript([srv.base]);
+    expect(run.code).toBe(1);
+    expect(run.stdoutLines).toContain(
+      'FAIL privacy: contains forbidden "to keep your home screen widget up to date"',
+    );
+    expect(run.stdoutLines).toContain('PASS support');
+  });
+
+  it('FR6 (e0): support FAQ still claims background widget updates → FAIL support', async () => {
+    const stale = readSitePage('support.html').replace(
+      'After that, the widget updates each time you open the app.',
+      'After that, the widget updates when you open the app and in the background when iOS allows it.',
+    );
+    expect(stale).toContain('in the background when iOS allows it');
+    const srv = await startServer(sitePages({ 'support.html': stale }));
+    const run = await runScript([srv.base]);
+    expect(run.code).toBe(1);
+    expect(run.stdoutLines).toContain(
+      'FAIL support: contains forbidden "in the background when iOS allows it"',
+    );
+    expect(run.stdoutLines).toContain('PASS privacy');
+  });
+
   it('FR6 (e): support page without the contact mailto → exit 1 with FAIL support', async () => {
     const noMailto = readSitePage('support.html')
       .split('mailto:jaime.alvarez@trilogy.com')

@@ -84,6 +84,8 @@ Delete the two keys that the SDK 55 config schema rejects (`additionalProperties
 
 Silent push needs only `remote-notification`. The path is `NotificationsAppDelegateSubscriber.didReceiveRemoteNotification` → `NotificationCenterManager` → the JS listener registered at `src/notifications/handler.ts:117`. None of it uses background fetch or TaskManager.
 
+> **Correction (build-18 re-review, 2026-10-20).** The last hop doesn't exist. `NotificationCenterManager.didReceive(userInfo)` asks its delegates, and `EmitterModule` (behind `addNotificationReceivedListener`) doesn't implement that method, so iOS gets `.noData`. The JS listener fires only from `willPresent`, which a content-available push with no alert never reaches. JS sees a background push only through a `Notifications.registerTaskAsync` task, and that needs `expo-task-manager` (removed here, because its plugin adds `fetch` back). So the relay push refreshed nothing before this spec and still refreshes nothing after it. Policy §5, the support FAQ and spec 05 smoke step 6 now say so. Real background refresh would need a task registered without the `fetch` mode, and that's a separate spec.
+
 **Requirements:**
 - `app.json` `expo.ios.infoPlist.UIBackgroundModes` becomes exactly `["remote-notification"]`.
 - Run `npm uninstall expo-background-fetch expo-task-manager`, which updates both `package.json` (removes lines 32 and 50) and `package-lock.json`.
@@ -346,7 +348,7 @@ resolved config (introspect)  ──►  EAS prebuild (CNG)  ──►  Info.pli
 | A local prebuild gets committed | `/ios` is in `.gitignore:60`. After the prebuild check, `git status --porcelain` must be empty, then `rm -rf ios`. Prebuild reports "Updated package.json \| no changes". |
 | `expo prebuild --clean` on a dirty tree | Run with `CI=1`. `@expo/cli` (`utils/git.js:83-104`) continues without prompting when non-interactive. |
 | Reasons duplicated between the app manifest and pod manifests | Harmless. Xcode aggregates per bundle, and `mergePrivacyInfo` dedups within the app file. |
-| Manifest vs. policy vs. nutrition label | Device ID is declared, not linked, not tracking, purpose App Functionality. This matches spec 01's push-token sentence and OPS O5. If O5 is entered differently in App Store Connect, fix O5, not the manifest. |
+| Manifest vs. policy vs. nutrition label | Device ID is declared, not linked, not tracking, purpose App Functionality. This matches spec 01's push-token sentence and OPS O5. If O5 is entered differently in App Store Connect, fix O5, not the manifest. **Build-18 re-review:** Crash Data was added on the same terms. Policy §5 discloses expo-updates' `Expo-Fatal-Error` header, which sends the previous launch's fatal error to EAS Update, so the manifest and O5 now declare `NSPrivacyCollectedDataTypeCrashData` too. |
 | Widget extension has no manifest | Out of Scope #5. This is an open hand-off: the `ITMS-91053` processing-email check isn't in spec 05 or OPS.md yet. The item text and decision rule are in Out of Scope #5, and the checklist's Final Verification gates on the item being placed. |
 | Native fingerprint changes | Expected. Build 18 is a native build, and spec 04 must baseline its fingerprint after this spec merges. |
 | `expo/bin/cli` path missing in a future SDK | The introspection suite fails loudly with ENOENT, which surfaces the change and doesn't skip silently. |

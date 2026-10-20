@@ -33,7 +33,7 @@ Changes to asc.js can't be covered by Jest because the file is untracked and abs
 
 1. **Submitting 1.1.0 for App Review.** **Descoped (user decision).** The user submits only after the TestFlight smoke test passes. The runbook (FR6) documents the command (`submit-app-review <buildId>`), and FR4 hardens it, but implementation never runs it.
 
-2. **App Privacy nutrition label (OPS O5).** **Descoped (user step).** App privacy details aren't exposed by the public ASC API. The user declares Device ID → App Functionality, Not Linked, Not Used for Tracking in the ASC UI.
+2. **App Privacy nutrition label (OPS O5).** **Descoped (user step).** App privacy details aren't exposed by the public ASC API. The user declares Device ID and Crash Data → App Functionality, Not Linked, Not Used for Tracking in the ASC UI (Crash Data added in the build-18 re-review for expo-updates' `Expo-Fatal-Error` header; see OPS O5).
 
 3. **Accepting Apple's updated agreement.** **Descoped (user step).** Only the Account Holder can accept it (ASC → Business). As of 2026-10-19 the ASC API returns `403 FORBIDDEN.REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED`, which blocks every asc.js call, `eas submit`, and every read-only verification in this spec until it's accepted.
 
@@ -578,9 +578,9 @@ attach-build <18> ─► check-submission ─► submit-app-review <18> --dry-ru
 3. Approvals: approve one QA item, then reject one with a reason.
 4. Settings → About: Privacy Policy and Support open in the in-app browser and load. The version row reads `Version 1.1.0 (18)` and `Update: embedded`.
 5. Widgets: add small, medium and large. They show data, and tapping one opens the app.
-6. Silent push: within 30 min of a cron tick (`server/cron.ts:39`), the widget timestamp updates. This proves dropping `fetch` (spec 03) broke nothing.
+6. Widget refresh on open: after step 3, opening the app updates the widget. (Re-review 2026-10-20: this replaced "within 30 min of a cron tick, the widget timestamp updates". That check could never pass, because the silent push doesn't refresh the widget (no `registerTaskAsync` task; `addNotificationReceivedListener` only hears foreground `willPresent`). Dropping `fetch` in spec 03 didn't cause this.)
 7. A local deadline notification fires, and tapping it routes correctly.
-8. Sign Out clears data, and `curl -s <relay>/health` shows `tokenCount` drop by 1 against a reading taken just before.
+8. Sign Out clears data, the widgets show the empty signed-out view, and `curl -s <relay>/health` shows `tokenCount` drop by 1 against a reading taken just before.
 
 **Mocks needed:** none. FR1 is a static config test, and the rest is command verification.
 
