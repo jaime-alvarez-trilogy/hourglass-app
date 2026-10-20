@@ -108,7 +108,7 @@ export default function GlassCard({
   layerBudget = true,
   style,
   testID,
-}: GlassCardProps): JSX.Element {
+}: GlassCardProps): React.JSX.Element {
   const [dims, setDims] = useState({ w: 0, h: 0 });
 
   const blurRadius = elevated ? BLUR_RADIUS.elevated : BLUR_RADIUS.base;

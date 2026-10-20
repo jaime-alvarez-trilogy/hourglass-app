@@ -14,7 +14,7 @@ interface SectionLabelProps {
   className?: string;
 }
 
-export default function SectionLabel({ children, className }: SectionLabelProps): JSX.Element {
+export default function SectionLabel({ children, className }: SectionLabelProps): React.JSX.Element {
   const base = 'text-textSecondary font-sans-semibold text-xs uppercase tracking-widest';
   const combined = className ? `${base} ${className}` : base;
 

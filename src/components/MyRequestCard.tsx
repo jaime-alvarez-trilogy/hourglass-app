@@ -65,7 +65,7 @@ interface MyRequestCardProps {
   entry: ManualRequestEntry;
 }
 
-export default function MyRequestCard({ entry }: MyRequestCardProps): JSX.Element {
+export default function MyRequestCard({ entry }: MyRequestCardProps): React.JSX.Element {
   const { date, durationMinutes, memo, status, rejectionReason } = entry;
 
   const badgeBg = BADGE_BG[status];

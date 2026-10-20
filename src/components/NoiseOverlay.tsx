@@ -14,7 +14,7 @@
 import React from 'react';
 import { View, ImageBackground, StyleSheet } from 'react-native';
 
-export default function NoiseOverlay(): JSX.Element {
+export default function NoiseOverlay(): React.JSX.Element {
   return (
     <View pointerEvents="none" style={styles.container}>
       <ImageBackground

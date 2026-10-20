@@ -6,6 +6,7 @@
 // No StyleSheet.create — NativeWind className only (except inline dimension style).
 
 import React, { useEffect } from 'react';
+import type { DimensionValue } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -16,7 +17,7 @@ import { timingSmooth } from '@/src/lib/reanimated-presets';
 
 interface SkeletonLoaderProps {
   /** Default: '100%' */
-  width?: number | string;
+  width?: DimensionValue;
   /** Default: 20 */
   height?: number;
   /** rounded-full for circular placeholders (default: false) */
@@ -30,7 +31,7 @@ export default function SkeletonLoader({
   height = 20,
   rounded = false,
   className,
-}: SkeletonLoaderProps): JSX.Element {
+}: SkeletonLoaderProps): React.JSX.Element {
   const opacity = useSharedValue(0.5);
 
   useEffect(() => {

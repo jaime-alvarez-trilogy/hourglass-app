@@ -129,7 +129,7 @@ export default function PanelGradient({
   state,
   children,
   className,
-}: PanelGradientProps): JSX.Element {
+}: PanelGradientProps): React.JSX.Element {
   const opacity = useSharedValue(0);
   // Track mount state without reading opacity.value on the JS thread.
   // Reading a SharedValue from useEffect (JS thread) triggers WorkletRuntime::executeSync

@@ -19,6 +19,7 @@ import React from 'react';
 import { create, act } from 'react-test-renderer';
 import * as path from 'path';
 import * as fs from 'fs';
+import type { TrendSparklineProps } from '@/src/components/TrendSparkline';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -113,17 +114,7 @@ const MOCK_DATA_12 = [1200, 1350, 1100, 1500, 1400, 1600, 1450, 1550, 1700, 1800
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
-function renderSparkline(props: {
-  data?: number[];
-  width?: number;
-  height?: number;
-  color?: string;
-  maxValue?: number;
-  showGuide?: boolean;
-  onScrubChange?: (index: number | null) => void;
-  weekLabels?: string[];
-  externalCursorIndex?: number | null;
-}) {
+function renderSparkline(props: Partial<TrendSparklineProps>) {
   const TrendSparkline = require('@/src/components/TrendSparkline').default;
   const defaultProps = {
     data: MOCK_DATA_4,

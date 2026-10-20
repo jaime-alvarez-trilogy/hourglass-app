@@ -39,9 +39,8 @@ function makeAIWeekData(aiPctLow: number, aiPctHigh: number, brainliftHours: num
     brainliftHours,
     taggedSlots: 100,
     totalSlots: 120,
-    aiUsageSlots: 75,
-    brainliftSlots: 30,
-    noTagSlots: 20,
+    workdaysElapsed: 0,
+    dailyBreakdown: [],
   };
 }
 

@@ -10,15 +10,6 @@ export const GestureDetector = ({ children }: { children: React.ReactNode; gestu
 
 export const Gesture = {
   Pan: () => ({
-    minDistance: () => ({
-      enabled: () => ({
-        onBegin: () => ({
-          onUpdate: () => ({
-            onFinalize: () => ({}),
-          }),
-        }),
-      }),
-    }),
     enabled: jest.fn().mockReturnThis(),
     minDistance: jest.fn().mockReturnThis(),
     activeOffsetX: jest.fn().mockReturnThis(),

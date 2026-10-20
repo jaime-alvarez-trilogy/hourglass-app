@@ -343,28 +343,65 @@ describe('02-platform-split-nav — FR2: FloatingPillTabBar wiring', () => {
 
 // ─── 02-platform-split-nav: FR3 — Screen Content Padding ─────────────────────
 
+// 07-ci-typecheck-lint FR5c: `contentStyle` is not a BottomTabNavigationOptions
+// key (bottom-tabs 7 / expo-router 55 never read it), so it was a no-op. Pill
+// clearance comes from each tab screen's own scroll paddingBottom; a working
+// `sceneStyle` would double-pad.
+
 describe('02-platform-split-nav — FR3: screen content padding', () => {
   let source: string;
+  let androidScreenOptions: string | null;
+
+  // Returns the balanced `{{ ... }}` object passed to the Android
+  // `<Tabs screenOptions=...>` (not `<Tabs.Screen>`), or null if absent.
+  function extractAndroidScreenOptions(src: string): string | null {
+    const tabsOpen = src.search(/<Tabs\s/);
+    if (tabsOpen === -1) return null;
+    const attr = src.indexOf('screenOptions={', tabsOpen);
+    if (attr === -1) return null;
+    const start = attr + 'screenOptions='.length;
+    let depth = 0;
+    for (let i = start; i < src.length; i++) {
+      if (src[i] === '{') depth++;
+      else if (src[i] === '}') {
+        depth--;
+        if (depth === 0) return src.slice(start, i + 1);
+      }
+    }
+    return null;
+  }
+
+  const TAB_SCREEN_FILES = ['index', 'overview', 'ai', 'approvals'].map((name) =>
+    path.resolve(__dirname, `../${name}.tsx`)
+  );
 
   beforeAll(() => {
     source = fs.readFileSync(LAYOUT_FILE, 'utf8');
+    androidScreenOptions = extractAndroidScreenOptions(source);
   });
 
-  it('SC3.1 — PILL_BOTTOM_OFFSET constant is defined', () => {
-    expect(source).toMatch(/PILL_BOTTOM_OFFSET\s*=/);
+  it('SC3.1 — Android <Tabs screenOptions> sets no contentStyle (not a bottom-tabs option)', () => {
+    expect(androidScreenOptions).not.toBeNull();
+    expect(androidScreenOptions).toContain('headerShown');
+    expect(androidScreenOptions).not.toMatch(/\bcontentStyle\s*:/);
   });
 
-  it('SC3.1 — PILL_BOTTOM_OFFSET value is >= 100', () => {
-    const match = source.match(/PILL_BOTTOM_OFFSET\s*=\s*(\d+)/);
-    expect(match).not.toBeNull();
-    const value = parseInt(match![1], 10);
-    expect(value).toBeGreaterThanOrEqual(100);
+  it('SC3.1 — Android <Tabs screenOptions> sets no sceneStyle (screens pad themselves)', () => {
+    expect(androidScreenOptions).not.toBeNull();
+    expect(androidScreenOptions).not.toMatch(/\bsceneStyle\s*:/);
   });
 
-  it('SC3.2 — contentStyle includes paddingBottom: PILL_BOTTOM_OFFSET', () => {
-    expect(source).toContain('contentStyle');
-    expect(source).toContain('paddingBottom');
-    expect(source).toContain('PILL_BOTTOM_OFFSET');
+  it('SC3.2 — each tab screen pads its scroll content by >= 100 to clear the pill', () => {
+    const underPadded: string[] = [];
+    for (const file of TAB_SCREEN_FILES) {
+      const screen = fs.readFileSync(file, 'utf8');
+      const paddings = [...screen.matchAll(/paddingBottom:\s*(\d+)/g)].map((m) => parseInt(m[1], 10));
+      const maxPadding = Math.max(-1, ...paddings);
+      if (!/<ScrollView\b/.test(screen) || maxPadding < 100) {
+        underPadded.push(`${path.basename(file)} (max paddingBottom ${maxPadding})`);
+      }
+    }
+    expect(underPadded).toEqual([]);
   });
 
   it('SC3.3 — tabBarStyle display none present to hide default tab bar', () => {

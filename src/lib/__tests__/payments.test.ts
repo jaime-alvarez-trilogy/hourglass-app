@@ -18,6 +18,9 @@ function makePayment(from: string, amount: number): Payment {
     amount,
     paidHours: 0,
     workedHours: 0,
+    overtimeHours: 0,
+    approvedOvertimeHours: 0,
+    manualMinutes: 0,
     status: 'PAID',
   };
 }
@@ -137,12 +140,22 @@ describe('getWeeklyEarningsTrend', () => {
   });
 
   describe('interface and exports', () => {
-    it('SC2.7 — Payment interface has amount, from, to fields', () => {
-      // Type-level check via assignment — will fail to compile if wrong
-      const p: Payment = { amount: 1000, from: '2026-03-02', to: '2026-03-08' };
+    it('SC2.7 — Payment interface has amount, periodStartDate, periodEndDate fields', () => {
+      // Type-level check via assignment — fails `npm run typecheck` if the contract drifts
+      const p: Payment = {
+        amount: 1000,
+        periodStartDate: '2026-03-02',
+        periodEndDate: '2026-03-08',
+        paidHours: 0,
+        workedHours: 0,
+        overtimeHours: 0,
+        approvedOvertimeHours: 0,
+        manualMinutes: 0,
+        status: 'PAID',
+      };
       expect(p.amount).toBe(1000);
-      expect(p.from).toBe('2026-03-02');
-      expect(p.to).toBe('2026-03-08');
+      expect(p.periodStartDate).toBe('2026-03-02');
+      expect(p.periodEndDate).toBe('2026-03-08');
     });
 
     it('SC2.8 — returns an array', () => {

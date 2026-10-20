@@ -102,10 +102,10 @@ describe('HapticTab — FR3: runtime render', () => {
               onLongPress: jest.fn(),
               onPressIn: jest.fn(),
               onPressOut: jest.fn(),
-              children: React.createElement('View' as any, null, 'icon'),
               style: {},
               accessibilityState: { selected: false },
             },
+            React.createElement('View' as any, null, 'icon'),
           ),
         );
       });
@@ -124,10 +124,10 @@ describe('HapticTab — FR3: runtime render', () => {
             onLongPress: jest.fn(),
             onPressIn: jest.fn(),
             onPressOut: jest.fn(),
-            children: React.createElement('View' as any, { testID: 'tab-icon' }, 'icon'),
             style: {},
             accessibilityState: { selected: false },
           },
+          React.createElement('View' as any, { testID: 'tab-icon' }, 'icon'),
         ),
       );
     });

@@ -118,7 +118,7 @@ export default function AIArcHero({
   deltaPercent,
   ambientColor,
   size = 180,
-}: AIArcHeroProps): JSX.Element {
+}: AIArcHeroProps): React.JSX.Element {
   // Geometry derived from size prop
   const cx = size / 2;
   const cy = size / 2;
