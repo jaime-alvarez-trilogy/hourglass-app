@@ -34,22 +34,46 @@ Feature: `store-compliance`
 ## Phase A.0: Test Foundation (SDK 55)
 
 ### FR1: Hotfix lane, dependency guards and release tooling
-- [ ] (C) Pre-flight:
+- [x] (C) Pre-flight:
   - `git status --porcelain` is empty, and `git rev-parse HEAD` is `aade79b` or a spec-only commit on top of it.
   - `node --version` is ≥ 22.13.
   - Record the `npm test`, `npm run typecheck` and `npm run lint` baselines (pass counts, exit codes).
-- [ ] (C) `git cherry-pick 962d413` (**once**; it isn't picked again in A.1). That brings `__tests__/config/deps.test.ts` (red). If spec 06's `checklist.md` conflicts, take the incoming version (`git checkout --theirs features/app/store-compliance/specs/06-dependency-hygiene/checklist.md`).
-- [ ] (C) Edit `deps.test.ts`:
+  - Done 2026-10-20: `git status --porcelain` → empty. HEAD `18be018` (two `spec(10-…)` commits on `aade79b`). `node --version` → `v22.17.0`, npm 10.9.2, eas-cli 20.1.0.
+  - Baselines: `npm test` → exit 0, 180 suites / 5087 tests passed. `npm run typecheck` → exit 0. `npm run lint` → exit 0, `✖ 499 problems (0 errors, 499 warnings)`.
+- [x] (C) `git cherry-pick 962d413` (**once**; it isn't picked again in A.1). That brings `__tests__/config/deps.test.ts` (red). If spec 06's `checklist.md` conflicts, take the incoming version (`git checkout --theirs features/app/store-compliance/specs/06-dependency-hygiene/checklist.md`).
+  - Done 2026-10-20 → `1a18a5c`. No conflict (spec 06's `checklist.md` auto-merged).
+- [x] (C) Edit `deps.test.ts`:
   - Delete the `FR5: refreshed to the latest SDK 55 patch line` describe.
   - Rewrite FR4 as "contains X iff `patches/X+*.patch` exists" plus "every entry is a direct dependency". An absent list is allowed when there are no patches.
   - Add "`react-native-inner-shadow` is in neither `dependencies` nor `devDependencies`".
-- [ ] (C) `ci-gates.test.ts`: every `node-version` is an even major ≥ 22, and at least one exists.
-- [ ] (C) `__tests__/scripts/ota-publish.test.ts`: the guard accepts build JSON with `runtime.version` and with `runtimeVersion`.
-- [ ] (C) `app-config.test.ts`: a new `describe('10-sdk-58-ios-27')` block containing only the `eas.json` `cli.version` floor ≥ 25.2.0 case (FR5 and FR6 add the rest).
-- [ ] (C) Run them. Expect red on:
+  - Done 2026-10-20. FR5 describe deleted. `versionAtLeast` is kept for FR4's SDK 58 floors, with its unit cases moved to a `helpers` describe on SDK 58-style values (`grep -nE "55\.0\.31|0\.83\.10" __tests__/config/deps.test.ts` → nothing).
+  - FR4 is the pure `collectExcludeProblems(pkg, patchFiles)`. The top-level package comes from patch-package's own parser (`packageNames[0]`, so a nested `a++b` patch requires `a`). It has 3 real-tree cases and 8 fixtures: no list / empty list with no patches valid, patched-but-missing, exclude-without-patch, not-a-direct-dep, scoped, nested.
+  - inner-shadow: `package.json` (both sections) **and** no `node_modules/react-native-inner-shadow` lockfile key. `collectPatchProblems` rules 1–6 and their fixtures are unchanged.
+- [x] (C) `ci-gates.test.ts`: every `node-version` is an even major ≥ 22, and at least one exists.
+  - Done 2026-10-20: a new `10-sdk-58-ios-27 — FR1` describe with 4 cases: all values even and ≥ 22, with ≥ 1 present; `app-tests` and `server-tests` each set one; and `major()` parses `22`/`22.x`/`22.13.1` and rejects `lts/*`. `jobBlock` was hoisted to module scope (FR8's cases unchanged).
+- [x] (C) `__tests__/scripts/ota-publish.test.ts`: the guard accepts build JSON with `runtime.version` and with `runtimeVersion`.
+  - Done 2026-10-20: `step 4: both eas-cli build JSON shapes (spec 10 FR1)`, 4 cases:
+    - the new shape publishes once;
+    - the legacy shape publishes once;
+    - a dry run on the new shape names the build;
+    - a different `runtime.version` is refused **by name**, which proves the field is actually read.
+  - The new-shape fixture mirrors real eas-cli 25.3.0 output (see A.1).
+- [x] (C) `app-config.test.ts`: a new `describe('10-sdk-58-ios-27')` block containing only the `eas.json` `cli.version` floor ≥ 25.2.0 case (FR5 and FR6 add the rest).
+  - Done 2026-10-20: `eas cli.version floor is >= 25.2.0` parses `>= X.Y.Z` (typed `easJson` import, no `fs`) and asserts it's ≥ 25.2.0, so later bumps still pass.
+- [x] (C) Run them. Expect red on:
   - rule 3 (`^55.0.5`), `--error-on-fail`, `@expo/ngrok`, the exclude and inner-shadow;
   - the Node 22 case, both `ota-publish` shapes, and `cli.version`.
   - The fixture and unit cases stay green. Record the counts.
+  - **Red, 2026-10-20** (`npx jest <file>` each): 14 failed / 113 passed / 127.
+    - `deps.test.ts`: 9 failed / 29 passed / 38.
+      - Rule 3 (2): `expo-widgets: declared "^55.0.5" must be exactly "55.0.5"`, and the real-tree `"55.0.5"` case.
+      - `--error-on-fail` (1); `@expo/ngrok` (2: package.json `"^4.1.0"` and 15 lockfile keys); inner-shadow (2: `"^1.3.1"` and the lockfile key).
+      - Exclude (2): `Expected ["expo-widgets","react-native-reanimated"] Received []`. Both patches exist, so the iff rule needs **both** names.
+    - `ci-gates.test.ts`: 1 failed / 20 passed / 21 (`bad: ["20","20"]`).
+    - `ota-publish.test.ts`: 3 failed / 41 passed / 44. All three are new-shape cases; the guard read `runtime ""`.
+      - The legacy-shape case is green before the change, because that's today's behavior. So only one of the "both shapes" is red, plus the dry-run and by-name cases.
+    - `app-config.test.ts`: 1 failed / 23 passed / 24 (`atLeast25_2_0: false` on `">= 18.0.0"`).
+    - Every fixture and unit case is green.
 
 ### FR2: Forward-compatible navigation, dead code and Skia
 - [ ] (C) Create `__tests__/config/sdk58-migration.test.ts` with the FR2 cases: no `useIsFocused` from `@react-navigation/native`, no `Skia.Path.Make()`, no `.copy().trim(`, and `components/haptic-tab.tsx` absent.
@@ -74,6 +98,12 @@ Feature: `store-compliance`
 
 ⚠️ **Validate test design BEFORE implementing.** Weak tests lead to weak implementation.
 
+> 2026-10-20, FR1-only run: these Phase A boxes cover FR1–FR3 and stay open for the FR3 pass. The FR1 tests got a manual check instead (no validator agent in that run):
+> - Every FR1 success criterion has a test or a recorded command.
+> - The exclude rule has positive and negative fixtures and can't pass on an empty list while patches exist.
+> - The Node case requires ≥ 1 value and a value per job.
+> - The ota-publish shape case proves the field is read (the mismatch is refused by name).
+
 - [ ] Run the `red-phase-test-validator` agent on `deps.test.ts`, `ci-gates.test.ts`, `ota-publish.test.ts`, `sdk58-migration.test.ts`, the ScrubCursor, AIArcHero and useStaggeredEntry tests, and the client tests.
 - [ ] Every FR1–FR3 success criterion has a test, or a recorded command check.
 - [ ] The source-walk tests can't pass vacuously. Each one asserts that the walk visited at least 50 files and found the known-good sites (e.g. `app/_layout.tsx`).
@@ -85,26 +115,73 @@ Feature: `store-compliance`
 ## Phase A.1: Implementation (SDK 55)
 
 ### FR1
-- [ ] (C) `git tag build-18 aade79b && git branch release/1.1 aade79b && git push origin build-18 release/1.1`. Record `git rev-parse build-18 release/1.1`.
-- [ ] (C) `git cherry-pick 96035ea` (**only** this one; `962d413` was picked in A.0).
+- [x] (C) `git tag build-18 aade79b && git branch release/1.1 aade79b && git push origin build-18 release/1.1`. Record `git rev-parse build-18 release/1.1`.
+  - Done 2026-10-20. The push printed `* [new tag] build-18 -> build-18` and `* [new branch] release/1.1 -> release/1.1`.
+  - `git rev-parse build-18 release/1.1` → `aade79b5db85e4d90e2963c8836fe43401ab262a` twice. `git ls-remote origin build-18 release/1.1` showed both at `aade79b…`. (`build-18` is a lightweight tag.)
+  - After the ota-publish cherry-pick below, `release/1.1` is `7b0e328`: `git merge-base aade79b release/1.1` → `aade79b`, and `git rev-list --count aade79b..release/1.1` → 1. `build-18` stays `aade79b` on origin.
+- [x] (C) `git cherry-pick 96035ea` (**only** this one; `962d413` was picked in A.0).
   - Resolve the `package.json` conflict by hand, keeping `typecheck`/`lint` and adding the strict `postinstall`.
   - For spec 06's `checklist.md`, take the incoming version.
   - Regenerate the lockfile with `npm install` instead of resolving it by hand.
-- [ ] (C) Remove `react-native-inner-shadow` (`npm uninstall react-native-inner-shadow`) and `git rm __mocks__/react-native-inner-shadow.ts`.
-- [ ] (C) `rm -rf node_modules && npm ci`. Exit 0, both patches listed as applied, no warnings.
-- [ ] (C) `.github/workflows/test.yml`: `node-version: '22'` in both jobs.
-- [ ] (C) `scripts/ota-publish.sh:86-95`: read `(b.runtime && b.runtime.version) ?? b.runtimeVersion`. FR1 tests green. Commit.
-- [ ] (C) Cherry-pick to `release/1.1`, inside this worktree:
+  - Done 2026-10-20 → `7384790`.
+    - The only conflict was `package.json` `scripts`. Resolved to `typecheck: "tsc --noEmit"` + `postinstall: "patch-package --error-on-fail --error-on-warn"`. `lint` was untouched.
+    - Spec 06's `checklist.md` and the lockfile auto-merged with no conflict.
+    - `npm install` → exit 0, `removed 31 packages`, `expo-widgets@55.0.5 ✔`, `react-native-reanimated@4.2.1 ✔`. The npm-written lockfile is byte-identical to git's merge result.
+- [x] (C) Remove `react-native-inner-shadow` (`npm uninstall react-native-inner-shadow`) and `git rm __mocks__/react-native-inner-shadow.ts`.
+  - Done 2026-10-20. Pre-check: `grep -rn inner-shadow app src components hooks constants` → comments and negative tests only (GlassCard), zero imports. `node_modules/react-native-inner-shadow` has no podspec and no `ios/`, and no lockfile package depends on it.
+  - `npm uninstall` → exit 0, `removed 1 package`. The mock is deleted.
+  - **Also:** `expo.install.exclude` gains `react-native-reanimated`. `patches/react-native-reanimated+4.2.1.patch` exists, so the FR4 iff rule requires it (96035ea only listed `expo-widgets`). It's now `["expo-widgets","react-native-reanimated"]`.
+  - Lockfile vs `aade79b`: 0 version changes, 41 keys removed (40 `@expo/ngrok` + transitive, 1 inner-shadow). The native surface equals build 18's.
+- [x] (C) `rm -rf node_modules && npm ci`. Exit 0, both patches listed as applied, no warnings.
+  - Done 2026-10-20: exit 0 and `added 1178 packages`. `patch-package --error-on-fail --error-on-warn` printed `expo-widgets@55.0.5 ✔` and `react-native-reanimated@4.2.1 ✔`, with no patch-package warnings. (npm also prints 12 upstream `npm warn deprecated` registry notices for transitive packages. `release/1.1`'s tree prints 13.)
+  - **Environment workaround, used for every clean install in FR1.** The first plain `npm ci` stalled in `@shopify/react-native-skia`'s postinstall `scripts/install-skia.mjs`. It was downloading the 685 MB m144c prebuilt binaries from GitHub's CDN at ~30 KB/s, an ETA of hours, so it was killed after ~12 min.
+    - Clean installs run as `rm -rf node_modules && SKIP_SKIA_DOWNLOAD=1 npm ci` (the script's own skip switch). Then `libs/` is APFS-cloned (`cp -cR`) from `hg-worktrees/release18/node_modules/@shopify/react-native-skia/libs`, and `diff -rq` → identical (685M).
+    - The source is the same Skia 2.4.18 / m144c with the same lockfile integrity, produced by the same postinstall.
+    - Helper: `/tmp/sdk58-tools/clean-ci.sh` (ephemeral). Jest mocks Skia, so the tests never read `libs/`.
+    - SDK 58's Skia 2.14 needs its own download in FR4. Expect the same slowness, and plan for it.
+- [x] (C) `.github/workflows/test.yml`: `node-version: '22'` in both jobs.
+  - Done 2026-10-20: both `'20'` → `'22'`. The step order is unchanged (SC8.2 green).
+- [x] (C) `scripts/ota-publish.sh:86-95`: read `(b.runtime && b.runtime.version) ?? b.runtimeVersion`. FR1 tests green. Commit.
+  - Done 2026-10-20: `const rtv = (b.runtime && b.runtime.version) ?? b.runtimeVersion;` feeds the `build_rtv` field. `bash -n` OK.
+  - Green: `deps.test.ts` 38/38, `ci-gates.test.ts` 21/21, `ota-publish.test.ts` 44/44.
+  - With only the red `cli.version` case stashed: `npm test` 0 (181 suites / 5133 tests), `npm run typecheck` 0, `npm run lint` 0 (0 errors, 499 warnings).
+  - Commits: `f077a17` `chore(10-sdk-58-ios-27): FR1 adapt dependency guards, drop inner-shadow, CI on Node 22` and `c7d4c60` `fix(10-sdk-58-ios-27): ota-publish.sh reads runtime.version from eas-cli >= 22 JSON`. The second touches only the script and its test, so it cherry-picks cleanly.
+- [x] (C) Cherry-pick to `release/1.1`, inside this worktree:
   - `git switch release/1.1 && git cherry-pick <sha> && rm -rf node_modules && npm ci && npm test`.
   - `git push origin release/1.1`.
   - `git switch feat/sdk-58 && rm -rf node_modules && npm ci`.
   - **Record no runtime value before this last `npm ci` finishes.**
   - Record the `release/1.1` test result and `git log release/1.1 --oneline -1 -- scripts/ota-publish.sh`.
-- [ ] (C) `npm i -g eas-cli@latest`. Record `eas --version` (≥ 25.2.0). Set `eas.json` `cli.version` to `">= 25.2.0"`.
+  - Done 2026-10-20, in place (no extra worktree).
+    - `git cherry-pick -x c7d4c60` → `7b0e328`. The amend before pushing only moved the `(cherry picked from …)` line above the trailer. It changes `scripts/ota-publish.sh` and its test only.
+    - Clean `npm ci` on `release/1.1` (Skia workaround above): exit 0, plain `patch-package` printed both ✔.
+    - **`release/1.1` `npm test` → exit 0, 180 suites / 5091 tests**: build 18's 5087 plus the 4 new shape cases.
+    - `git push origin release/1.1` → `aade79b..7b0e328`. `git log release/1.1 --oneline -1 -- scripts/ota-publish.sh` → `7b0e328 fix(10-sdk-58-ios-27): ota-publish.sh reads runtime.version from eas-cli >= 22 JSON`.
+    - Then `git switch feat/sdk-58` and a clean `npm ci`: exit 0, strict postinstall, both ✔.
+    - No runtime value was resolved or recorded in FR1. FR8 records the baseline.
+- [x] (C) `npm i -g eas-cli@latest`. Record `eas --version` (≥ 25.2.0). Set `eas.json` `cli.version` to `">= 25.2.0"`.
+  - Done 2026-10-20, after the cherry-pick. `npm i -g eas-cli@latest` → exit 0. `eas --version` → `eas-cli/25.3.0 darwin-arm64 node-v22.17.0`. `eas.json` `cli.version` changed `">= 18.0.0"` → `">= 25.2.0"`, and `eas config --platform ios --profile production --json --non-interactive` → exit 0 (the CLI accepts the floor).
+  - `eas build:list --help` still has `--platform`, `--status`, `--channel`, `--runtime-version`, `--limit`, `--json` and `--non-interactive`, so the script's argv is valid.
+  - Shape check, read-only: `eas build:list --platform ios --status finished --channel production --limit 2 --json --non-interactive`.
+    - Build objects have `runtime: {id, version}` and `updateChannel: {id, name}`, and **no** `runtimeVersion`. `appVersion` and `appBuildVersion` are unchanged.
+    - The guard expression on the newest build (`05e37eef-9a8a-47ef-bcee-f37be3aebad9`, 1.1.0 (18), `gitCommitHash` `aade79b`) reads `1f59138f04a4a284c1956c0fdb6bb0e74dc8dcdb`.
+    - The test fixture was updated to match (`31d46fa`). `release/1.1` keeps the first fixture, which differs only in `updateChannel` being a string; the script never reads it.
+  - Commit `abe73a2` `chore(10-sdk-58-ios-27): FR1 eas.json cli.version >= 25.2.0`.
 - [ ] (J) **ITMS-91053 baseline (before FR4 starts).** In the App Store Connect processing emails for builds 17 and 18, search for `ITMS-91053`. Record "none", or each binary and API category listed:
-  - Build 17: ______
-  - Build 18: ______
-- [ ] (C) `npx expo install --check` exits 0. Three gates green. `deps.test.ts`, `ci-gates.test.ts`, `ota-publish.test.ts` and the `cli.version` case are green. Record.
+  - Build 17: pending (J). J is checking the processing emails (2026-10-20).
+  - Build 18: pending (J). J is checking the processing emails (2026-10-20).
+  - Must be filled in before FR4 starts.
+- [x] (C) `npx expo install --check` exits 0. Three gates green. `deps.test.ts`, `ci-gates.test.ts`, `ota-publish.test.ts` and the `cli.version` case are green. Record.
+  - Final FR1 run, 2026-10-20 at `31d46fa`:
+    - `npm test` → **exit 0**, 181 suites / 5134 tests: baseline 5087 + 38 deps + 4 ci-gates + 4 ota-publish + 1 cli.version.
+    - `npm run typecheck` → **exit 0**.
+    - `npm run lint` → **exit 0**, `✖ 499 problems (0 errors, 499 warnings)`, the same as baseline, with none in the 4 touched test files.
+    - The four FR1 files: `deps.test.ts` 38/38, `ci-gates.test.ts` 21/21, `ota-publish.test.ts` 44/44, `app-config.test.ts` 24/24.
+  - **`npx expo install --check` → exit 1. Recorded, not fixed.**
+    - The exclude works: the first line is `Skipped checking dependencies: expo-widgets and react-native-reanimated. These dependencies are listed in expo.install.exclude in package.json.`
+    - The failure is the 25-package SDK 55 patch-line drift that already exists at `aade79b`, for example `expo@55.0.7 - expected version: ~55.0.31` and `react-native@0.83.2 - expected version: 0.83.10`. The lockfile has 0 version changes vs `aade79b`, so build 18 gives the identical list minus the skip line.
+    - Clearing it would mean `npx expo install --fix` on SDK 55. That's spec 06 FR5, which this spec drops (spec-research Problem Context, Research Corrections 6). It would also change native versions, against checkpoint A's "nothing native changes" (Decision 2).
+    - The criterion is reachable only after FR4's SDK 58 install, and FR4's own `--check` success criterion covers it.
 
 ### FR2
 - [ ] (C) `useIsFocused` from `'expo-router'` at `FadeInScreen.tsx:18`, `useFocusKey.ts:2` and `useStaggeredEntry.ts:29`.
@@ -479,3 +556,15 @@ Each cell passes when there's no clipping or overlap, every chart re-measures wi
   - New decisions 10 (iPad options) and 16 (ASC key access).
 - 27A9275 is the released Xcode 27.1, so the image pin stands.
 - Nothing implemented yet.
+
+**2026-10-20 (FR1 implemented)**: FR1 is done on SDK 55, with all three gates green.
+- Commits on `feat/sdk-58`: `1a18a5c` (962d413), `7384790` (96035ea), `f077a17`, `c7d4c60`, `abe73a2`, `31d46fa` and this checklist commit.
+- Refs: `build-18` → `aade79b`, and `release/1.1` → `7b0e328`, which is `aade79b` plus the ota-publish cherry-pick. Both are on origin.
+- eas-cli 25.3.0.
+- Open items:
+  - (1) ITMS-91053 for builds 17 and 18 is **pending (J)**, and it's needed before FR4.
+  - (2) `npx expo install --check` exits 1 on SDK 55 because of the pre-existing patch-line drift that spec 10 drops. The exclude itself is honored. See the FR1 A.1 entry.
+  - (3) Clean installs skip Skia's 685 MB GitHub download (~30 KB/s here) and restore byte-identical `libs/` from a sibling worktree. FR4's Skia 2.14 needs a real download, so start it early.
+- Deviations:
+  - `expo.install.exclude` also lists `react-native-reanimated`, because the iff rule requires it while its patch exists.
+  - `versionAtLeast` is kept, with neutral unit values, for FR4.
