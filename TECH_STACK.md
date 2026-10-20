@@ -157,6 +157,7 @@ Background execution is silent-push only (`UIBackgroundModes: ["remote-notificat
 | **expo-symbols** | ~55.0.5 | SF Symbols (iOS) |
 | **expo-system-ui** | ~55.0.10 | System UI color config |
 | **expo-constants** | ~55.0.9 | App config access |
+| **expo-application** | ~55.0.10 | Native app version (Settings → About) |
 | **expo-updates** | ~55.0.15 | OTA updates (EAS) |
 | **expo-status-bar** | ~55.0.4 | Status bar control |
 | **expo-splash-screen** | ~55.0.12 | Splash screen |

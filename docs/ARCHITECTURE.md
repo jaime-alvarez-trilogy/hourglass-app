@@ -264,7 +264,7 @@ app/
 | Overview | `/(tabs)/overview` | `useOverviewData(4\|12\|24)`, `useEarningsHistory`, `useApprovalItems` | payments history, work-diary history | `ApprovalUrgencyCard` (`overview.tsx:365-371`) |
 | AI | `/(tabs)/ai` | `useAIData`, `useAppBreakdown`, `useWeeklyHistory` | work-diary (per-day background fetch), local app-usage cache | none |
 | Requests | `/(tabs)/approvals` | `useApprovalItems`, `useMyRequests`, `useConfig` | approvals/manual + overtime × 3 weeks | TEAM REQUESTS section (`approvals.tsx:304-339`); contributors see MY REQUESTS only |
-| Settings | `/modal` | `useConfig` | auth/token, auth/buildConfig | dev toggles `devManagerView`, `devOvertimePreview` (dev-only). "Debug Log" section (Share / Clear buttons) visible to **all users** — spec 08. |
+| Settings | `/modal` | `useConfig` | auth/token, auth/buildConfig | dev toggles `devManagerView`, `devOvertimePreview` (dev-only). "Debug Log" section (Share / Clear buttons) visible to **all users** — spec 08. "About" section (Privacy Policy, Support, version/update row) visible to **all users** — store-compliance spec 02. |
 
 ### 5.5 Auth gating
 
