@@ -48,11 +48,14 @@ trap 'rm -rf "$tmpdir"' EXIT
 failures=0
 o2_hint_printed=0
 
-# fetch URL OUTFILE — prints the HTTP status code; "000" when curl gets no response
-# (connection refused, DNS failure, timeout). Never aborts the script.
+# fetch URL OUTFILE — prints the HTTP status code; "000" when curl gets no complete response
+# (connection refused, DNS failure, timeout, or a transfer cut off after the status line, where
+# curl still reports the status it saw but exits non-zero). Never aborts the script.
 fetch() {
   local code
-  code=$(curl -sS --max-time 20 -o "$2" -w '%{http_code}' "$1") || true
+  if ! code=$(curl -sS --max-time 20 -o "$2" -w '%{http_code}' "$1"); then
+    code="000"
+  fi
   [ -n "$code" ] || code="000"
   printf '%s' "$code"
 }

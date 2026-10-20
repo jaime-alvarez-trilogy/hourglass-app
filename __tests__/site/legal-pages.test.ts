@@ -107,8 +107,10 @@ const POLICY_H2 = [
 const NEW_S4_BULLET_1 =
   'We do not operate user accounts, and we do not store your Crossover credentials or work data on any server';
 
+// Bullet 2 is scoped to SDKs: expo-updates' launch check (§5) sends an installation id and,
+// after a failed start, an error description to Expo, so "no crash reports at all" would overclaim.
 const S4_BULLETS_2_TO_5 = [
-  'We do not collect analytics, crash reports, or usage telemetry',
+  'We do not add analytics, crash-reporting or usage-telemetry SDKs',
   'We do not use advertising SDKs or tracking libraries',
   'We do not sell, rent, or share any personal data with third parties',
   'We do not export your data to any external system',
@@ -120,12 +122,20 @@ const S5_ORIGINAL_P =
 const S5_NEW_P =
   "If you allow notifications, the app registers an anonymous device push token with Expo's push notification service and with this refresh service; the token contains no personal data and is not linked to your identity or your Crossover account.";
 
+// expo-updates checks EAS Update on every launch (EXUpdatesCheckOnLaunch ALWAYS) and sends the
+// EAS-Client-ID, platform, runtime version, channel and update ids, plus Expo-Fatal-Error after a
+// failed start (node_modules/expo-updates/ios/EXUpdates/AppLoader/FileDownloader.swift).
+const S5_UPDATES_P =
+  "Each time the app starts, it also checks Expo's update service (EAS Update) for a newer version of the app's code. That request includes a random installation identifier created by the app, the platform, the app's runtime version, release channel and current update ID, and, if the app hit a fatal error while starting on a previous launch, a short description of that error. It does not include your Crossover credentials or work data, and the identifier is not linked to your Crossover account.";
+
 const S6_PARAGRAPHS = [
   "Your credentials and cached work data are kept only on your device. Signing out deletes your saved credentials and the app's cached work data. Home screen widgets may continue to show the last data they received until you delete the app. If you delete the app without signing out, iOS may keep your saved credentials in the device Keychain, so sign out first to remove them.",
   "The refresh service stores only the anonymous push token and the time it was last registered. When you sign out, the app asks the refresh service to delete the token. Tokens that Expo's push service reports as no longer registered are deleted automatically.",
 ];
 
-// Sections the spec requires to stay byte-identical (whitespace-insensitive here).
+// Sections the spec requires to stay byte-identical (whitespace-insensitive here). §2 and §3 also
+// carry the manager team-data bullet and caching sentence (useTeamRoster / useTeamAggregateData,
+// persisted in HOURGLASS_QUERY_CACHE, which clearAll() removes and handleSignOut() clears in memory).
 const UNCHANGED_SECTIONS: Record<string, string> = {
   '1. About This App': `
     <p>Hourglass is a mobile application built exclusively for employees of Crossover for Work. It provides a convenient view of your tracked hours, earnings, AI usage metrics, and team approval requests by connecting directly to your existing Crossover account.</p>
@@ -138,11 +148,13 @@ const UNCHANGED_SECTIONS: Record<string, string> = {
       <li>Earnings and payment summaries</li>
       <li>AI usage and BrainLift session tags</li>
       <li>Pending time approval requests (for managers)</li>
+      <li>For managers: your direct reports' names, team names and profile photos, their tracked hours, and the AI usage and BrainLift data from their work diaries</li>
     </ul>
     <p>This data is fetched directly from Crossover's servers and displayed in the app. It is not sent to any third-party service.</p>`,
   '3. How Your Data Is Stored': `
     <p>Your credentials are stored exclusively on your device using the platform's secure storage (iOS Keychain via Expo SecureStore). They are never transmitted to any server operated by this application.</p>
-    <p>Work data may be temporarily cached on your device to allow the app and home screen widgets to display information when offline. This cache is stored locally and is never uploaded or shared.</p>`,
+    <p>Work data may be temporarily cached on your device to allow the app and home screen widgets to display information when offline. This cache is stored locally and is never uploaded or shared.</p>
+    <p>If you are a manager, the team data listed in section 2 is cached on your device in the same way as your own work data, and signing out deletes it from the app's cache.</p>`,
   '7. Permissions': `
     <p>The app may request the following device permissions:</p>
     <ul>
@@ -209,7 +221,7 @@ describe('FR1: corrected privacy policy at site/privacy-policy.html', () => {
     expect(innerAll(html, 'h2').map(textOf)).toEqual(POLICY_H2);
   });
 
-  it('FR1: §4 bullet 1 no longer claims "no databases"; bullets 2–5 are unchanged', () => {
+  it('FR1: §4 bullet 1 no longer claims "no databases"; bullets 2–5 match the contract', () => {
     const html = readSite('privacy-policy.html');
     expect(html).not.toContain('user accounts or databases');
     expect(html).toContain(NEW_S4_BULLET_1);
@@ -217,12 +229,13 @@ describe('FR1: corrected privacy policy at site/privacy-policy.html', () => {
     expect(bullets).toEqual([NEW_S4_BULLET_1, ...S4_BULLETS_2_TO_5]);
   });
 
-  it('FR1: §5 keeps its original paragraph and adds exactly one push-token sentence', () => {
+  it('FR1: §5 keeps its original paragraph, then the push-token and update-check paragraphs', () => {
     const html = readSite('privacy-policy.html');
     const paragraphs = innerAll(section(html, '5. '), 'p').map(squash);
-    expect(paragraphs).toHaveLength(2);
+    expect(paragraphs).toHaveLength(3);
     expect(paragraphs[0]).toBe(S5_ORIGINAL_P);
     expect(paragraphs[1]).toBe(S5_NEW_P);
+    expect(paragraphs[2]).toBe(S5_UPDATES_P);
   });
 
   it('FR1: new §6 "Data Retention and Deletion" contains both contract paragraphs verbatim', () => {
@@ -231,7 +244,7 @@ describe('FR1: corrected privacy policy at site/privacy-policy.html', () => {
     expect(paragraphs).toEqual(S6_PARAGRAPHS);
   });
 
-  it('FR1: summary box, §3 sentence, §4 bullets 2–5, contact and footer are unchanged', () => {
+  it('FR1: summary box, §3 sentence, §4 bullets 2–5 (contract text), contact and footer are present', () => {
     const html = readSite('privacy-policy.html');
     expect(html).toContain(
       '<p><strong>Summary:</strong> Hourglass is an internal tool for Crossover employees. Your credentials stay on your device. We do not collect, store, or share your personal data on any external server.</p>',

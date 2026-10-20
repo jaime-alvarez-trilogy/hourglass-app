@@ -3,12 +3,14 @@
 // FR2: the out-of-repo NativeWindSmoke test is gone, and no test or mock
 //      source reaches outside the repo (home directory, ~/.claude).
 // FR3: typecheck foundation (script, @types/node, tsconfig types).
-// FR7: ESLint guard against the Node-only global `Buffer` in app code.
+// FR7: ESLint guard against the Node-only global `Buffer` in app code (static
+//      config check plus a probe that runs the real ESLint on snippets).
 // FR8: .github/workflows/test.yml `app-tests` gates on typecheck + lint + test.
 //
 // Static fs reads only — the same pattern as the source-analysis tests in
 // app/(tabs)/__tests__/native-tabs.test.tsx. No new dependencies.
 
+import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -109,6 +111,37 @@ describe('07-ci-typecheck-lint — FR7: Buffer lint guard', () => {
       /['"]no-restricted-globals['"]\s*:\s*\[\s*['"]error['"]\s*,[\s\S]*?name\s*:\s*['"]Buffer['"]/
     );
   });
+
+  // Probe: lint a snippet as if it lived at `file`, with the repo's real eslint.config.js.
+  // A child process, because ESLint loads flat config through a dynamic import() that jest's
+  // VM can't run. --stdin-filename needs no file on disk. ESLint exits 1 when it reports errors.
+  function bufferRules(code: string, file: string): string[] {
+    const run = spawnSync(
+      process.execPath,
+      [path.join(ROOT, 'node_modules/eslint/bin/eslint.js'), '--stdin', '--stdin-filename', file, '--format', 'json'],
+      { cwd: ROOT, input: code, encoding: 'utf8' },
+    );
+    if (run.status !== 0 && run.status !== 1) throw new Error(`eslint exited ${run.status}: ${run.stderr}`);
+    const [result] = JSON.parse(run.stdout) as { messages: { ruleId: string | null; message: string }[] }[];
+    return result.messages
+      .filter((m) => /Buffer/.test(m.message))
+      .map((m) => m.ruleId ?? 'null');
+  }
+
+  it.each([
+    ['bare Buffer', 'export const a = Buffer.from("x");', 'no-restricted-globals'],
+    ['global.Buffer', 'export const a = global.Buffer.from("x");', 'no-restricted-properties'],
+    ['globalThis.Buffer', 'export const a = globalThis.Buffer.from("x");', 'no-restricted-properties'],
+    ["globalThis['Buffer']", "export const a = globalThis['Buffer'];", 'no-restricted-properties'],
+    ['destructured from globalThis', 'const { Buffer: B } = globalThis;\nexport const a = B;', 'no-restricted-properties'],
+  ])('SC7.2 — probe: %s in app code is an error', (_label, code, rule) => {
+    expect(bufferRules(code, 'src/lib/lint-probe.ts')).toEqual([rule]);
+  }, 30_000);
+
+  it('SC7.3 — probe: TextEncoder in app code and global.Buffer in a test file are clean', () => {
+    expect(bufferRules('export const a = new TextEncoder().encode("x");', 'src/lib/lint-probe.ts')).toEqual([]);
+    expect(bufferRules('export const a = global.Buffer.from("x");', 'src/__tests__/lint-probe.test.ts')).toEqual([]);
+  }, 30_000);
 });
 
 // ─── FR8: CI gates in app-tests ──────────────────────────────────────────────

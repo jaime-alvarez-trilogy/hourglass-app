@@ -298,6 +298,25 @@ function makeCases(files) {
       body: { data: { type: 'reviewSubmissions', id: '<new-submission-id>', attributes: { submitted: true } } },
     },
   ];
+  const itemWrite = (subId) => ({
+    method: 'POST',
+    path: '/reviewSubmissionItems',
+    body: {
+      data: {
+        type: 'reviewSubmissionItems',
+        relationships: {
+          reviewSubmission: { data: { type: 'reviewSubmissions', id: subId } },
+          appStoreVersion: { data: { type: 'appStoreVersions', id: 'asv-110' } },
+        },
+      },
+    },
+  });
+  const confirmWrite = (subId) => ({
+    method: 'PATCH',
+    path: `/reviewSubmissions/${subId}`,
+    body: { data: { type: 'reviewSubmissions', id: subId, attributes: { submitted: true } } },
+  });
+  const openLookup = /^\/v1\/reviewSubmissions\?(?=.*filter\[app\]=6761698411)(?=.*filter\[platform\]=IOS)(?=.*filter\[state\]=READY_FOR_REVIEW(,|%2C)UNRESOLVED_ISSUES)/;
   const whatsNewWrite = (text) => ({
     method: 'PATCH',
     path: '/appStoreVersionLocalizations/asvl-110-en',
@@ -1095,7 +1114,11 @@ function makeCases(files) {
       args: ['submit-app-review', 'bld-18', '--dry-run'],
       exit: 0,
       writes: submissionWrites,
-      check: (r, t) => t.has(/^= build 18 already attached/m, 'stdout'),
+      check: (r, t) => {
+        t.has(/^= build 18 already attached/m, 'stdout');
+        t.requested(openLookup, 'contract: GET /reviewSubmissions for open iOS submissions before creating one');
+        t.lacks(/reusing review submission/, 'out', 'the only submission (rs-100) is COMPLETE');
+      },
     },
     {
       id: 'FR4.34',
@@ -1141,6 +1164,64 @@ function makeCases(files) {
     },
 
     // ── FR5: compliance metadata ──
+    {
+      id: 'FR4.37',
+      title: 'submit-app-review re-run after the item POST failed: reuses the open submission, item POST + PATCH only',
+      scenario: 'post-live+open-submission',
+      args: ['submit-app-review', 'bld-18', '--dry-run'],
+      exit: 0,
+      writes: [itemWrite('rs-open'), confirmWrite('rs-open')],
+      check: (r, t) => {
+        t.has(/^= reusing review submission rs-open \(READY_FOR_REVIEW\)$/m, 'stdout');
+        t.requested(openLookup, 'contract: GET /reviewSubmissions for open iOS submissions');
+        t.requested(/^\/v1\/reviewSubmissions\/rs-open\/items\?(.*&)?include=appStoreVersion\b/, 'contract: GET the open submission\'s items');
+      },
+    },
+    {
+      id: 'FR4.38',
+      title: 'submit-app-review re-run after the PATCH failed: version already an item, PATCH only',
+      scenario: 'post-live+open-submission-with-item',
+      args: ['submit-app-review', 'bld-18', '--dry-run'],
+      exit: 0,
+      writes: [confirmWrite('rs-open')],
+      check: (r, t) => {
+        t.has(/^= reusing review submission rs-open \(READY_FOR_REVIEW\)$/m, 'stdout');
+        t.has(/^= version 1\.1\.0 already an item of submission rs-open$/m, 'stdout');
+      },
+    },
+    {
+      id: 'FR4.39',
+      title: 'submit-app-review with an UNRESOLVED_ISSUES submission holding the version: reuse it, PATCH only',
+      scenario: 'post-live+unresolved-submission-with-item',
+      args: ['submit-app-review', 'bld-18', '--dry-run'],
+      exit: 0,
+      writes: [confirmWrite('rs-unresolved')],
+      check: (r, t) => {
+        t.has(/^= reusing review submission rs-unresolved \(UNRESOLVED_ISSUES\)$/m, 'stdout');
+        t.has(/^= version 1\.1\.0 already an item of submission rs-unresolved$/m, 'stdout');
+      },
+    },
+    {
+      id: 'FR4.40',
+      title: 'submit-app-review with the version item REMOVED from the open submission: adds it again',
+      scenario: 'post-live+open-submission-removed-item',
+      args: ['submit-app-review', 'bld-18', '--dry-run'],
+      exit: 0,
+      writes: [itemWrite('rs-open'), confirmWrite('rs-open')],
+      check: (r, t) => t.lacks(/already an item/),
+    },
+    {
+      id: 'FR4.41',
+      title: 'submit-app-review with two open submissions: refuse, 0 writes',
+      scenario: 'post-live+two-open-submissions',
+      args: ['submit-app-review', 'bld-18', '--dry-run'],
+      exit: 1,
+      check: (r, t) => {
+        t.has(/more than one open review submission/);
+        t.has(/rs-open READY_FOR_REVIEW/);
+        t.has(/rs-open-2 UNRESOLVED_ISSUES/);
+      },
+    },
     {
       id: 'FR5.01',
       title: 'set-urls --dry-run before Pages is live: "URL not live: … -> 404 (finish spec 01 / OPS O2)", 0 writes',

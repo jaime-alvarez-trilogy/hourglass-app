@@ -2,6 +2,8 @@
 const { defineConfig } = require('eslint/config');
 const expoConfig = require('eslint-config-expo/flat');
 
+const NO_BUFFER = 'Hermes has no global Buffer. Use TextEncoder (see src/lib/log.ts).';
+
 module.exports = defineConfig([
   expoConfig,
   {
@@ -16,8 +18,14 @@ module.exports = defineConfig([
         'error',
         {
           name: 'Buffer',
-          message: 'Hermes has no global Buffer. Use TextEncoder (see src/lib/log.ts).',
+          message: NO_BUFFER,
         },
+      ],
+      // no-restricted-globals only sees the bare identifier; these catch global.Buffer / globalThis.Buffer.
+      'no-restricted-properties': [
+        'error',
+        { object: 'global', property: 'Buffer', message: NO_BUFFER },
+        { object: 'globalThis', property: 'Buffer', message: NO_BUFFER },
       ],
     },
   },

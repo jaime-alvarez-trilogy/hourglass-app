@@ -10,7 +10,7 @@ How the lane works:
 - Each build embeds its runtime. An update reaches a binary only when the two runtimes match exactly, so an update published from a tree whose native inputs differ from every live build reaches nobody.
 - Binaries check for updates on every cold start, but don't wait for them (`EXUpdatesCheckOnLaunch: ALWAYS`, `EXUpdatesLaunchWaitMs: 0`). The first cold start after a publish downloads the update and the second one runs it.
 - The Settings version row shows `Update: <first 8 chars of the iOS update id>` when an update is running, and `Update: embedded` when the binary's own bundle is.
-- Inside an update, the version row's `version (buildNumber)` comes from the tree that published it, not from the binary. That's why section A publishes from the build's own commit, and why the script warns when the two differ.
+- The version row's `version (buildNumber)` always comes from the binary (`Application.nativeApplicationVersion` and `Constants.platform.ios.buildNumber` in `app/modal.tsx`), so an update never changes it; only the `Update:` line does. The update's manifest (`Constants.expoConfig`) does carry the publishing tree's `app.json` values, so the script warns when they differ from the target build: that means the tree isn't the build's commit, which section A requires.
 
 Rules:
 
@@ -76,7 +76,7 @@ Commit the change (the script needs a clean tree) and make sure you're logged in
 scripts/ota-publish.sh --dry-run "check"
 ```
 
-- `Dry run OK`: a live build has this exact runtime, so the change can ship as an OTA. Also check the caveat row in section E.
+- `Dry run OK`: a finished iOS build on channel `production` has this exact runtime (the `build:` line names it), so the change is OTA-compatible with that build. It reaches App Store users only once that build is READY_FOR_SALE. Until then they're on the previous live build, so use section B to reach build 15. Also check the caveat row in section E.
 - `Refusing to publish: no finished iOS build on channel "production" has runtime …`: run `npm ci` and retry once, since local `node_modules` that drifted from the lockfile change the fingerprint too. If it still refuses, the change is native: ship a build. To see which source changed:
   ```bash
   eas fingerprint:compare --build-id <id> --environment production
@@ -109,7 +109,7 @@ Then force-quit and relaunch twice on a store install. After a rollback, Setting
 | Icons and splash | Forks | Native build |
 | `extra` (feature flags read through `Constants.expoConfig.extra`), or any other `app.json` field except the versions | Forks | Native build |
 | `fingerprint.config.js`, `.fingerprintignore` | Forks | Native build (see Rules) |
-| `version`, `ios.buildNumber` | Doesn't fork | OTA (the Settings row shows the publishing tree's values) |
+| `version`, `ios.buildNumber` | Doesn't fork | OTA (the Settings row still shows the binary's values) |
 | `package.json` scripts | Doesn't fork | OTA |
 | `.gitignore` | Doesn't fork | OTA |
 | `eas.json` (build profiles, submit block) | Doesn't fork | OTA |
@@ -217,7 +217,7 @@ Worked example: for build 18, OPS O6 closed after steps 1–2, O4 after step 4 a
 ### Submit
 
 1. (J) Decide whether to submit, only after all 8 smoke checks pass and the Upload processing-email result allows it.
-2. (C) Preview the submission: `ASC_TRACE=1 node .appstore/asc.js submit-app-review <buildId> --dry-run 2>&1`. Expect `= build <N> already attached`, then `[dry-run] POST /reviewSubmissions`, `[dry-run] POST /reviewSubmissionItems` and `[dry-run] PATCH /reviewSubmissions/<new-submission-id>`, ending with `[dry-run] 3 write(s) skipped`. The `[http]` trace must show only GETs.
+2. (C) Preview the submission: `ASC_TRACE=1 node .appstore/asc.js submit-app-review <buildId> --dry-run 2>&1`. Expect `= build <N> already attached`, then `[dry-run] POST /reviewSubmissions`, `[dry-run] POST /reviewSubmissionItems` and `[dry-run] PATCH /reviewSubmissions/<new-submission-id>`, ending with `[dry-run] 3 write(s) skipped`. The `[http]` trace must show only GETs. If an earlier run stopped partway, the open submission is reused instead: the preview prints `= reusing review submission <id> (<state>)`, skips the `POST /reviewSubmissions`, and also skips the item POST when it prints `= version <x.y.z> already an item of submission <id>`. Two open submissions make it refuse.
 3. (J) Submit: click Submit for Review in ASC, or tell C to run `node .appstore/asc.js submit-app-review <buildId>` live.
 
 ### Post-release

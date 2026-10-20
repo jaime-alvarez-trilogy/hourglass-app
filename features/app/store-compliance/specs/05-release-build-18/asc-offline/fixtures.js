@@ -268,6 +268,8 @@ function today() {
         attributes: { platform: 'IOS', submittedDate: '2026-07-15T12:00:00.000-07:00', state: 'COMPLETE' },
       },
     ],
+    // reviewSubmissionItems by submission id; versionId is the item's appStoreVersion linkage.
+    reviewSubmissionItems: { 'rs-100': [{ id: 'rsi-100', attributes: { state: 'APPROVED' }, versionId: 'asv-100' }] },
   };
 }
 
@@ -341,6 +343,13 @@ function inReview(s) {
   });
 }
 
+// An open (not yet submitted) review submission, as a partial submit-app-review run leaves it.
+function openSubmission(s, id, state, items = []) {
+  s.reviewSubmissions.push({ type: 'reviewSubmissions', id, attributes: { platform: 'IOS', submittedDate: null, state } });
+  s.reviewSubmissionItems[id] = items;
+}
+const item110 = (id, state = 'READY_FOR_REVIEW') => ({ id, attributes: { state }, versionId: 'asv-110' });
+
 const BASES = {
   'agreement-403': () => Object.assign(today(), { agreement403: true }),
   today: () => today(),
@@ -404,6 +413,19 @@ const MODIFIERS = {
   'two-editable-infos': (s) => s.appInfos.push(appInfo('ai-edit-2', 'PREPARE_FOR_SUBMISSION', 'PREPARE_FOR_SUBMISSION')),
   'build15-unexpired': (s) => {
     find(s.builds, 'bld-15').attributes.expired = false;
+  },
+  // POST /reviewSubmissions succeeded, the item POST did not.
+  'open-submission': (s) => openSubmission(s, 'rs-open', 'READY_FOR_REVIEW'),
+  // The item POST succeeded too, the confirming PATCH did not.
+  'open-submission-with-item': (s) => openSubmission(s, 'rs-open', 'READY_FOR_REVIEW', [item110('rsi-open')]),
+  // A rejected submission waiting to be resubmitted: its version item is still there.
+  'unresolved-submission-with-item': (s) =>
+    openSubmission(s, 'rs-unresolved', 'UNRESOLVED_ISSUES', [item110('rsi-unresolved', 'REJECTED')]),
+  // The version's item was removed from the open submission, so it must be added again.
+  'open-submission-removed-item': (s) => openSubmission(s, 'rs-open', 'READY_FOR_REVIEW', [item110('rsi-open', 'REMOVED')]),
+  'two-open-submissions': (s) => {
+    openSubmission(s, 'rs-open', 'READY_FOR_REVIEW');
+    openSubmission(s, 'rs-open-2', 'UNRESOLVED_ISSUES');
   },
   'partial-urls': (s) => {
     find(s.appInfoLocs['ai-edit'], 'ail-edit-en').attributes.privacyPolicyUrl = URLS.privacy;

@@ -110,8 +110,9 @@ if [ "$build_rtv" != "$RTV" ]; then
 fi
 
 # --- 5. Version check (warning only) --------------------------------------------------------
-# Inside an OTA, Constants.expoConfig comes from the update manifest, so the Settings version row
-# shows the publishing tree's version and buildNumber, not the binary's.
+# The Settings version row reads the binary (nativeApplicationVersion / platform.ios.buildNumber),
+# so an OTA never changes it. The update manifest (Constants.expoConfig) does carry this tree's
+# app.json values, and a mismatch means this tree is not the build's commit (runbook section A).
 app_fields=$(node -e '
   const { expo = {} } = JSON.parse(require("fs").readFileSync("app.json", "utf8"));
   const field = (v) => (v == null ? "" : String(v).replace(/[|\r\n]/g, " "));
@@ -123,8 +124,8 @@ EOF
 if [ "$app_version" != "$build_version" ] || [ "$app_build" != "$build_number" ]; then
   printf '%s\n' \
     "WARNING: app.json is $app_version ($app_build) but the target build is $build_version ($build_number)" \
-    "  The update still reaches that build, but its Settings version row will show $app_version ($app_build)." \
-    "  To avoid that, publish from the build's commit (docs/RELEASING.md, section A)." >&2
+    "  The update still reaches that build, and Settings still shows the binary's $build_version ($build_number)," \
+    "  but this tree is not the build's commit. For a baseline, publish from it (docs/RELEASING.md, section A)." >&2
 fi
 
 # --- 6. Dry run -----------------------------------------------------------------------------

@@ -216,7 +216,29 @@ function routeAsc(s, method, url) {
   }
   if (p === '/betaAppLocalizations') return list(matches(q.get('filter[app]'), fixtures.APP_ID) ? s.betaLocs : []);
   if ((m = p.match(/^\/betaAppLocalizations\/([^/]+)$/))) return one(s.betaLocs.find((l) => l.id === m[1]), 'betaAppLocalization');
-  if (p === '/reviewSubmissions') return list(matches(q.get('filter[app]'), fixtures.APP_ID) ? s.reviewSubmissions : []);
+  if (p === '/reviewSubmissions') {
+    if (!matches(q.get('filter[app]'), fixtures.APP_ID)) return list([]);
+    return list(
+      s.reviewSubmissions.filter(
+        (x) => matches(q.get('filter[platform]'), x.attributes.platform) && matches(q.get('filter[state]'), x.attributes.state),
+      ),
+    );
+  }
+  if ((m = p.match(/^\/reviewSubmissions\/([^/]+)\/items$/))) {
+    if (!s.reviewSubmissions.some((x) => x.id === m[1])) return notFound(`mock: no reviewSubmission ${m[1]}`);
+    const include = csv(q.get('include')) ?? [];
+    const items = (s.reviewSubmissionItems[m[1]] ?? []).map((it) => {
+      const rel = { links: { related: `https://${ASC_HOST}/v1/reviewSubmissionItems/${it.id}/appStoreVersion` } };
+      if (include.includes('appStoreVersion')) rel.data = it.versionId ? { type: 'appStoreVersions', id: it.versionId } : null;
+      return { type: 'reviewSubmissionItems', id: it.id, attributes: { ...it.attributes }, relationships: { appStoreVersion: rel } };
+    });
+    const body = { data: items, links: { self: url.href }, meta: { paging: { total: items.length, limit: 200 } } };
+    if (include.includes('appStoreVersion')) {
+      const ids = [...new Set((s.reviewSubmissionItems[m[1]] ?? []).map((it) => it.versionId).filter(Boolean))];
+      body.included = s.versions.filter((v) => ids.includes(v.id));
+    }
+    return ok(body);
+  }
 
   return notFound(`mock: no fixture for GET ${p}`);
 }

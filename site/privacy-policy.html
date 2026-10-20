@@ -130,7 +130,7 @@
     </a>
 
     <h1>Privacy Policy</h1>
-    <p class="subtitle">Last updated: October 19, 2026</p>
+    <p class="subtitle">Last updated: October 20, 2026</p>
 
     <div class="highlight">
       <p><strong>Summary:</strong> Hourglass is an internal tool for Crossover employees. Your credentials stay on your device. We do not collect, store, or share your personal data on any external server.</p>
@@ -148,17 +148,19 @@
       <li>Earnings and payment summaries</li>
       <li>AI usage and BrainLift session tags</li>
       <li>Pending time approval requests (for managers)</li>
+      <li>For managers: your direct reports' names, team names and profile photos, their tracked hours, and the AI usage and BrainLift data from their work diaries</li>
     </ul>
     <p>This data is fetched directly from Crossover's servers and displayed in the app. It is not sent to any third-party service.</p>
 
     <h2>3. How Your Data Is Stored</h2>
     <p>Your credentials are stored exclusively on your device using the platform's secure storage (iOS Keychain via Expo SecureStore). They are never transmitted to any server operated by this application.</p>
     <p>Work data may be temporarily cached on your device to allow the app and home screen widgets to display information when offline. This cache is stored locally and is never uploaded or shared.</p>
+    <p>If you are a manager, the team data listed in section 2 is cached on your device in the same way as your own work data, and signing out deletes it from the app's cache.</p>
 
     <h2>4. Data We Do Not Collect</h2>
     <ul>
       <li>We do not operate user accounts, and we do not store your Crossover credentials or work data on any server</li>
-      <li>We do not collect analytics, crash reports, or usage telemetry</li>
+      <li>We do not add analytics, crash-reporting or usage-telemetry SDKs</li>
       <li>We do not use advertising SDKs or tracking libraries</li>
       <li>We do not sell, rent, or share any personal data with third parties</li>
       <li>We do not export your data to any external system</li>
@@ -167,6 +169,7 @@
     <h2>5. Background Refresh</h2>
     <p>Hourglass uses a lightweight background ping mechanism to keep your home screen widget up to date. This service sends a silent push notification to your device to trigger a local data refresh. No personal data is transmitted as part of this process — the notification contains no payload other than a refresh signal.</p>
     <p>If you allow notifications, the app registers an anonymous device push token with Expo's push notification service and with this refresh service; the token contains no personal data and is not linked to your identity or your Crossover account.</p>
+    <p>Each time the app starts, it also checks Expo's update service (EAS Update) for a newer version of the app's code. That request includes a random installation identifier created by the app, the platform, the app's runtime version, release channel and current update ID, and, if the app hit a fatal error while starting on a previous launch, a short description of that error. It does not include your Crossover credentials or work data, and the identifier is not linked to your Crossover account.</p>
 
     <h2>6. Data Retention and Deletion</h2>
     <p>Your credentials and cached work data are kept only on your device. Signing out deletes your saved credentials and the app's cached work data. Home screen widgets may continue to show the last data they received until you delete the app. If you delete the app without signing out, iOS may keep your saved credentials in the device Keychain, so sign out first to remove them.</p>

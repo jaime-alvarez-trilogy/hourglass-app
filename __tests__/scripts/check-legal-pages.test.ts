@@ -19,7 +19,8 @@ const PREFIX = '/hourglass-app';
 
 jest.setTimeout(20_000);
 
-type Reply = { status: number; body?: string; headers?: Record<string, string> };
+// truncate: send the status line and half the body, then drop the connection (curl exits 18).
+type Reply = { status: number; body?: string; headers?: Record<string, string>; truncate?: boolean };
 type Handler = (pathname: string, query: URLSearchParams) => Reply;
 
 const servers: http.Server[] = [];
@@ -47,6 +48,16 @@ async function startServer(handler: Handler): Promise<Started> {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     requests.push(url.pathname + url.search);
     const reply = handler(url.pathname, url.searchParams);
+    if (reply.truncate) {
+      const body = Buffer.from(reply.body ?? '');
+      res.writeHead(reply.status, {
+        'content-type': 'text/html; charset=utf-8',
+        'content-length': String(body.length),
+        ...reply.headers,
+      });
+      res.write(body.subarray(0, Math.floor(body.length / 2)), () => res.destroy());
+      return;
+    }
     res.writeHead(reply.status, { 'content-type': 'text/html; charset=utf-8', ...reply.headers });
     res.end(reply.body ?? '');
   });
@@ -272,6 +283,27 @@ describe('FR6: scripts/check-legal-pages.sh', () => {
     expect(run.stdoutLines[run.stdoutLines.length - 1]).toBe(
       `3 legal page check(s) failed for ${base}`,
     );
+  });
+
+  it('FR6 (h2): 200 status line then a dropped connection → FAIL HTTP 000, not a misleading content failure', async () => {
+    const pages = sitePages();
+    const srv = await startServer((pathname, query) => {
+      const reply = pages(pathname, query);
+      // Only the exact policy URL drops; the ?cb= probe gets the full page.
+      return pathname === `${PREFIX}/privacy-policy.html` && !query.has('cb') ? { ...reply, truncate: true } : reply;
+    });
+    const run = await runScript([srv.base]);
+    expect(run.killed).toBe(false);
+    expect(run.code).toBe(1);
+    expect(run.stdoutLines).toContain('FAIL privacy: HTTP 000');
+    expect(run.stdout).not.toContain('FAIL privacy: missing');
+    expect(run.stdoutLines).toContain('PASS index');
+    expect(run.stdoutLines).toContain('PASS support');
+    expect(run.stdoutLines[run.stdoutLines.length - 1]).toBe(
+      `1 legal page check(s) failed for ${srv.base}`,
+    );
+    // curl's own transport error stays visible on stderr.
+    expect(run.stderr).toMatch(/curl: \(18\)/);
   });
 
   it('FR6 (i): two arguments → exit 2 and usage on stderr', async () => {

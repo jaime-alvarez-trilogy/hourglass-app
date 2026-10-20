@@ -412,6 +412,9 @@ describe('FR3: scripts/ota-publish.sh', () => {
       const r = run([MSG], { STUB_BUILDS_JSON: JSON.stringify([build(overrides)]) });
       expect(r.status).toBe(0);
       expect(r.stderr).toContain(`WARNING: app.json is 1.1.0 (18) but the target build is ${target}`);
+      // app/modal.tsx reads the binary's version and build, so an OTA never changes the Settings row.
+      expect(r.stderr).toContain(`Settings still shows the binary's ${target}`);
+      expect(r.stderr).not.toContain('version row will show');
       expect(r.stdout).not.toContain('WARNING:');
       expect(r.updateCalls).toHaveLength(1);
       expect(r.stdout).toContain('OTA published');
