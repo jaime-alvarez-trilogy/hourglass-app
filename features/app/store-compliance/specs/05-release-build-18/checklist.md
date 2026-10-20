@@ -118,14 +118,15 @@ Feature: `store-compliance`
   - Every numbered step starts with `(C)` or `(J)`. The App Privacy label, agreement acceptance, ITMS-91053 check, the 8 smoke checks and the submit decision are `(J)`. The only untagged list lines are the section's 3 rules, the two reasons lists, the What's New guidance and the three ITMS-91053 branches.
 - [x] `diff <(head -n $(wc -l < /tmp/releasing-before.md) docs/RELEASING.md) /tmp/releasing-before.md` → no output (spec 04 content unchanged).
 - [x] Commit: `docs(05-release-build-18): add native release runbook`
-- [ ] `features/app/store-compliance/OPS.md` → "Before build 18 is submitted" (spec FR6 "OPS.md ownership"):
+- [x] `features/app/store-compliance/OPS.md` → "Before build 18 is submitted" (spec FR6 "OPS.md ownership"):
   - O3 → `(C)`: `node .appstore/asc.js set-social-media-age-rating`, dry-run first (spec 05 FR5). J does it in the ASC UI only if the command refuses (`socialMedia not exposed by the API`) or the rating isn't 4+ / Brazil L afterwards. Keep "if locked, do it on the 1.1.0 version record".
   - O4 → `(C)`: `node .appstore/asc.js set-urls`, dry-run first (spec 05 FR5). It refuses until the spec 01 URLs return 200. Marketing = `…/hourglass-app/`. J does it in the UI only on an ASC API error.
   - O6 → `(C)`: `disable-public-link`, then `remove-public-link-testers`, dry-run first (spec 05 FR3), before build 18 is uploaded. J does it in ASC → TestFlight only if a command errors.
   - Strike `~~Move the two email testers to an internal group.~~` and add the reason: internal groups only accept ASC team users (spec 05 Out of Scope 7), so the EMAIL testers stay in "Test" with the link off.
   - Leave every other item unchanged and tick nothing.
-- [ ] Run the Phase 1.0 OPS.md verification commands. All match.
-- [ ] Commit: `docs(05-release-build-18): re-own OPS O3/O4/O6 to asc.js`
+- [x] Run the Phase 1.0 OPS.md verification commands. All match.
+  - 2026-10-20: `^- \[ \] \*\*O(3|4|6) \(C\)` → 3 lines (9, 10, 12). Per-line citations: O3 `spec 05 FR5` → 1, O4 `spec 05 FR5` → 1, O6 `spec 05 FR3` → 1. `~~Move the two email testers` → 1 line (O6), followed by the Out of Scope 7 reason. `diff /tmp/ops-before.md` → only lines 9, 10 and 12 differ. `[x]` count → 0.
+- [x] Commit: `docs(05-release-build-18): re-own OPS O3/O4/O6 to asc.js`
 
 ---
 
