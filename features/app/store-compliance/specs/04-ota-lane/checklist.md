@@ -90,9 +90,9 @@ Phases 1.0–1.2 go into the implementation PR, which ships in build 18. Phase 1
   Expect `EXUpdatesRuntimeVersion: 'file:fingerprint'`, `EXUpdatesCheckOnLaunch: 'ALWAYS'`, `EXUpdatesLaunchWaitMs: 0`, and `EXUpdatesURL: 'https://u.expo.dev/4ad8a6bd-aec2-45a5-935f-5598d47b605d'`.
 
 ### FR2: Fingerprint scope
-- [ ] Create `fingerprint.config.js`. Use exactly `module.exports = { sourceSkips: ['ExpoConfigVersions', 'PackageJsonScriptsAll', 'GitIgnore'] }` plus the JSDoc `@type {import('expo/fingerprint').Config}` and a one-line *why* comment per entry.
-- [ ] Create `.fingerprintignore`: comment lines explaining why, then the single pattern `eas.json`. Don't add `features/**`, `docs/**` and similar; they aren't fingerprint sources.
-- [ ] `npx jest __tests__/config/fingerprint-config.test.ts` passes
+- [x] Create `fingerprint.config.js`. Use exactly `module.exports = { sourceSkips: ['ExpoConfigVersions', 'PackageJsonScriptsAll', 'GitIgnore'] }` plus the JSDoc `@type {import('expo/fingerprint').Config}` and a one-line *why* comment per entry.
+- [x] Create `.fingerprintignore`: comment lines explaining why, then the single pattern `eas.json`. Don't add `features/**`, `docs/**` and similar; they aren't fingerprint sources.
+- [x] `npx jest __tests__/config/fingerprint-config.test.ts` passes
 - [ ] Sensitivity matrix. Run it in a scratch worktree, never in the working tree, after committing FR1 and FR2:
   ```bash
   ROOT="$(pwd)"; WT=/tmp/ota-matrix; git worktree add --detach "$WT" HEAD && ln -s "$ROOT/node_modules" "$WT/node_modules" && cd "$WT"
