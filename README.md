@@ -119,7 +119,7 @@ The ping server (Railway) only stores **Expo push tokens** — anonymous device 
 Data stays fresh through two mechanisms:
 
 1. **Foreground refresh** — TanStack Query refetches stale data every time the app comes to the foreground (wired via `AppState`)
-2. **Background refresh** — The Railway server sends a silent push notification every 30 minutes, waking the app to fetch and update widget data
+2. **Background refresh (not active on iOS yet)** — The Railway server sends a silent push notification every 30 minutes, meant to wake the app to fetch and update widget data. The app has no `registerTaskAsync` task, so iOS doesn't run the JS handler for it. The widget refreshes only while the app is open (see `docs/ARCHITECTURE.md` §2)
 
 Query results are persisted to AsyncStorage so the app shows cached data instantly on cold start, even before the network response arrives.
 

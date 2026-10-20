@@ -393,7 +393,7 @@ export function AIConeChart({
 
   return (
   <View>
-    <GestureDetector gesture={gesture} enabled={animDone && size === 'full'}>
+    <GestureDetector gesture={gesture}>
     <View style={{ width, height }}>
       <Animated.View style={[{ height }, clipStyle]}>
       <Canvas style={{ width, height }}>

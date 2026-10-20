@@ -4,6 +4,7 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { WidgetData } from '../../widgets/types';
 
 // Mock expo-widgets — iOS-only native module (virtual so it doesn't need to exist on disk)
 jest.mock('expo-widgets', () => ({}), { virtual: true });
@@ -282,7 +283,7 @@ describe('updateWidgetData — deadlineMs fallback is Sunday (FR2)', () => {
 // ─── FR2: buildTimelineEntries ─────────────────────────────────────────────────
 
 describe('buildTimelineEntries (FR2)', () => {
-  function makeBaseData() {
+  function makeBaseData(): WidgetData {
     return {
       hours: '32.5',
       hoursDisplay: '32.5h',
@@ -298,6 +299,15 @@ describe('buildTimelineEntries (FR2)', () => {
       isManager: false,
       cachedAt: Date.now(),
       useQA: false,
+      daily: [],
+      approvalItems: [],
+      myRequests: [],
+      actionBg: '',
+      paceBadge: 'none',
+      weekDeltaHours: '',
+      weekDeltaEarnings: '',
+      brainliftTarget: '5h',
+      todayDelta: '',
     };
   }
 

@@ -66,7 +66,7 @@ function AppRow({ entry, slotCount }: { entry: AppBreakdownEntry; slotCount: num
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function AppBreakdownCard({ entries, guidance }: AppBreakdownCardProps): JSX.Element | null {
+export default function AppBreakdownCard({ entries, guidance }: AppBreakdownCardProps): React.JSX.Element | null {
   if (entries.length === 0) return null;
 
   const aiApps = entries

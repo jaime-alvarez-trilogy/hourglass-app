@@ -43,7 +43,7 @@ export default function EarningsPaceCard({
   earnings,
   targetWeeklyEarnings,
   window,
-}: EarningsPaceCardProps): JSX.Element | null {
+}: EarningsPaceCardProps): React.JSX.Element | null {
   const annualProjection = computeAnnualProjection(earnings);
 
   // FR5 / FR6: Hidden entirely when no sufficient data

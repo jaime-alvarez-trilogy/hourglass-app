@@ -36,7 +36,7 @@ export default function AppUsageBar({
   nonAiSlots,
   height = 4,
   className,
-}: AppUsageBarProps): JSX.Element {
+}: AppUsageBarProps): React.JSX.Element {
   // Clamp aiOnly to 0 — brainliftSlots should be a subset of aiSlots, but be defensive
   const aiOnlySlots = Math.max(0, aiSlots - brainliftSlots);
   const total = brainliftSlots + aiOnlySlots + nonAiSlots;

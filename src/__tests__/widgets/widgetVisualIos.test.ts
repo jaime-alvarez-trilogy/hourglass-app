@@ -14,8 +14,8 @@ jest.mock(
   () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const mockReact = require('react');
-    function makeComp(name) {
-      return (props) =>
+    function makeComp(name: string) {
+      return (props: Record<string, unknown>) =>
         mockReact.createElement(name, { ...props }, props.children);
     }
     return {

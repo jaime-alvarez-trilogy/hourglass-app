@@ -71,7 +71,7 @@ Calendar-triggered notifications rely on iOS same-id replace (no AsyncStorage ID
 
 - **Request**: `src/lib/pushToken.ts:22-40` (`registerPushToken`). Called once from `app/_layout.tsx:95-99` when `config.setupComplete` is true. Uses `requestPermissionsAsync()`. On failure, push token is never registered with the ping server.
 - **Check**: `useScheduledNotifications.ts:224-225` uses `getPermissionsAsync()` on every foreground (no re-prompt).
-- **Foreground handler**: `app/_layout.tsx:48-54`. `shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false`. Set at module scope.
+- **Foreground handler**: `app/_layout.tsx:48-55`. `shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false` (banner + list + sound, badge off; `.banner | .list` is the iOS 14+ equivalent of the deprecated alert option). Set at module scope.
 - **Background listener**: `app/_layout.tsx:101-108` calls `registerBackgroundPushHandler()` (`src/notifications/handler.ts:65-67`) which wires `addNotificationReceivedListener(handleBackgroundPush)`. Unsubscribed on unmount.
 
 ### 1.5 iOS categories / actions
@@ -100,6 +100,8 @@ None. No custom `setNotificationCategoryAsync` registrations, no actionable appr
 ## 2. Push & Refresh Pipeline
 
 Silent push wakes the app, which fetches fresh data and updates the widget without rendering React.
+
+> **Not wired on iOS (build-18 re-review, 2026-10-20).** The design below is intended, but on iOS §2.2 step 1 never happens. `addNotificationReceivedListener` fires only from `UNUserNotificationCenter` `willPresent`. The server's content-available push goes to `didReceiveRemoteNotification`, and expo-notifications forwards that only to a `Notifications.registerTaskAsync` task. The app has no such task, and no `expo-task-manager` (store-compliance spec 03). So today the widget refreshes only from `useWidgetSync` while the app is open. Between opens, WidgetKit replays the last 96-entry timeline, with only urgency recomputed. Sign-out replaces that timeline through `clearWidgetData()`.
 
 ### 2.1 Server side (Railway)
 
@@ -250,7 +252,7 @@ app/
 `app/(tabs)/_layout.tsx`. Platform-split rendering:
 
 - **iOS** (`NativeTabs` from `expo-router/unstable-native-tabs`): native `UITabBarController` with glass pill on iOS 26+.
-- **Android** (`Tabs` + custom `FloatingPillTabBar` at `:136-142`): default tab bar hidden, custom pill overlay; `contentStyle` adds `PILL_BOTTOM_OFFSET=112` padding.
+- **Android** (`Tabs` + custom `FloatingPillTabBar` at `:126-132`): default tab bar hidden, custom pill overlay. Content clearance comes from each tab screen's own scroll `paddingBottom: 100` (no navigator-level padding).
 
 `TAB_SCREENS` constant (`:50-56`): Home, Overview, AI, Requests + hidden `explore`. Approvals badge shown when `items.length > 0` (`:79`).
 
@@ -264,7 +266,7 @@ app/
 | Overview | `/(tabs)/overview` | `useOverviewData(4\|12\|24)`, `useEarningsHistory`, `useApprovalItems` | payments history, work-diary history | `ApprovalUrgencyCard` (`overview.tsx:365-371`) |
 | AI | `/(tabs)/ai` | `useAIData`, `useAppBreakdown`, `useWeeklyHistory` | work-diary (per-day background fetch), local app-usage cache | none |
 | Requests | `/(tabs)/approvals` | `useApprovalItems`, `useMyRequests`, `useConfig` | approvals/manual + overtime × 3 weeks | TEAM REQUESTS section (`approvals.tsx:304-339`); contributors see MY REQUESTS only |
-| Settings | `/modal` | `useConfig` | auth/token, auth/buildConfig | dev toggles `devManagerView`, `devOvertimePreview` (dev-only). "Debug Log" section (Share / Clear buttons) visible to **all users** — spec 08. |
+| Settings | `/modal` | `useConfig` | auth/token, auth/buildConfig | dev toggles `devManagerView`, `devOvertimePreview` (dev-only). "Debug Log" section (Share / Clear buttons) visible to **all users** — spec 08. "About" section (Privacy Policy, Support, version/update row) visible to **all users** — store-compliance spec 02. |
 
 ### 5.5 Auth gating
 

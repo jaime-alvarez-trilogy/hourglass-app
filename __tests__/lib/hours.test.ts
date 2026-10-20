@@ -10,6 +10,7 @@ import {
   getWeekStartDate,
   getThursdayDeadlineGMT,
 } from '../../src/lib/hours';
+import type { PaymentsResponse } from '../../src/lib/hours';
 
 // ─── Test Fixtures ────────────────────────────────────────────────────────────
 
@@ -31,9 +32,12 @@ const makeTimesheet = (overrides = {}) => ({
   ...overrides,
 });
 
-const makePayments = (overrides = {}) => ({
+const makePayments = (overrides: Partial<PaymentsResponse> = {}): PaymentsResponse => ({
   paidHours: 20,
   workedHours: 20,
+  overtimeHours: 0,
+  approvedOvertimeHours: 0,
+  manualMinutes: 0,
   amount: 500,
   ...overrides,
 });

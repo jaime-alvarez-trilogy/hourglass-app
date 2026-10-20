@@ -35,6 +35,16 @@ function logFileUri(): string {
   return `${FileSystem.documentDirectory ?? ''}${LOG_FILENAME}`;
 }
 
+// Hermes has no Node byte-length global, so count UTF-8 bytes via TextEncoder.
+// Built lazily: a construction failure then surfaces inside the rotation
+// try/catch instead of crashing every importer at module load.
+let utf8Encoder: TextEncoder | null = null;
+
+function utf8ByteLength(s: string): number {
+  if (!utf8Encoder) utf8Encoder = new TextEncoder();
+  return utf8Encoder.encode(s).length;
+}
+
 class Logger {
   private buffer: LogEvent[] = [];
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -181,7 +191,7 @@ class Logger {
     let kept: string[] = [];
     let cumulative = 0;
     for (let i = lines.length - 1; i >= 0; i--) {
-      const lineBytes = Buffer.byteLength(lines[i], 'utf8') + 1; // +1 for \n
+      const lineBytes = utf8ByteLength(lines[i]) + 1; // +1 for \n
       if (cumulative + lineBytes > TARGET_BYTES) break;
       cumulative += lineBytes;
       kept.unshift(lines[i]);

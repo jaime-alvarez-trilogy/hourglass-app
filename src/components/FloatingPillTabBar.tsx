@@ -130,7 +130,7 @@ function PillTabItem({
         {/* Icon with optional badge */}
         <View style={{ position: 'relative' }}>
           <MaterialIcons name={mdIcon} size={20} color={itemColor} />
-          {badge > 0 && (
+          {(badge ?? 0) > 0 && (
             <View
               style={{
                 position: 'absolute',

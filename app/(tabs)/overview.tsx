@@ -646,7 +646,7 @@ function TeamMemberRow({ entry }: { entry: TeamMemberBreakdown }) {
           </View>
           {fetchFailed && (
             <Text className="text-textMuted text-xs font-sans" style={{ marginTop: 2 }}>
-              Couldn't load
+              Couldn&apos;t load
             </Text>
           )}
         </View>

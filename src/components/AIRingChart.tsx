@@ -56,7 +56,7 @@ function Ring({ cx, cy, radius, percent, fillColor, trackColor, strokeWidth, ani
   useEffect(() => {
     animatedSweep.value = withTiming(targetSweep, {
       ...timingChartFill,
-      duration: timingChartFill.duration + animDelay,
+      duration: (timingChartFill.duration ?? 0) + animDelay,
     });
   }, [targetSweep]);
 

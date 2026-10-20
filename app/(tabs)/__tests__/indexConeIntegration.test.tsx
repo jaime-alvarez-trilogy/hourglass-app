@@ -121,7 +121,7 @@ const MOCK_CONE_DATA = {
   isTargetAchievable: true,
 };
 
-const mockComputeAICone = jest.fn(() => MOCK_CONE_DATA);
+const mockComputeAICone = jest.fn((..._args: unknown[]) => MOCK_CONE_DATA);
 jest.mock('@/src/lib/aiCone', () => ({
   computeAICone: (...args: any[]) => mockComputeAICone(...args),
 }));

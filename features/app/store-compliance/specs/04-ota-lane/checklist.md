@@ -1,0 +1,251 @@
+# Implementation Checklist
+
+Spec: `04-ota-lane`
+Feature: `store-compliance`
+
+Phases 1.0–1.2 go into the implementation PR, which ships in build 18. Phase 1.3 (FR4) can only run after build 18 is READY_FOR_SALE. It closes OPS O11.
+
+> Run only the targeted test files listed below. Don't run the full jest suite as part of these steps; CI runs it.
+
+---
+
+## Phase 1.0: Test Foundation
+
+### FR1: Fingerprint runtime policy and version sync
+- [x] Open `__tests__/config/app-config.test.ts`. If spec 03 hasn't landed, create it with spec 03's contract header: `import type { ExpoConfig } from 'expo/config'`, `import appJson from '@/app.json'`, `import pkg from '@/package.json'`, `const expo = appJson.expo as unknown as ExpoConfig`. Follow spec 03's test-file contract: **no `fs`, no `path`, no `package-lock.json` import** in this file. Append a top-level `describe('app.json — 04 OTA lane')` with a nested `describe('FR1: fingerprint runtime policy')` containing:
+  - [x] `expo.runtimeVersion` deep-equals `{ policy: 'fingerprint' }`
+  - [x] `expect(expo.ios).not.toHaveProperty('runtimeVersion')` and `expect(expo.android).not.toHaveProperty('runtimeVersion')`
+  - [x] `pkg.version === expo.version`
+  - [x] `expo.updates.url === 'https://u.expo.dev/' + expo.extra.eas.projectId`
+- [x] Run `npx jest __tests__/config/app-config.test.ts`. The policy assertion and the `pkg.version` assertion must fail (red) before implementation. Spec 03's assertions keep whatever status they had.
+- [x] The lockfile root-version assertions go in `fingerprint-config.test.ts` (FR2 below), not here.
+
+### FR2: Fingerprint scope
+- [x] Create `__tests__/config/fingerprint-config.test.ts` with `ROOT = path.resolve(__dirname, '../..')` and `import appJson from '@/app.json'`. It contains:
+  - [x] `describe('FR1: lockfile root version')`: `const lock = JSON.parse(fs.readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8'))`. Assert `lock.version` and `lock.packages[''].version` each equal `appJson.expo.version`. Assert nothing else in the lockfile. This lives here, not in `app-config.test.ts`, because spec 03's contract bans `fs` and lockfile imports there, and `npm ci` doesn't catch root-version drift (measured).
+  - [x] `require('../../fingerprint.config.js')` deep-equals `{ sourceSkips: [...] }`, and the sorted `sourceSkips` equal `['ExpoConfigVersions', 'GitIgnore', 'PackageJsonScriptsAll']`
+  - [x] For every entry, `typeof SourceSkips[entry] === 'number'`, with `SourceSkips` imported from `expo/fingerprint`. This guards against typos, because `normalizeSourceSkips` silently drops unknown names.
+  - [x] Read `.fingerprintignore` and keep lines that are trimmed, non-empty and don't start with `#`. The result must equal `['eas.json']`.
+- [x] Run `npx jest __tests__/config/fingerprint-config.test.ts`. The FR2 assertions should fail because the files are missing, and the FR1 lockfile assertions should fail because both root fields read `1.0.0`.
+
+### FR3: Guarded publish script
+- [x] Create `__tests__/scripts/ota-publish.test.ts` with the harness from spec.md, Technical Design → "Test harness for FR3":
+  - [x] `repo` and `stubs` as sibling dirs from `fs.mkdtempSync(os.tmpdir())`. Copy the real script into `repo/scripts/`. Write `repo/app.json` (`1.1.0` / `"18"`), then `git init` and commit with `-c user.name -c user.email -c commit.gpgsign=false`.
+  - [x] `stubs/npx` and `stubs/eas` (chmod 755) log `CALL`, `ARG <each>` and `ENV EXPO_NO_DOTENV=` lines to `$STUB_LOG`. Their output comes from `STUB_RTV_JSON/EXIT`, `STUB_BUILDS_JSON/EXIT` and `STUB_UPDATE_JSON/EXIT`.
+  - [x] Spawn with `bash <script>`, `cwd: os.tmpdir()`, `PATH = stubs:$PATH`. Remove the temp dirs in `afterEach`.
+- [x] Usage refusals. Each case exits 1, stderr contains `Usage:`, and the log has no `npx` or `eas` calls:
+  - [x] no args
+  - [x] `"   "` (whitespace only)
+  - [x] two positional args (`fix` `thing`)
+  - [x] unknown flag `--force "msg"`
+- [x] Dirty tree: a modified tracked file (`app.json`) → exit 1, `uncommitted changes`, no `npx`/`eas` calls
+- [x] Dirty tree: an untracked file only → exit 1, `uncommitted changes`, no `npx`/`eas` calls
+- [x] Stubbed runtime `{"runtimeVersion":"1.1.0",...}` → exit 1, `is not a fingerprint hash`, no `eas` calls
+- [x] Runtime resolver exits 1 → exit 1, no `eas` calls
+- [x] `build:list` returns `[]` → exit 1, stderr contains `no finished iOS build on channel "production" has runtime 7e91e3c1…`. No `eas update` call. The logged `build:list` argv includes `--platform` `ios`, `--status` `finished`, `--channel` `production`, `--runtime-version` `<rtv>` and `--json`.
+- [x] `build:list` exits 1 → exit 1, no `eas update` call
+- [x] Happy path → exit 0. `eas update` is called exactly once, and its argv equals `update --channel production --environment production --platform ios --message <msg> --json --non-interactive`. The logged env has `EXPO_NO_DOTENV=1`. stdout contains `OTA published`, the runtime, the group id, the iOS update id and `Update: 019e0000`.
+- [x] The message `fix: "Approve" button` arrives as a single `ARG` line, byte for byte
+- [x] `--dry-run "msg"` → exit 0, stdout contains `Dry run OK` and `eas update --channel production`, no `eas update` call
+- [x] Build `appBuildVersion: "17"` vs app.json `"18"` → exit 0, stderr contains `WARNING:`, `eas update` still called
+- [x] `STUB_UPDATE_EXIT=3` → exit 3, stdout doesn't contain `OTA published`
+- [x] Update JSON with a different `runtimeVersion` → exit 1, stderr contains `ERROR: eas published to runtime`
+- [x] `fs.statSync('scripts/ota-publish.sh').mode & 0o111` is non-zero, and the first line is `#!/usr/bin/env bash`
+- [x] Run `npx jest __tests__/scripts/ota-publish.test.ts`. Everything should fail because the script is missing.
+
+### FR4: Baseline OTA (post-release)
+- [x] No automated test. This FR is a manual end-to-end check in Phase 1.3, and FR3's tests cover its guard logic. Confirm Phase 1.3 is present and that OPS O11 points at it.
+
+### FR5: Release runbook
+- [x] No jest test (documentation). Write down the verification commands to run in Phase 1.1 (listed under FR5 there).
+
+---
+
+## Test Design Validation (MANDATORY)
+
+⚠️ **Validate the test design BEFORE implementing.** Weak tests lead to weak implementation.
+
+- [x] Run the `red-phase-test-validator` agent
+- [x] Every FR1–FR3 success criterion has test coverage. FR2's sensitivity matrix and FR1's introspection check are command checks in 1.1, by design (too slow for jest).
+- [x] Assertions are specific: exact argv arrays, exact stderr substrings from the spec's Interface Contracts, exact exit codes, and "no call" assertions on the stub log for every refusal.
+- [x] Stub fixtures match the verified eas-cli 20.1.0 JSON shapes: `build:list` returns raw BuildFragment objects with `runtimeVersion`/`appVersion`/`appBuildVersion`; `update` returns an array with `id`/`group`/`platform`/`runtimeVersion`.
+- [x] Stubs live outside the temp repo, so they can't make the tree dirty
+- [x] Fix any issues identified before proceeding
+
+---
+
+## Phase 1.1: Implementation
+
+### FR1: Fingerprint runtime policy and version sync
+- [x] `app.json`: replace `"runtimeVersion": { "policy": "appVersion" }` with `{ "policy": "fingerprint" }`. Add no `ios`/`android` override, and leave `updates.url` untouched.
+- [x] `npm version 1.1.0 --no-git-tag-version`. Confirm `package.json` and both `package-lock.json` root version fields read `1.1.0`, and nothing else in the lockfile changed (`git diff --stat package-lock.json` shows 2 lines changed).
+- [x] `npx jest __tests__/config/app-config.test.ts` passes
+- [x] `npx jest __tests__/config/fingerprint-config.test.ts -t 'FR1'` passes (lockfile root version). The FR2 assertions in the same file go green under FR2 below.
+- [x] `grep -nE "readFileSync|__dirname|package-lock|from ['\"](node:)?(fs|path)['\"]" __tests__/config/app-config.test.ts` prints nothing (spec 03 test-file contract). At this point the file holds only the spec 03 and spec 04 blocks; spec 05 is blocked until this spec merges.
+- [x] `npx expo-updates runtimeversion:resolve --platform ios`: `runtimeVersion` matches `/^[0-9a-f]{40}$/` and `workflow` is `"managed"`. Paste the output into Session Notes.
+- [x] Introspection check:
+  ```bash
+  npx expo config --type introspect --json | node -e 'const c=JSON.parse(require("fs").readFileSync(0,"utf8"))._internal.modResults.ios.expoPlist; console.log(c)'
+  ```
+  Expect `EXUpdatesRuntimeVersion: 'file:fingerprint'`, `EXUpdatesCheckOnLaunch: 'ALWAYS'`, `EXUpdatesLaunchWaitMs: 0`, and `EXUpdatesURL: 'https://u.expo.dev/4ad8a6bd-aec2-45a5-935f-5598d47b605d'`.
+
+### FR2: Fingerprint scope
+- [x] Create `fingerprint.config.js`. Use exactly `module.exports = { sourceSkips: ['ExpoConfigVersions', 'PackageJsonScriptsAll', 'GitIgnore'] }` plus the JSDoc `@type {import('expo/fingerprint').Config}` and a one-line *why* comment per entry.
+- [x] Create `.fingerprintignore`: comment lines explaining why, then the single pattern `eas.json`. Don't add `features/**`, `docs/**` and similar; they aren't fingerprint sources.
+- [x] `npx jest __tests__/config/fingerprint-config.test.ts` passes
+- [x] Sensitivity matrix. Run it in a scratch worktree, never in the working tree, after committing FR1 and FR2:
+  ```bash
+  ROOT="$(pwd)"; WT=/tmp/ota-matrix; git worktree add --detach "$WT" HEAD && ln -s "$ROOT/node_modules" "$WT/node_modules" && cd "$WT"
+  rtv(){ npx expo-updates runtimeversion:resolve --platform ios | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).runtimeVersion'; }
+  BASE=$(rtv); echo "base $BASE"
+  # after each edit: echo "<label> $(rtv)"; git checkout -- . && git clean -fdq -e node_modules   # -e keeps the symlink
+  ```
+  The following must equal `$BASE`. Record each value.
+  - [x] `ios.buildNumber` → `"99"`
+  - [x] `version` → `"9.9.9"`
+  - [x] add a script `"foo": "echo foo"` to `package.json` `scripts`
+  - [x] `eas.json` `submit.production.ios.ascApiKeyId` → `"NEWKEY1234"`
+  - [x] append `tmp-junk/` to `.gitignore`
+  - [x] new files `features/x.md`, `docs/y.md`, `site/z.html`
+
+  The following must differ from `$BASE`:
+  - [x] remove `"fetch"` from `ios.infoPlist.UIBackgroundModes`. If spec 03 already removed it, add `"audio"` instead.
+  - [x] change `"expo-secure-store"` to `["expo-secure-store", { "faceIDPermission": false }]`. If spec 03 already did this, set `faceIDPermission` to a string instead.
+  - [x] append a line to `patches/expo-widgets+55.0.5.patch`
+
+  Clean up: `cd "$ROOT" && git worktree remove --force "$WT"`.
+
+### FR3: Guarded publish script
+- [x] Create `scripts/ota-publish.sh` per the spec (steps 1–8, exact stderr and stdout strings, bash 3.2 compatible, `node` for JSON). `chmod 755`, and confirm `git ls-files -s scripts/ota-publish.sh` shows `100755`.
+- [x] `bash -n scripts/ota-publish.sh` passes. Also run `shellcheck scripts/ota-publish.sh` if it's installed, with no errors.
+- [x] `npx jest __tests__/scripts/ota-publish.test.ts` passes
+- [x] Prove the `.env.local` leak and the fix (skip this if `.env.local` has no `EXPO_PUBLIC_DEV_USERNAME`):
+  ```bash
+  V=$(sed -n 's/^EXPO_PUBLIC_DEV_USERNAME=//p' .env.local)
+  npx expo export --platform ios --output-dir /tmp/ota-leak-on  >/dev/null && grep -rlF "$V" /tmp/ota-leak-on | wc -l   # expect >= 1 (control)
+  EXPO_NO_DOTENV=1 npx expo export --platform ios --output-dir /tmp/ota-leak-off >/dev/null && grep -rlF "$V" /tmp/ota-leak-off | wc -l   # expect 0
+  rm -rf /tmp/ota-leak-on /tmp/ota-leak-off
+  ```
+  Record both counts in Session Notes. Don't record the value itself.
+  **Correction (2026-10-19, measured):** as written, these commands can't tell the leak from the fix. Pass `--clear` to both exports, because Metro's transform cache isn't keyed on `EXPO_PUBLIC_` values: a warm cache returns whichever value was inlined first. `eas update --environment …` clears the cache itself (eas-cli 20.1.0 `clearCache: flags['clear-cache'] ? true : !!flags['environment']`). Also grep with `-a` (`grep -rlaF`): macOS grep skips the binary `.hbc` bundle, so `-rlF` reports 0 even when the value is there.
+- [ ] Live dry run against EAS (needs an EAS login) on the PR branch with a clean tree: `scripts/ota-publish.sh --dry-run "check"`. **Expected before build 18 exists:** exit 1 with `no finished iOS build on channel "production" has runtime <hash>`. Paste the output into Session Notes.
+
+### FR5: Release runbook
+- [x] Create `docs/RELEASING.md` with `# Releasing Hourglass` (intro naming both lanes and saying spec 05 appends `## Native release`) and `## OTA updates`. Don't create a `## Native release` heading; spec 05 FR6 appends it. `## OTA updates` contains `### A.` baseline, `### B.` 1.0.0 emergency (from `e7fb801`, no literal runtime on main), `### C.` OTA-safe check, `### D.` rollback and `### E.` the fork table with its caveat row. Add the notes on config-file changes, `npm version` bumps and committed `.env*` files.
+- [x] `grep -c '^## OTA updates$' docs/RELEASING.md` prints `1`, and `grep -c '^## Native release' docs/RELEASING.md` prints `0`
+- [x] `grep -c '^### [A-E]\. ' docs/RELEASING.md` prints `5`
+- [x] `grep -n 'expo-fingerprint' docs/RELEASING.md` prints nothing
+- [x] Each term is present: `for t in 'scripts/ota-publish.sh' 'EXPO_NO_DOTENV=1' 'runtimeversion:resolve --platform ios' 'e7fb801' 'roll-back-to-embedded' 'fingerprint:compare'; do grep -qF "$t" docs/RELEASING.md || echo "MISSING $t"; done` prints nothing
+- [x] Spot-check that every `eas …` command in the doc parses: `eas <cmd> --help` lists every flag the doc uses (eas-cli 20.1.0)
+
+---
+
+## Phase 1.2: Review (MANDATORY)
+
+⚠️ **DO NOT skip this phase.** All four steps are mandatory for every change.
+
+### Step 0: Spec-Implementation Alignment
+- [ ] Run the `spec-implementation-alignment` agent
+- [ ] All FR1, FR2, FR3 and FR5 success criteria verified in code or command output. FR4 is deferred to Phase 1.3.
+- [ ] Interface contracts match the implementation: config shapes, script argv order, stderr/stdout strings, exit codes
+- [ ] Spec 03's test-file contract holds for the spec 04 block in `app-config.test.ts`: typed JSON imports only, `describe('app.json — 04 OTA lane')`, `not.toHaveProperty` for absence. The lockfile reads are only in `fingerprint-config.test.ts`
+- [ ] No scope creep: no foreground update checks, no Android publish, no `package.json` script additions, no app source changes
+- [ ] No shortfall
+
+### Step 1: Comprehensive PR Review
+- [ ] Run the `pr-review-toolkit:review-pr` skill (launches 6 specialized agents)
+
+### Step 2: Address Feedback
+- [ ] Fix HIGH severity issues (critical)
+- [ ] Fix MEDIUM severity issues (or document why they're deferred)
+- [ ] Re-run the three targeted test files after fixes
+- [ ] Commit fixes: `fix(04-ota-lane): {description}`
+
+### Step 3: Test Quality Optimization
+- [ ] Run the `test-optimiser` agent on the three new or modified test files
+- [ ] Apply suggested improvements that strengthen confidence
+- [ ] Re-run the tests to confirm they pass
+- [ ] Commit if changes were made: `fix(04-ota-lane): strengthen test assertions`
+
+### Final Verification
+- [x] `npx jest __tests__/config/app-config.test.ts __tests__/config/fingerprint-config.test.ts __tests__/scripts/ota-publish.test.ts` passes
+- [ ] No regressions: CI `npm test` is green on the PR. Don't run the full suite locally as part of this checklist.
+- [x] If spec 07 has merged: `npm run typecheck` and `npm run lint` pass with the new files
+- [x] `npx expo-updates runtimeversion:resolve --platform ios` on the final PR head prints a 40-hex runtime
+- [ ] The code follows existing patterns (CJS config like `babel.config.js`; tests under `__tests__/`)
+
+---
+
+## Phase 1.3: Post-release verification: FR4 Baseline OTA (closes OPS O11)
+
+⚠️ Runs **after** build 18 is READY_FOR_SALE. It doesn't block merging the PR. It does block ticking OPS O11 and calling the FEATURE goal "OTA hotfixes actually reach installed users" met.
+
+- [ ] Pre-release (during spec 05's TestFlight smoke): the build 18 Settings row shows `Update: embedded`
+- [ ] Get build 18's metadata:
+  ```bash
+  eas build:list --platform ios --status finished --channel production --app-build-version 18 --limit 1 --json --non-interactive
+  ```
+  Record `id`, `runtimeVersion` and `gitCommitHash`.
+- [ ] `git cat-file -t <gitCommitHash>` prints `commit`. If it doesn't, stop: the build tree is unknown, so investigate before publishing.
+- [ ] `git switch --detach <gitCommitHash> && npm ci`
+- [ ] `npx expo-updates runtimeversion:resolve --platform ios` equals the build's `runtimeVersion`. This is the FR2 determinism criterion.
+- [ ] `scripts/ota-publish.sh --dry-run "baseline: build 18 (v1.1.0)"` → `Dry run OK`, with no `WARNING:`
+- [ ] `scripts/ota-publish.sh "baseline: build 18 (v1.1.0)"` → `OTA published`. Record the runtime, group and iOS update id.
+- [ ] Device with the App Store install: force-quit and relaunch twice, then open Settings. The row shows `Update: <first 8 chars of the iOS update id>`.
+- [ ] If it still shows `embedded` after 3 cold starts: **stop**, don't republish. Check `eas update:list --branch production --json --non-interactive` and `eas update:insights <group> --platform ios`, and record what you find.
+- [ ] Optional: within 48 h, `eas update:insights <group> --platform ios --json` shows at least 1 launch
+- [ ] `git switch main`
+- [ ] Record everything in Session Notes, then tick OPS O11 in `OPS.md`
+
+---
+
+## Session Notes
+
+<!-- Add notes as you work -->
+
+**2026-10-19**: Spec drafted. Research corrections are listed in spec.md under "Verified Facts". The main ones:
+- Under default settings, the fingerprint includes `version`, `buildNumber`, `package.json` scripts, `.gitignore` and `eas.json`. FR2 adds `fingerprint.config.js` and an `eas.json`-only `.fingerprintignore`; the research's ignore patterns did nothing.
+- `npx expo-fingerprint` returns npm 404. Use `npx expo-updates runtimeversion:resolve --platform ios`.
+- Build 15's EAS commit `1b45a8a` isn't in the repo. Runbook §B branches from `e7fb801`.
+- `.env.local` would leak `EXPO_PUBLIC_DEV_USERNAME` into an OTA bundle, so the script publishes with `EXPO_NO_DOTENV=1`.
+- spec-research.md was amended to match: Decision 2 and its `.fingerprintignore` contract (`eas.json` only, verified with `runtimeversion:resolve`), and runbook §B (branch from `e7fb801`, never a literal `1.0.0` on main) and §C. The original proposals are kept under its Corrections section. If the two documents disagree, follow spec.md.
+
+**2026-10-19 (revision)**: Validator finding: FR1's lockfile assertions clashed with spec 03's test-file contract for `app-config.test.ts` (no `fs`, no `package-lock.json` import). Moved the two lockfile root-version assertions into `fingerprint-config.test.ts` (`describe('FR1: lockfile root version')`, `fs.readFileSync` + `JSON.parse`, root fields only). `app-config.test.ts` keeps `pkg.version === expo.version` through the `@/package.json` import. The spec 04 block there was also renamed to spec 03's reserved `describe('app.json — 04 OTA lane')` and now uses `not.toHaveProperty` for the absence checks. The lockfile test is still needed: in a scratch dir, `npm ci` with `package.json` `1.1.0` and a lockfile root of `1.0.0` exited 0 and didn't rewrite the lockfile.
+
+**2026-10-19 (Phase 1.0, red)**: Tests written in `__tests__/config/app-config.test.ts` (spec 04 block appended), `__tests__/config/fingerprint-config.test.ts` and `__tests__/scripts/ota-publish.test.ts`.
+- Targeted run: 68 tests, **48 failed / 20 passed**. The 20 passing are spec 03's 16 plus 4 guards that are green by design: no `ios`/`android` `runtimeVersion` override, `updates.url` ↔ `extra.eas.projectId`, no competing `fingerprint.config.cjs`, and neither config file gitignored (`git check-ignore --no-index`; EAS has no `.easignore`).
+- Every failure is missing behaviour: `runtimeVersion` is still `{ policy: 'appVersion' }`; `package.json` and both lockfile root fields read `1.0.0`; `Cannot find module '../../fingerprint.config.js'`; `ENOENT .fingerprintignore`; `ENOENT … scripts/ota-publish.sh` (36 harness tests at copy, 4 static tests at stat/read/`bash -n`).
+- Harness validated: a throwaway prototype `scripts/ota-publish.sh` (written in the worktree, never staged, deleted) passed all 40 FR3 tests, so the red isn't hiding a harness bug. The file takes ~7.6 s (40 × ~190 ms, dominated by the script's own node/git spawns; git setup is ~36 ms).
+- Strengthening beyond the checklist minimum, all taken from the FR3 text: stubs print valid-looking stdout even when exiting non-zero (forces exit-code checks); hermetic git (`GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, `GIT_*` stripped) and inherited `EXPO_NO_DOTENV` stripped; args checked before the tree; 39/41-char and uppercase runtimes refused; missing-field and non-JSON resolver output; non-JSON `build:list`; `--dry-run` still refused at the guard (§C) and still warns on version mismatch; the `ios` element picked by platform, not index; shell-metacharacter message; `commit:` = short HEAD; static `set -euo pipefail`, `bash -n` and no bash-4-only constructs (CI's bash 5 wouldn't catch a 3.2 break).
+- `jest.requireActual('../../fingerprint.config.js')` instead of bare `require`: same loading, no `no-require-imports` warning.
+- Real resolver output at this commit: `{"runtimeVersion":"1.1.0","fingerprintSources":null,"workflow":"managed"}`, which is the shape the `1.1.0` refusal stub uses.
+- tsc: +9 errors, all TS2307/TS2304 (Node built-ins and `__dirname` without `@types/node` in `types`, the same class as spec 03's introspect test). 0 errors in these files with `--types jest,node`. `app-config.test.ts` keeps zero TS errors and passes the spec 03 contract grep. eslint is clean on all three files.
+- Test Design Validation is left for the orchestrator's `red-phase-test-validator` run.
+
+**2026-10-19 (Phase 1.1, green)**: Orchestrator's red-phase validator returned no findings, so Test Design Validation is ticked with no test changes.
+- **FR1.** `npm version 1.1.0 --no-git-tag-version` changed exactly 2 lockfile lines (both root `version` fields). `npx expo-updates runtimeversion:resolve --platform ios` after FR1 alone: `runtimeVersion` `2b0325cf9602a9689181098e223a52d66710ff33`, `workflow` `"managed"`, 184 sources. Introspection `expoPlist`: `EXUpdatesEnabled: true`, `EXUpdatesCheckOnLaunch: 'ALWAYS'`, `EXUpdatesLaunchWaitMs: 0`, `EXUpdatesURL: 'https://u.expo.dev/4ad8a6bd-aec2-45a5-935f-5598d47b605d'`, `EXUpdatesRuntimeVersion: 'file:fingerprint'`.
+- **FR2.** After FR2: `runtimeVersion` `a0123e904dabf5610e315a75f845005f5f814b5c`, `workflow` `"managed"`, 182 sources. `eas.json` is listed with `hash: null` (ignored), there's no `.gitignore` source and no `packageJson:scripts` contents, and the `expoConfig` contents carry no `version` or `ios.buildNumber`. `npx expo-updates fingerprint:generate --platform ios` gives the same hash.
+- **Sensitivity matrix** (scratch worktree `/tmp/ota-matrix` at `bc2fdc4`, removed afterwards). Run twice:
+  - With the checklist's `node_modules` symlink: base `22ac71da948496d875fc13ff82bc8370c8fa661e`. It differs from the working tree's hash because plugin and autolinking paths resolve outside the scratch root (`../../../Users/…/node_modules/…`). Comparisons within the run are still valid.
+  - With an APFS clone instead (`cp -c -R node_modules`): base `a0123e904dabf5610e315a75f845005f5f814b5c`, equal to the working tree's.
+  - Clone run values. Same as base: `buildNumber` 99, `version` 9.9.9, script `foo`, `eas.json` `ascApiKeyId`, a `.gitignore` line, new `features/x.md` + `docs/y.md` + `site/z.html`. Different: `UIBackgroundModes` + `audio` (spec 03 already removed `fetch`) → `0877f4d4f5a446a7a3caa2eefbd3e2fd3f3203f9`; `expo-secure-store` `faceIDPermission` set to a string (spec 03 already set `false`) → `3d54d2d3506726a0afeabce26f02dea4ef19888d`; a line appended to `patches/expo-widgets+55.0.5.patch` → `035f05c219701bc2a21a35060c5701a87fb83094`. The symlink run gave the same 6 same / 3 different split.
+- **FR3.** 40/40 tests pass under `/bin/bash` 3.2.57, which is the `bash` the tests spawn. `bash -n` is clean. shellcheck isn't installed, so it was skipped. `git ls-files -s` shows `100755`. Choices the spec leaves open:
+  - Any argument starting with `-` is refused, not only `--flag`, so a typo like `-n` isn't published as the message. A `--dry-run` after the message gets its own usage line.
+  - The matched build's `runtimeVersion` must equal the resolved runtime. This guards against `--runtime-version` being silently ignored.
+  - An unreadable `app.json` is a refusal.
+- **`.env.local` leak proof.** The worktree has no `.env.local` (it's gitignored), and the main checkout's copy also holds credentials. So a temporary worktree `.env.local` held only `EXPO_PUBLIC_DEV_USERNAME=<synthetic sentinel>`, and it was deleted afterwards. With `--clear` on both exports and `grep -rlaF`: control **1** file, `EXPO_NO_DOTENV=1` **0** files. `env: load .env.local` was logged in the control only.
+  - Without `--clear`, a warm Metro cache made both runs agree (1/1, then 0/0), because the transform cache isn't keyed on `EXPO_PUBLIC_` values.
+  - The real publish is safe anyway: `eas update --environment production` implies `--clear` (eas-cli 20.1.0 `build/commands/update/index.js:532`). A comment in script step 7 says why `--environment` must stay. The checklist command above now carries this correction.
+- **FR5.** `docs/RELEASING.md`: `^## OTA updates$` = 1, `^## Native release` = 0, `^### [A-E]\. ` = 5. Those are the only `### ` headings, as spec 05's heading-order check expects. No `expo-fingerprint`, and every required term is present. All 11 `eas …` commands were flag-checked against `eas <cmd> --help` (eas-cli 20.1.0).
+- **Suite.** `npx jest --silent`: 4950 passed / 1 failed. The failure is the known baseline `NativeWindSmoke.test.tsx:202`. Targeted files: 68/68.
+  - `npx tsc --noEmit`: 541. The error list is identical to the red commit `022e4b1`, so the implementation adds 0. 12 of them are the Node-builtin TS2307/TS2304 errors in the spec 03/04 test files, waiting on spec 07's `@types/node`.
+  - `npx expo lint`: 9 errors / 494 warnings, same as baseline. eslint is clean on the new and changed files.
+  - `npx expo-doctor`: 19/20; only the package-versions check fails.
+- **Left for the orchestrator:** the live EAS `--dry-run "check"` (FR3, last item), all of Phase 1.2, and Phase 1.3.
+
+**2026-10-20 (build-18 merge, worktree `hg-worktrees/build18`):** `feat/legal-pages-links` (01, 02) and `feat/ci-typecheck-lint` (07) were merged into `feat/store-compliance-build18`, giving merge commits `6f429f7` and `297dcfa`. Final Verification on the merged head `297dcfa`:
+- The three targeted files pass inside the full run. `npx jest --silent`: **5058 passed / 0 failed, 179 suites**.
+- Spec 07 has merged. `npm run typecheck` exits 0 with 0 errors, and `npx expo lint --no-cache` exits 0 with 0 errors / 499 warnings. The 12 Node-builtin errors in the spec 03/04 test files are cleared by spec 07's `@types/node`.
+- `npx expo-updates runtimeversion:resolve --platform ios` → `a0123e904dabf5610e315a75f845005f5f814b5c` (40-hex, `workflow: "managed"`). That's identical to the Phase 1.1 base, so spec 07's `scripts.typecheck` and spec 02's `expo-application` declaration don't move the runtime. `expo-application` was already autolinked.
+- Introspect: `UIBackgroundModes` is `["remote-notification"]`, there's no `NSFaceIDUsageDescription`, `privacyManifests` is present, `runtimeVersion` is `{"policy":"fingerprint"}`, and `ios.buildNumber` is `"18"`.
+- **Still open (orchestrator):** the CI `npm test` on the PR, Phase 1.2 review, the live EAS dry run, and Phase 1.3.

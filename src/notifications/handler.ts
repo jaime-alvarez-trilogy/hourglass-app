@@ -112,6 +112,14 @@ export async function scheduleLocalNotification(count: number): Promise<void> {
 /**
  * Register the background push handler with expo-notifications.
  * Call this from the app entry point.
+ *
+ * Known gap (build-18 review): on iOS this listener only fires from
+ * UNUserNotificationCenter willPresent, i.e. for a visible notification while the app is
+ * in the foreground. The server's content-available-only `bg_refresh` push goes to
+ * didReceiveRemoteNotification instead, which expo-notifications hands only to a task
+ * registered with Notifications.registerTaskAsync (needs expo-task-manager, removed in
+ * store-compliance spec 03). So today handleBackgroundPush never runs from that push and
+ * the widget refreshes only when the app is open (site/privacy-policy.html §5 says so).
  */
 export function registerBackgroundPushHandler(): Notifications.Subscription {
   return Notifications.addNotificationReceivedListener(handleBackgroundPush);

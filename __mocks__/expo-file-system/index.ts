@@ -27,7 +27,7 @@ export const readAsStringAsync = jest.fn(async (uri: string): Promise<string> =>
 export const getInfoAsync = jest.fn(
   async (uri: string): Promise<{ exists: boolean; size: number; uri: string }> => {
     if (files[uri] === undefined) return { exists: false, size: 0, uri };
-    return { exists: true, size: Buffer.byteLength(files[uri], 'utf8'), uri };
+    return { exists: true, size: new TextEncoder().encode(files[uri]).length, uri };
   }
 );
 
@@ -55,7 +55,7 @@ export const _reset = () => {
   });
   getInfoAsync.mockImplementation(async (uri: string) => {
     if (files[uri] === undefined) return { exists: false, size: 0, uri };
-    return { exists: true, size: Buffer.byteLength(files[uri], 'utf8'), uri };
+    return { exists: true, size: new TextEncoder().encode(files[uri]).length, uri };
   });
   deleteAsync.mockImplementation(async (uri: string) => {
     delete files[uri];

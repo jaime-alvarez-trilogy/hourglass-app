@@ -200,4 +200,43 @@ describe('FR10: runRoleRefresh action', () => {
     await runRoleRefresh(queryClient, makeConfig(), null);
     expect(mockGetProfileDetail).not.toHaveBeenCalled();
   });
+
+  // 07-ci-typecheck-lint FR5b: DetailResponse.avatarTypes / .assignment /
+  // .assignment.team are optional. A partial detail must leave config untouched
+  // (no isManager:false or team id "undefined" written). Characterization:
+  // green before and after the explicit guard replaces the swallowed TypeError.
+  describe('07-ci-typecheck-lint FR5b: partial detail response leaves config untouched', () => {
+    const expectNoConfigWrite = async (detail: Record<string, unknown>) => {
+      mockGetProfileDetail.mockResolvedValueOnce(detail);
+      const config = makeConfig();
+
+      await expect(runRoleRefresh(queryClient, config, MOCK_CREDS)).resolves.toBeUndefined();
+
+      expect(mockGetProfileDetail).toHaveBeenCalledTimes(1);
+      expect(mockSaveConfig).not.toHaveBeenCalled();
+      expect(queryClient.invalidateQueries).not.toHaveBeenCalled();
+      expect(config.lastRoleCheck).toBe(EIGHT_DAYS_AGO);
+    };
+
+    it('detail with no assignment (pure-manager /detail shape)', async () => {
+      const { assignment: _omitted, ...detail } = makeDetailResponse({
+        avatarTypes: ['MANAGER', 'COMPANY_ADMIN'],
+      });
+      expect(detail).not.toHaveProperty('assignment');
+      await expectNoConfigWrite(detail);
+    });
+
+    it('assignment with no team', async () => {
+      const detail = makeDetailResponse({
+        assignment: { id: 79996, salary: 60, weeklyLimit: 35, manager: { id: 2372227 } },
+      });
+      await expectNoConfigWrite(detail);
+    });
+
+    it('detail with no avatarTypes', async () => {
+      const { avatarTypes: _omitted, ...detail } = makeDetailResponse();
+      expect(detail).not.toHaveProperty('avatarTypes');
+      await expectNoConfigWrite(detail);
+    });
+  });
 });

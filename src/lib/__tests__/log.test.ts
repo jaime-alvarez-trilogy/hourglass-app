@@ -349,3 +349,129 @@ describe('logger — FR10: zero network calls', () => {
     }
   });
 });
+
+// ─── 07-ci-typecheck-lint FR1: Hermes has no global Buffer ──────────────────
+// jest-expo/node provides Node's Buffer; Hermes does not. These tests delete
+// globalThis.Buffer around the log calls only, then assert afterwards with a
+// TextEncoder-based byte counter, so jest's own matchers never run without it.
+
+describe('logger — no-Buffer runtime (Hermes parity)', () => {
+  type BufferHolder = { Buffer?: unknown };
+  const holder = globalThis as unknown as BufferHolder;
+  const ORIGINAL_BUFFER = holder.Buffer;
+
+  const utf8Bytes = (s: string): number => new TextEncoder().encode(s).length;
+
+  async function withoutBuffer(fn: () => Promise<void>): Promise<void> {
+    const saved = holder.Buffer;
+    delete holder.Buffer;
+    try {
+      if (typeof holder.Buffer !== 'undefined') {
+        throw new Error('withoutBuffer: globalThis.Buffer could not be removed');
+      }
+      await fn();
+    } finally {
+      holder.Buffer = saved;
+    }
+  }
+
+  // Mirrors the rotation algorithm in log.ts (newest-first keep while the
+  // cumulative per-line cost stays <= target) with a pluggable line cost.
+  function simulateKept(content: string, target: number, cost: (line: string) => number): string[] {
+    const lines = content.split('\n');
+    const kept: string[] = [];
+    let cumulative = 0;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const lineCost = cost(lines[i]) + 1;
+      if (cumulative + lineCost > target) break;
+      cumulative += lineCost;
+      kept.unshift(lines[i]);
+    }
+    return kept;
+  }
+
+  afterEach(() => {
+    if (holder.Buffer === undefined) holder.Buffer = ORIGINAL_BUFFER;
+  });
+
+  it('rotates the log to <= TARGET_BYTES when Buffer is undefined (regression)', async () => {
+    const mod = freshLogger();
+    await withoutBuffer(async () => {
+      mod.__setRotationLimits(500, 300);
+      for (let i = 0; i < 20; i++) {
+        mod.log.info('evt', { i });
+      }
+      await mod.log.flush();
+    });
+
+    const content = _fsGet(LOG_URI)!;
+    expect(content).toBeDefined();
+    expect(utf8Bytes(content)).toBeLessThanOrEqual(300);
+    expect(content.startsWith('{')).toBe(true);
+    const parsedFirst = JSON.parse(content.split('\n')[0]);
+    expect(parsedFirst.meta.i).toBeGreaterThan(0);
+  });
+
+  it('counts multi-byte characters in UTF-8 bytes, not UTF-16 code units', async () => {
+    const MAX = 1500;
+    const TARGET = 1000;
+    const NEW_CATEGORY = 'multibyte.new';
+    // 🔥 = 4 UTF-8 bytes / 2 UTF-16 units; ñ = 2 bytes / 1 unit.
+    const heavyCategory = '🔥ñ'.repeat(40);
+    const seededLines = Array.from({ length: 10 }, (_, i) =>
+      JSON.stringify({
+        ts: '2026-10-19T00:00:00.000Z',
+        level: 'info',
+        category: `${heavyCategory}.${i}`,
+        meta: { i },
+      })
+    );
+    const seeded = seededLines.join('\n') + '\n';
+    // Same length and character class as the line log.info writes below
+    // (toISOString always yields 24 ASCII chars).
+    const newLineShape = JSON.stringify({
+      ts: new Date(0).toISOString(),
+      level: 'info',
+      category: NEW_CATEGORY,
+      meta: {},
+    });
+    const preRotation = seeded + newLineShape + '\n';
+
+    // Preconditions: rotation must trigger, and a UTF-16 `.length` counter
+    // would keep more than TARGET bytes, so this test cannot pass vacuously.
+    expect(utf8Bytes(preRotation)).toBeGreaterThan(MAX);
+    const keptByUtf16 = simulateKept(preRotation, TARGET, (l) => l.length).join('\n');
+    expect(utf8Bytes(keptByUtf16)).toBeGreaterThan(TARGET);
+
+    const mod = freshLogger();
+    getFs()._setFile(LOG_URI, seeded);
+    await withoutBuffer(async () => {
+      mod.__setRotationLimits(MAX, TARGET);
+      mod.log.info(NEW_CATEGORY, {});
+      await mod.log.flush();
+    });
+
+    const content = _fsGet(LOG_URI)!;
+    expect(utf8Bytes(content)).toBeLessThanOrEqual(TARGET);
+    expect(content.startsWith('{')).toBe(true);
+    const lines = content.split('\n').filter((s) => s.length > 0);
+    expect(JSON.parse(lines[lines.length - 1]).category).toBe(NEW_CATEGORY);
+  });
+
+  it('empty log: appends one line without rotating when Buffer is undefined', async () => {
+    const mod = freshLogger();
+    getFs()._setFile(LOG_URI, '');
+    let flushResult: unknown = 'not-called';
+    await withoutBuffer(async () => {
+      mod.log.info('only', { n: 1 });
+      flushResult = await mod.log.flush();
+    });
+
+    expect(flushResult).toBeUndefined();
+    expect((getFs().readAsStringAsync as jest.Mock).mock.calls.length).toBe(0);
+    const content = _fsGet(LOG_URI)!;
+    const lines = content.split('\n').filter((s) => s.length > 0);
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]).category).toBe('only');
+  });
+});

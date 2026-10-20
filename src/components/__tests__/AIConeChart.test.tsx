@@ -1052,27 +1052,59 @@ describe('AIConeChart — FR12 (02-safe-cone-scrub): Animation-Complete Gate', (
 
   // ── FR2: Gesture Gate ─────────────────────────────────────────────────────
 
-  it('SC12.9 — FR2: source adds enabled prop to GestureDetector', () => {
+  // 07-ci-typecheck-lint FR5d: RNGH 2.30 GestureDetectorProps has no `enabled`
+  // (ignored at runtime). The effective gates are the Pan gesture's .enabled()
+  // via useScrubGesture (size) and the `if (!animDone) return;` reaction guards.
+
+  // Text of a JSX opening tag starting at `<name`, up to its closing `>` at
+  // brace depth 0 (so `=>` inside `{...}` attributes doesn't end it early).
+  function openingTag(src: string, name: string): string | null {
+    const start = src.indexOf(`<${name}`);
+    if (start === -1) return null;
+    let depth = 0;
+    for (let i = start; i < src.length; i++) {
+      if (src[i] === '{') depth++;
+      else if (src[i] === '}') depth--;
+      else if (src[i] === '>' && depth === 0) return src.slice(start, i + 1);
+    }
+    return null;
+  }
+
+  // Argument object of the first `callee({ ... })` call (balanced braces).
+  function callArgObject(src: string, callee: string): string | null {
+    const call = src.indexOf(`${callee}({`);
+    if (call === -1) return null;
+    const start = call + callee.length + 1;
+    let depth = 0;
+    for (let i = start; i < src.length; i++) {
+      if (src[i] === '{') depth++;
+      else if (src[i] === '}') {
+        depth--;
+        if (depth === 0) return src.slice(start, i + 1);
+      }
+    }
+    return null;
+  }
+
+  it('SC12.9 — FR2: <GestureDetector> passes only gesture (no dead enabled= prop)', () => {
     const source = fs.readFileSync(CONE_CHART_FILE, 'utf8');
-    // GestureDetector must have enabled= prop
-    expect(source).toMatch(/GestureDetector[\s\S]{0,200}enabled\s*=/);
+    const tag = openingTag(source, 'GestureDetector');
+    expect(tag).not.toBeNull();
+    expect(tag).toMatch(/\bgesture\s*=\s*\{\s*gesture\s*\}/);
+    expect(tag).not.toMatch(/\benabled\s*=/);
   });
 
-  it('SC12.10 — FR2: GestureDetector enabled prop references animDone', () => {
+  it('SC12.10 — FR2: useScrubGesture is gated on size === "full" (Pan .enabled())', () => {
     const source = fs.readFileSync(CONE_CHART_FILE, 'utf8');
-    // enabled={animDone && ...} or enabled={animDone} or logically equivalent
-    expect(source).toMatch(/enabled\s*=\s*\{[^}]*animDone[^}]*\}/);
+    const args = callArgObject(source, 'useScrubGesture');
+    expect(args).not.toBeNull();
+    expect(args).toMatch(/\benabled\s*:\s*size\s*===\s*['"]full['"]/);
   });
 
-  it('SC12.11 — FR2: GestureDetector enabled prop also guards on size==="full"', () => {
+  it('SC12.11 — FR2: scrub reactions are gated by at least 2 `if (!animDone) return;` guards', () => {
     const source = fs.readFileSync(CONE_CHART_FILE, 'utf8');
-    // enabled must include size guard: animDone && size === 'full'
-    const enabledMatch = source.match(/enabled\s*=\s*\{([^}]+)\}/);
-    expect(enabledMatch).not.toBeNull();
-    const enabledExpr = enabledMatch![1];
-    // The enabled expression must reference both animDone and size
-    expect(enabledExpr).toMatch(/animDone/);
-    expect(enabledExpr).toMatch(/size|['"]full['"]/);
+    const guards = source.match(/if\s*\(\s*!animDone\s*\)\s*return\s*;/g) ?? [];
+    expect(guards.length).toBeGreaterThanOrEqual(2);
   });
 
   it('SC12.12 — FR2: compact chart renders without crash (gesture gate compact guard)', () => {

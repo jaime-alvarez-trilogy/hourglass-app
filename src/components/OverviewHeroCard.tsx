@@ -60,7 +60,7 @@ export default function OverviewHeroCard({
   window,
   onWindowChange,
   hoursHitRate,
-}: OverviewHeroCardProps): JSX.Element {
+}: OverviewHeroCardProps): React.JSX.Element {
   const periodLabel = window === 4 ? 'LAST 4 WEEKS' : window === 12 ? 'LAST 12 WEEKS' : 'LAST 24 WEEKS';
 
   return (

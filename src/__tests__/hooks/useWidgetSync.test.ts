@@ -3,6 +3,9 @@
  * Tests for src/hooks/useWidgetSync.ts
  */
 
+import type { ManualApprovalItem } from '../../lib/approvals';
+import type { ManualRequestEntry } from '../../types/requests';
+
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
 jest.mock('../../widgets/bridge', () => ({
@@ -67,6 +70,22 @@ beforeEach(() => {
 });
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
+
+function makeManualItem(id: string, fullName: string, hours: string): ManualApprovalItem {
+  return {
+    id,
+    category: 'MANUAL',
+    userId: 0,
+    fullName,
+    durationMinutes: Math.round(parseFloat(hours) * 60),
+    hours,
+    description: '',
+    startDateTime: '',
+    type: 'WEB',
+    timecardIds: [],
+    weekStartDate: '',
+  };
+}
 
 describe('FR5: useWidgetSync', () => {
   it('calls updateWidgetData on first render when hoursData and config are non-null', () => {
@@ -219,7 +238,7 @@ describe('FR5: useWidgetSync', () => {
 
   it('passes approvalItems to updateWidgetData when provided', () => {
     const approvalItems = [
-      { id: 'mt-1', category: 'MANUAL' as const, name: 'Alice', hours: '1.0' },
+      makeManualItem('mt-1', 'Alice', '1.0'),
     ];
     renderHook(() =>
       useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, 1, MOCK_CONFIG, approvalItems)
@@ -236,8 +255,8 @@ describe('FR5: useWidgetSync', () => {
   });
 
   it('passes myRequests to updateWidgetData when provided', () => {
-    const myRequests = [
-      { id: 'req-1', date: 'Wed Mar 18', hours: '1.0h', memo: 'Fix', status: 'PENDING' as const },
+    const myRequests: ManualRequestEntry[] = [
+      { id: 'req-1', date: '2026-03-18', durationMinutes: 60, memo: 'Fix', status: 'PENDING', rejectionReason: null },
     ];
     renderHook(() =>
       useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, 0, MOCK_CONFIG, [], myRequests)
@@ -254,10 +273,10 @@ describe('FR5: useWidgetSync', () => {
   });
 
   it('re-fires updateWidgetData when approvalItems reference changes', () => {
-    const initialApprovals = [{ id: 'mt-1', category: 'MANUAL' as const, name: 'Alice', hours: '1.0' }];
+    const initialApprovals = [makeManualItem('mt-1', 'Alice', '1.0')];
     const updatedApprovals = [
-      { id: 'mt-1', category: 'MANUAL' as const, name: 'Alice', hours: '1.0' },
-      { id: 'mt-2', category: 'MANUAL' as const, name: 'Bob', hours: '2.0' },
+      makeManualItem('mt-1', 'Alice', '1.0'),
+      makeManualItem('mt-2', 'Bob', '2.0'),
     ];
 
     const { rerender } = renderHook<void, { approvalItems: typeof initialApprovals }>(

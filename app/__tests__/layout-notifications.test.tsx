@@ -77,14 +77,18 @@ const MockStack = ({ children }: any) => {
   const mockReact = require('react');
   return mockReact.createElement('MockStack', null, children);
 };
-(MockStack as any).Screen = () => null;
+(MockStack as any).Screen = function MockStackScreen() {
+  return null;
+};
 
 jest.mock('expo-router', () => {
   const StackMock = ({ children }: any) => {
     const mockReact = require('react');
     return mockReact.createElement('MockStack', null, children);
   };
-  StackMock.Screen = () => null;
+  StackMock.Screen = function StackMockScreen() {
+    return null;
+  };
   return {
     Stack: StackMock,
     useRouter: () => ({ replace: jest.fn() }),
@@ -199,10 +203,14 @@ describe('FR1: setNotificationHandler — module scope', () => {
     expect(mockSetNotificationHandler).toHaveBeenCalledTimes(1);
   });
 
-  it('FR1.5 — handler config: shouldShowAlert is true', async () => {
+  // 07-ci-typecheck-lint FR5a: expo-notifications 55 NotificationBehavior —
+  // banner + list replace the deprecated shouldShowAlert (iOS 14+ .banner|.list).
+  it('FR1.5 — handler config: shows banner and list, no deprecated shouldShowAlert', async () => {
     const call = mockSetNotificationHandler.mock.calls[0][0];
     const result = await call.handleNotification({});
-    expect(result.shouldShowAlert).toBe(true);
+    expect(result.shouldShowBanner).toBe(true);
+    expect(result.shouldShowList).toBe(true);
+    expect(result.shouldShowAlert).toBeUndefined();
   });
 
   it('FR1.6 — handler config: shouldPlaySound is true', async () => {

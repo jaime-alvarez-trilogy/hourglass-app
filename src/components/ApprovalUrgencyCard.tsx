@@ -59,7 +59,7 @@ const RING_BORDER_WIDTH = 1.5;
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ApprovalUrgencyCard({ pendingCount, onPress }: ApprovalUrgencyCardProps): JSX.Element {
+export function ApprovalUrgencyCard({ pendingCount, onPress }: ApprovalUrgencyCardProps): React.JSX.Element {
   const reducedMotion = useReducedMotion();
 
   // Pulsing border ring — SharedValue opacity loop

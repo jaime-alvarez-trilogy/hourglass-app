@@ -1,0 +1,10 @@
+# Paths left out of the iOS fingerprint (runtimeVersion policy "fingerprint").
+# One minimatch glob per line, relative to the project root; lines starting with # are comments.
+#
+# eas.json holds EAS build profiles and the App Store Connect submit block (e.g. the ASC API key
+# id). Neither changes the native module surface the JS bundle binds to, so editing it must not
+# fork the runtime and strand OTA updates. Build-profile env/prebuildCommand/image changes still
+# need a native build: see docs/RELEASING.md, "What changes the runtime".
+#
+# Changing this file forks the runtime for every later publish; change it only with a native build.
+eas.json

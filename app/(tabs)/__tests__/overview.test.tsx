@@ -952,7 +952,8 @@ describe('OverviewScreen FR3 (04-team-view-content) — TeamMemberRow component'
     const idx = source.indexOf('function TeamMemberRow');
     const body = source.slice(idx, idx + 3000);
     expect(body).toMatch(/fetchFailed/);
-    expect(body).toMatch(/Couldn't load/);
+    // JSX source spells the apostrophe as &apos; (react/no-unescaped-entities); renders as U+0027.
+    expect(body).toMatch(/Couldn(?:'|&apos;)t load/);
   });
 
   it('renders member stats with gold/cyan/violet accents', () => {

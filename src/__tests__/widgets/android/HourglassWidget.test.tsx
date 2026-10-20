@@ -17,6 +17,10 @@ import { create, act } from 'react-test-renderer';
 // Render primitives as simple host components that expose their props for inspection.
 // Note: jest.mock factory is hoisted — must not reference out-of-scope variables like React.
 // Use require() inside the factory to access React.
+// Not { virtual: true }: the package is installed. As a virtual mock it was skipped under
+// --runInBand whenever src/widgets/__tests__/widgetPolish.test.ts (which loads the real
+// package) ran first in the same process: HourglassWidget.tsx got the real widgets and
+// every render returned null.
 jest.mock(
   'react-native-android-widget',
   () => {
@@ -33,7 +37,6 @@ jest.mock(
         mockReact.createElement('ImageWidget', { image, style }),
     };
   },
-  { virtual: true }
 );
 
 // ─── Fixture helpers ───────────────────────────────────────────────────────────
