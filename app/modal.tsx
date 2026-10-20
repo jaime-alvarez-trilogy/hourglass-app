@@ -1,10 +1,14 @@
 // modal.tsx
 // FR3 (05-panel-glass-surfaces): BlurView dark glass surface
 
-import { View, Text, Switch, StyleSheet, Alert, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, Switch, StyleSheet, Alert, Linking, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { AnimatedPressable } from '@/src/components/AnimatedPressable';
 import { BlurView } from 'expo-blur';
+import * as Application from 'expo-application';
+import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
+import * as Updates from 'expo-updates';
+import { openBrowserAsync, WebBrowserPresentationStyle } from 'expo-web-browser';
 import { useRouter } from 'expo-router';
 import { useEffect, useState, startTransition } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -15,8 +19,24 @@ import { fetchAndBuildConfig } from '@/src/api/auth';
 import { MOCK_TEAM_ITEMS } from '@/src/lib/devMock';
 import { useConfig } from '@/src/hooks/useConfig';
 import { colors } from '@/src/lib/colors';
+import { PRIVACY_POLICY_URL, SUPPORT_URL, formatBuildInfo } from '@/src/lib/legalLinks';
 import { log } from '@/src/lib/log';
 import * as Sharing from 'expo-sharing';
+
+// Store-compliance spec 02 FR4: in-app Safari sheet, then external Safari, then
+// an Alert. Any resolved result (including iOS 'locked' on a double-tap) counts as
+// opened. No EXPO_OS gate: it would skip the call under jest's web preset.
+async function openLegalLink(url: string): Promise<void> {
+  try {
+    await openBrowserAsync(url, { presentationStyle: WebBrowserPresentationStyle.AUTOMATIC });
+  } catch {
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('Could not open link', url);
+    }
+  }
+}
 
 export default function ModalScreen() {
   const router = useRouter();
@@ -43,6 +63,15 @@ export default function ModalScreen() {
   }, [config, togglesInitialized]);
 
   const isMe = username === process.env.EXPO_PUBLIC_DEV_USERNAME;
+
+  // Spec 02 FR5: version and build come from the binary first. Under an OTA launch
+  // expoConfig is the publishing tree's config, which may carry a bumped version.
+  const buildInfo = formatBuildInfo({
+    version: Application.nativeApplicationVersion ?? Constants.expoConfig?.version,
+    buildNumber: Constants.platform?.ios?.buildNumber ?? Constants.expoConfig?.ios?.buildNumber,
+    updateId: Updates.updateId,
+    isEmbeddedLaunch: Updates.isEmbeddedLaunch,
+  });
 
   async function handleSignOut() {
     Alert.alert('Sign Out', 'This will clear your saved credentials and return to the login screen.', [
@@ -253,6 +282,34 @@ export default function ModalScreen() {
             </View>
           </View>
 
+          {/* Store-compliance spec 02: legal links + binary/OTA version row,
+              visible to all users. Must stay above Sign Out (last onPress node). */}
+          <View testID="about-section" style={styles.aboutBox}>
+            <Text style={styles.aboutTitle}>About</Text>
+            <TouchableOpacity
+              testID="about-privacy"
+              accessibilityRole="link"
+              style={styles.aboutRow}
+              onPress={() => openLegalLink(PRIVACY_POLICY_URL)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.aboutRowLabel}>Privacy Policy</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              testID="about-support"
+              accessibilityRole="link"
+              style={styles.aboutRow}
+              onPress={() => openLegalLink(SUPPORT_URL)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.aboutRowLabel}>Support</Text>
+            </TouchableOpacity>
+            <View testID="about-version">
+              <Text style={styles.aboutVersion}>{buildInfo.versionLine}</Text>
+              <Text style={styles.aboutUpdate}>{buildInfo.updateLine}</Text>
+            </View>
+          </View>
+
           {config && isMe && (
             <View style={styles.devBox}>
               <Text style={styles.devTitle}>Dev Options</Text>
@@ -409,6 +466,41 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: '#FFFFFF',
+  },
+  aboutBox: {
+    backgroundColor: '#161B22',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+  },
+  aboutTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#8B949E',
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  aboutRow: {
+    minHeight: 44,
+    justifyContent: 'center',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  aboutRowLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.textPrimary,
+  },
+  aboutVersion: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginTop: 12,
+  },
+  aboutUpdate: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
   },
   devBox: {
     backgroundColor: '#161B22',
