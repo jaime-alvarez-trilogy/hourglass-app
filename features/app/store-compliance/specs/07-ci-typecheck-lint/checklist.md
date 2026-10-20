@@ -115,13 +115,13 @@ Two PRs are recommended (see spec → Release & Merge Order):
 - [x] Commit: `chore(07-ci-typecheck-lint): FR2 delete NativeWindSmoke and out-of-repo test`
 
 ### FR3: Typecheck foundation (PR B)
-- [ ] `npm install --save-dev @types/node@25.3.5`
-- [ ] `git diff package-lock.json` adds only the root devDependency. `node_modules/@types/node` stays at `25.3.5`.
-- [ ] `tsconfig.json`: `"types": ["jest", "node"]`, nothing else.
-- [ ] `package.json`: add `"typecheck": "tsc --noEmit"`.
-- [ ] `npm run typecheck 2>&1 | grep -c "error TS"` returns **112** (or the re-measured equivalent recorded in Pre-flight). No TS2307 `fs`/`path`, TS2304 `__dirname`/`global` or TS2591 remain.
-- [ ] The `ci-gates.test.ts` FR3 cases are green.
-- [ ] Commit: `build(07-ci-typecheck-lint): FR3 node types and typecheck script`
+- [x] `npm install --save-dev @types/node@25.3.5`
+- [x] `git diff package-lock.json` adds only the root devDependency. `node_modules/@types/node` stays at `25.3.5`.
+- [x] `tsconfig.json`: `"types": ["jest", "node"]`, nothing else.
+- [x] `package.json`: add `"typecheck": "tsc --noEmit"`.
+- [x] `npm run typecheck 2>&1 | grep -c "error TS"` returns **112** (or the re-measured equivalent recorded in Pre-flight). No TS2307 `fs`/`path`, TS2304 `__dirname`/`global` or TS2591 remain.
+- [x] The `ci-gates.test.ts` FR3 cases are green.
+- [x] Commit: `build(07-ci-typecheck-lint): FR3 node types and typecheck script`
 
 ### FR4: Mechanical production type fixes (PR B)
 - [ ] 14 files in `src/components/`: `JSX.Element` → `React.JSX.Element`.
