@@ -76,12 +76,12 @@ Harness: a Node `http` server on `127.0.0.1:0` per case, the script run via `chi
 
 ⚠️ **Validate test design BEFORE implementing.** Weak tests lead to weak implementation.
 
-- [ ] Run `red-phase-test-validator` agent
+- [x] Run `red-phase-test-validator` agent (run by the orchestrator; it reported zero findings)
 - [x] All FR success criteria have test coverage (FR1–FR6 in Jest; FR4/FR6 also by the manual dry run; FR7 by Phase 1.3 commands)
 - [x] Assertions are specific (exact contract strings, ordered heading lists, exit codes), not just "exists" or "doesn't throw"
 - [x] HTTP fixtures return realistic data matching the check script contract: real `site/` files for the happy path, and single-defect variants for the failure cases
 - [x] No test touches the real network or depends on Pages being enabled
-- [ ] Fix any issues identified before proceeding
+- [x] Fix any issues identified before proceeding (none to fix)
 
 ---
 
@@ -203,4 +203,12 @@ Harness: a Node `http` server on `127.0.0.1:0` per case, the script run via `chi
 - Browser check: all three pages were rendered with macOS Quick Look (WebKit). They show the dark palette, green links and the logo. Link targets are proven by the FR4 resolution test and the HTTP dry run.
 - `npx tsc --noEmit`: 552 errors, against the 526 baseline. All 26 new ones are the existing "no node types" class (TS2307 `fs`/`path`/`http`…, TS2304 `__dirname`, plus the TS7006/TS2694 cascades), which every existing `fs`-based test already has. The three new files type-check clean under `npx tsc --noEmit --types jest,node`, which simulates spec 07 FR3. `npx expo lint`: 9 errors / 494 warnings, unchanged.
 - **Expected after merge (FR7):** the first push-triggered `pages.yml` run on `main` will fail at `Setup Pages` (`Get Pages site failed`), because Pages isn't enabled yet. That's expected, not a regression. Enable Pages (OPS O2), then re-run with `workflow_dispatch`.
-- Not run here (orchestrator / post-merge): the FR7 baseline `gh api`/curl reads in Phase 1.0, the production run of the script in Phase 1.1 FR6, the agent-based gates (red-phase-test-validator, Phase 1.2 review agents), and all of Phase 1.3.
+- Not run here (orchestrator / post-merge): the FR7 baseline `gh api`/curl reads in Phase 1.0, the production run of the script in Phase 1.1 FR6, the Phase 1.2 review agents, and all of Phase 1.3.
+
+**2026-10-19 (Phase 1.1 verification pass)**: The orchestrator's red-phase-test-validator returned zero findings, so the tests didn't change. The implementation commit `7142795` was checked against the spec again:
+- Policy diff (`git diff -M HEAD~2 HEAD`) touches only the contract lines; the rename is still 82%. The support and landing bodies match the contract verbatim. The `<style>` blocks match the policy's, apart from the support page's single `h3` rule. `pages.yml` matches the workflow contract verbatim.
+- `npx jest __tests__/site __tests__/scripts`: 67/67 pass. `npx jest --silent`: 4942 passed / 1 failed. The only failure is the baseline `NativeWindSmoke.test.tsx` "MEMORY.md contains NATIVEWIND_VERIFIED entry" case, which spec 07 removes.
+- `node -e "require('yaml').parse(...)"` exits 0. `git ls-files -s scripts/check-legal-pages.sh` shows `100755`. `git ls-files privacy-policy.html` prints nothing.
+- Local prefix dry run on `/bin/bash` 3.2.57 with `python3 -m http.server`: `/hourglass-app` and `/hourglass-app/` give 3× PASS and exit 0. `/nope` gives 3× `FAIL …: HTTP 404`, the O2 hint once, and exit 1. Two args exit 2.
+- `npx tsc --noEmit`: 552 errors, against 526 on main. The +26 are all TS2307/TS2304/TS7006/TS2694 missing-node-types errors in the three new test files, the same class `__tests__/approval-card.test.tsx` already has. With `--types jest,node` the new files have 0 errors. `npx expo lint`: 9 errors / 494 warnings, unchanged.
+- Still open for the orchestrator: the FR7 baseline reads (Phase 1.0), the production run of the script (Phase 1.1 FR6), Phase 1.2 review and all of Phase 1.3.
