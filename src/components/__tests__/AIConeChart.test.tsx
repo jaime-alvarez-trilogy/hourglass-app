@@ -247,15 +247,8 @@ describe('AIConeChart — FR2: toPixel Coordinate Helper', () => {
   //   pctY=100 → y = 16 (top, paddingTop)
 
   it('SC2.1 — hoursX=0 maps to paddingLeft for full variant', () => {
-    const { buildActualPath } = require('@/src/components/AIConeChart');
-    const skia = require('@shopify/react-native-skia');
-    const skiaPath = skia.Skia.Path();
-    const calls: Array<{ type: string; args: number[] }> = [];
-
-    // Spy on path methods to capture calls
-    skiaPath.moveTo.mockImplementation((...args: number[]) => { calls.push({ type: 'moveTo', args }); return skiaPath; });
-    skiaPath.lineTo.mockImplementation((...args: number[]) => { calls.push({ type: 'lineTo', args }); return skiaPath; });
-
+    // (10-sdk-58-ios-27 FR2: the unused moveTo/lineTo spies were dropped; the shared Skia
+    // mock no longer has path mutators, matching Skia 2.14.)
     const toPixelFn = (hx: number, py: number) => {
       const padding = { top: 16, right: 16, bottom: 28, left: 36 };
       const dims = { width: 400, height: 200 };
@@ -342,12 +335,8 @@ describe('AIConeChart — FR3: buildActualPath', () => {
     expect(() => buildActualPath([], identityPixel)).not.toThrow();
   });
 
-  it('SC3.2 — 1 point: returns a path (moveTo called, no lineTo)', () => {
-    const skia = require('@shopify/react-native-skia');
-    const mockPath = skia.Skia.Path();
-    mockPath.moveTo.mockClear();
-    mockPath.lineTo.mockClear();
-
+  it('SC3.2 — 1 point: returns a path', () => {
+    // The path is built from an SVG string (SC3.3); there are no moveTo/lineTo calls to count.
     const result = buildActualPath([{ hoursX: 0, pctY: 0 }], identityPixel);
     // Should not throw and returns truthy
     expect(result).toBeTruthy();

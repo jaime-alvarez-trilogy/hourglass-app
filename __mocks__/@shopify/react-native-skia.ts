@@ -5,11 +5,14 @@
 
 const React = require('react');
 
-/** Shared mock path object factory — includes trim() for 04-victory-charts FR4 */
+/**
+ * Shared mock path object factory.
+ * 10-sdk-58-ios-27 FR2: no moveTo / lineTo / trim. Skia 2.14 removes them from SkPath (#4092),
+ * so app code builds paths with Skia.Path.MakeFromSVGString and trims with the <Path start end>
+ * props. Any leftover mutation now throws "is not a function" in a test instead of on device.
+ */
 function makeMockPath(): Record<string, jest.Mock> {
   return {
-    moveTo: jest.fn().mockReturnThis(),
-    lineTo: jest.fn().mockReturnThis(),
     cubicTo: jest.fn().mockReturnThis(),
     quadTo: jest.fn().mockReturnThis(),
     addArc: jest.fn().mockReturnThis(),
@@ -17,7 +20,6 @@ function makeMockPath(): Record<string, jest.Mock> {
     close: jest.fn().mockReturnThis(),
     copy: jest.fn(function() { return makeMockPath(); }),
     reset: jest.fn().mockReturnThis(),
-    trim: jest.fn().mockReturnThis(),
   };
 }
 
@@ -75,8 +77,9 @@ module.exports = {
   useSharedValueEffect: (_effect: any, ..._deps: any[]) => {},
 
   Skia: {
-    // Path supports both Skia.Path() (legacy factory) and Skia.Path.Make() (canonical API)
-    // MakeFromSVGString added for 04-victory-charts FR4 (AIArcHero Skia rebuild)
+    // Path supports both Skia.Path() (legacy factory) and Skia.Path.Make() (still in 2.14).
+    // MakeFromSVGString returns a path stub: it's the one construction idiom app code uses
+    // (AIArcHero, ScrubCursor; spec 10 FR2). Tests spy on it to assert the SVG string.
     Path: Object.assign(
       () => makeMockPath(),
       {

@@ -129,9 +129,10 @@ describe('FR1: useStaggeredEntry — springBouncy and stagger delay', () => {
 });
 
 describe('FR1: useStaggeredEntry — focus trigger', () => {
-  it('imports useIsFocused from @react-navigation/native', () => {
+  it('imports useIsFocused from expo-router; no react-navigation import (10-sdk-58-ios-27 FR2)', () => {
     const source = fs.readFileSync(HOOK_FILE, 'utf8');
-    expect(source).toMatch(/useIsFocused.*from.*@react-navigation\/native/);
+    expect(source).toMatch(/useIsFocused.*from.*['"]expo-router['"]/);
+    expect(source).not.toContain('@react-navigation');
   });
 
   it('calls useIsFocused() to get focus state', () => {

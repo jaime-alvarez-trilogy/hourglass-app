@@ -6,9 +6,9 @@
 //     useReducedMotion, isFocused wiring
 //
 // NOTE on useIsFocused mock:
-// The component uses @react-navigation/native useIsFocused.
-// jest-expo/node preset auto-mocks this. We verify the source
-// references it correctly; runtime tests use the mocked version.
+// The component imports useIsFocused from expo-router (10-sdk-58-ios-27 FR2).
+// It is mocked below. We verify the source references it correctly;
+// runtime tests use the mocked version.
 
 import React from 'react';
 import { create, act } from 'react-test-renderer';
@@ -19,10 +19,7 @@ const COMPONENT_FILE = path.resolve(__dirname, '../FadeInScreen.tsx');
 
 // Mock useIsFocused — FadeInScreen requires NavigationContainer which is not
 // available in unit test context. Mock returns true (focused) by default.
-jest.mock('@react-navigation/native', () => ({
-  ...jest.requireActual('@react-navigation/native'),
-  useIsFocused: jest.fn(() => true),
-}));
+jest.mock('expo-router', () => ({ useIsFocused: jest.fn(() => true) }));
 
 // ─── Source file static checks ────────────────────────────────────────────────
 

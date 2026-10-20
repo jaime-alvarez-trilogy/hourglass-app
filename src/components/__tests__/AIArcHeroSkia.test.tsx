@@ -24,6 +24,8 @@ import React from 'react';
 import { create, act } from 'react-test-renderer';
 import * as fs from 'fs';
 import * as path from 'path';
+import { Path as SkiaPath } from '@shopify/react-native-skia'; // the shared mock's Path
+import { withSpring } from 'react-native-reanimated'; // jest.fn below (10 FR2)
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -54,6 +56,15 @@ jest.mock('react-native-svg', () => {
     Text: wrap('SvgText'),
   };
 });
+
+// 10-sdk-58-ios-27 FR2: real Reanimated (so a shared value keeps its identity across
+// renders), but withSpring settles at once so the render test can read the fill Path's
+// animated `end` without driving frames. Nothing else in this file depends on spring timing.
+jest.mock('react-native-reanimated', () => ({
+  __esModule: true,
+  ...jest.requireActual('react-native-reanimated'),
+  withSpring: jest.fn((toValue: number) => toValue),
+}));
 
 // ─── File paths ───────────────────────────────────────────────────────────────
 
@@ -437,5 +448,61 @@ describe('AIArcHero — SC4.14: size prop', () => {
   it('SC4.14b — source has default size=180', () => {
     const source = fs.readFileSync(COMPONENT_FILE, 'utf8');
     expect(source).toMatch(/size\s*=\s*180/);
+  });
+});
+
+// ─── 10-sdk-58-ios-27 FR2: fill arc trimmed by Path start/end (Skia 2.14-safe) ─
+//
+// Skia 2.14 removes SkPath.copy()/trim() mutation (#4092). The fill Path now draws the same
+// full arc as the track and is trimmed natively by start={0} end={sweepProgress}; both props
+// exist on PathProps in 2.4.18 and 2.14.0 (dom/types/Drawings.d.ts:12-18). The Skia mock's
+// Path is a function component, so react-test-renderer can find it by type and read its props.
+
+describe('AIArcHero — 10 FR2: fill Path trims via start/end props', () => {
+  function renderArc(aiPct: number) {
+    let tree: any;
+    act(() => {
+      tree = create(React.createElement(AIArcHero, { ...DEFAULT_PROPS, aiPct }));
+    });
+    const paths = tree.root.findAllByType(SkiaPath);
+    return { tree, paths, track: paths[0], fill: paths[1] };
+  }
+
+  it('renders exactly two Paths: the full track, then the gradient fill', () => {
+    const { paths, track, fill } = renderArc(75);
+    expect(paths).toHaveLength(2);
+    expect(track.props.color).toBe('rgba(255,255,255,0.08)');
+    expect(fill.props.color).toBe('white');
+  });
+
+  it('fill Path receives start={0}', () => {
+    const { fill } = renderArc(75);
+    expect(fill.props.start).toBe(0);
+  });
+
+  it('fill Path end is the sweep shared value, animated to aiPct/100', () => {
+    (withSpring as unknown as jest.Mock).mockClear();
+    const { fill } = renderArc(75);
+    expect(withSpring).toHaveBeenCalledWith(0.75, { mass: 1, stiffness: 80, damping: 12 });
+    expect(typeof fill.props.end).toBe('object');
+    expect(fill.props.end.value).toBeCloseTo(0.75, 5);
+  });
+
+  it('fill Path end stays the same shared value across aiPct changes (bound, not recomputed)', () => {
+    const { tree, fill } = renderArc(75);
+    const end = fill.props.end;
+    act(() => {
+      tree.update(React.createElement(AIArcHero, { ...DEFAULT_PROPS, aiPct: 40 }));
+    });
+    const fillAfter = tree.root.findAllByType(SkiaPath)[1];
+    expect(fillAfter.props.end).toBe(end);
+    expect(fillAfter.props.end.value).toBeCloseTo(0.4, 5);
+  });
+
+  it('fill Path draws the same full-arc path object as the track (no per-frame copy)', () => {
+    const { track, fill } = renderArc(75);
+    expect(fill.props.path).toBe(track.props.path);
+    expect(track.props.start).toBeUndefined();
+    expect(track.props.end).toBeUndefined();
   });
 });

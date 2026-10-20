@@ -26,7 +26,7 @@ import {
   withSpring,
   useReducedMotion,
 } from 'react-native-reanimated';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused } from 'expo-router';
 import { springBouncy } from '@/src/lib/reanimated-presets';
 import type { StyleProp, ViewStyle } from 'react-native';
 
