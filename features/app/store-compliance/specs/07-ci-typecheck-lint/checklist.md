@@ -89,13 +89,13 @@ Two PRs are recommended (see spec → Release & Merge Order):
 
 ⚠️ **Validate test design BEFORE implementing.** Weak tests lead to weak implementation.
 
-- [ ] Run `red-phase-test-validator` agent
-- [ ] All FR success criteria have test coverage. Items covered by commands instead (FR4/FR6 typecheck, FR7 probes, FR8 CI) are listed in Phase 1.1.
-- [ ] Assertions are specific (not just "exists" or "doesn't throw")
-- [ ] The multi-byte test asserts its own non-vacuity precondition
-- [ ] The FR5b characterization tests are flagged as expected-green (not a red-phase failure)
-- [ ] Mocks return realistic data matching interface contracts (`DetailResponse` partials, `NotificationBehavior` shape)
-- [ ] Fix any issues identified before proceeding
+- [x] Run `red-phase-test-validator` agent
+- [x] All FR success criteria have test coverage. Items covered by commands instead (FR4/FR6 typecheck, FR7 probes, FR8 CI) are listed in Phase 1.1.
+- [x] Assertions are specific (not just "exists" or "doesn't throw")
+- [x] The multi-byte test asserts its own non-vacuity precondition
+- [x] The FR5b characterization tests are flagged as expected-green (not a red-phase failure)
+- [x] Mocks return realistic data matching interface contracts (`DetailResponse` partials, `NotificationBehavior` shape)
+- [x] Fix any issues identified before proceeding
 
 ---
 
@@ -182,20 +182,20 @@ Two PRs are recommended (see spec → Release & Merge Order):
 - [x] Commit: `fix(07-ci-typecheck-lint): FR7 lint errors and Hermes Buffer guard`
 
 ### FR8: CI gates (PR B)
-- [ ] `.github/workflows/test.yml` `app-tests`:
-  - [ ] `- id: install` / `run: npm ci`
-  - [ ] `- name: Typecheck` / `run: npm run typecheck`
-  - [ ] `- name: Lint` with `if: ${{ !cancelled() && steps.install.outcome == 'success' }}` / `run: npm run lint`
-  - [ ] `- name: Test` with the same `if` / `run: npm test`
-  - [ ] The job key stays `app-tests`. `server-tests` is unchanged.
-- [ ] The `ci-gates.test.ts` FR8 cases are green.
-- [ ] CI-parity check prints `exit=0`:
+- [x] `.github/workflows/test.yml` `app-tests`:
+  - [x] `- id: install` / `run: npm ci`
+  - [x] `- name: Typecheck` / `run: npm run typecheck`
+  - [x] `- name: Lint` with `if: ${{ !cancelled() && steps.install.outcome == 'success' }}` / `run: npm run lint`
+  - [x] `- name: Test` with the same `if` / `run: npm test`
+  - [x] The job key stays `app-tests`. `server-tests` is unchanged.
+- [x] The `ci-gates.test.ts` FR8 cases are green.
+- [x] CI-parity check prints `exit=0`:
   ```bash
   T=$(mktemp -d) && git archive HEAD | tar -x -C "$T" && ln -s "$PWD/node_modules" "$T/node_modules" \
     && (cd "$T" && npx tsc --noEmit && npx expo lint) ; echo "exit=$?" ; rm -rf "$T"
   ```
-- [ ] Full local run, **once**: `npm run typecheck && npm run lint && npm test`. All exit 0, with 0 failures. The total test count = base − 20 (deleted smoke tests) + new tests from this spec. Record the numbers.
-- [ ] Commit: `ci(07-ci-typecheck-lint): FR8 gate app-tests on typecheck and lint`
+- [x] Full local run, **once**: `npm run typecheck && npm run lint && npm test`. All exit 0, with 0 failures. The total test count = base − 20 (deleted smoke tests) + new tests from this spec. Record the numbers.
+- [x] Commit: `ci(07-ci-typecheck-lint): FR8 gate app-tests on typecheck and lint`
 - [ ] Push. On the PR, `app-tests` shows `Typecheck`, `Lint` and `Test` steps, all green, and `server-tests` is green.
 - [ ] (Recommended) Gate probe:
   1. Open a throwaway draft PR adding `export const __ciProbe: number = 'x';` to a `src/` file.
@@ -279,4 +279,23 @@ Two PRs are recommended (see spec → Release & Merge Order):
   - Under today's `types: ["jest"]`, the count is 531 (+3 `fs`/`path`/`__dirname` in `ci-gates.test.ts`, +1 `__dirname` in `native-tabs.test.tsx`, −2 `Buffer` in the mock). FR3 clears all of these.
   - ESLint findings on the touched files are identical before and after (36 = 36).
 
-**{Date}**: {Notes about progress, blockers, decisions}
+**2026-10-19 (Phase 1.1, branch `feat/ci-typecheck-lint`, not yet rebased onto 01–04):** all FRs implemented; the branch is green on its own.
+- **Red-phase validation:** the orchestrator ran the validator separately and reported 0 findings, so no test changes were needed before implementation.
+- **Typecheck, step by step:** 529 at the start (no `expo-env.d.ts` in the worktree) → FR3: 112 (no TS2307/TS2304 `__dirname`/`global`/TS2591 left) → FR4: 90 (−22) → FR5: 80 (−10) → FR6: **0**. CI parity (`git archive HEAD` + symlinked `node_modules`): `tsc` 0 errors, `expo lint` 0 errors, `exit=0`.
+- **Lint:** **0 errors / 494 warnings**, the same as the 494 baseline. A per-file JSON diff against base `ca0378c` shows no warning added or removed. A first pass added 4 `import/first` warnings, because the FR6 `import type` lines sat after `jest.mock()`. They were moved above the mocks, which is runtime-neutral since type imports are erased (commit `83a097c`).
+- **FR7 probes:** `Buffer` in `src/lib/__probe.ts` → exit 1, `no-restricted-globals`. In `src/lib/__tests__/probe.test.ts` → exit 0, no finding. `TextEncoder` in `src/lib/__probe.ts` → exit 0.
+- **Final full run (once):** `npm run typecheck` exit 0 (0 errors). `npm run lint` exit 0. `npm test`: **4876 passed / 0 failed, 170 suites**. That's 4876 on main − 20 deleted `NativeWindSmoke` tests + 20 added by this spec.
+- **FR6 per-file counts** all equal the Pre-flight baselines; each file was run alone. No fixture completion changed an outcome.
+- **Findings — spec gaps, fixed under the FR rules:**
+  - `src/components/__tests__/AITabConeIntegration.test.tsx` **SC12.I6** still asserted the dead `<GestureDetector enabled=…>` prop, so it went red after FR5d. The spec only listed AIConeChart SC12.9–12.11. It's rewritten to the effective gate: no `enabled=` on `<GestureDetector`, and `useScrubGesture({ enabled: size === 'full' })`. It fails on the pre-FR5d source (verified), and the count is unchanged (1 test).
+  - `app/(tabs)/__tests__/overview.test.tsx` "renders fetchFailed rows with \"Couldn't load\" label" is a source-grep test, so the FR7 `&apos;` spelling turned it red. The regex now accepts `'` or `&apos;`. The same file's render test still asserts the literal `"Couldn't load"` and passes, which confirms the rendered text is unchanged (U+0027).
+  - `useAIInsights.test.ts` `makeAIWeekData` held 3 stale fields (`aiUsageSlots`, `brainliftSlots`, `noTagSlots`) and was missing `workdaysElapsed`/`dailyBreakdown`. TS reported only the first excess property. All five were brought in line with `AIWeekData`; the hook test reads none of them.
+  - The FR2 `NativeWindSmoke` grep matches the comment in `__tests__/components/colors.test.ts`; the spec has the path as `src/components/__tests__/`. It also matches the new `__tests__/ci-gates.test.ts` guard itself, which is expected.
+  - `docs/ARCHITECTURE.md` §1.4/§5.3: only the two lines named in the spec were edited. Other `app/_layout.tsx` / `app/(tabs)/_layout.tsx` line citations were already approximate before this spec and are left as they are.
+- **Still open (orchestrator):**
+  - Rebase PR B onto 01–04 and re-measure, under the Pre-flight parent item.
+  - Push and the PR CI run.
+  - The optional gate probe PR.
+  - Merge before the build-18 cut.
+  - Phase 1.2 review.
+- **Files shared with specs 01–05:** `package.json` (`scripts.typecheck` plus the `@types/node` devDependency), `package-lock.json` (one root devDependency line), `tsconfig.json` (`types`) and `.github/workflows/test.yml` (`app-tests` steps). This spec didn't touch `app/modal.tsx`, `app.json`, `eas.json` or `.gitignore`. It did touch `app/__tests__/modal-debug-log.test.tsx` (mock parameter typing only), which spec 02 may also edit.
