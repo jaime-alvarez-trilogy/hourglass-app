@@ -589,7 +589,7 @@ function makeCases(files) {
       ['FR2.20', 'disable-public-link --dryrun', ['disable-public-link', '--dryrun'], 'today'],
       ['FR2.21', 'disable-public-link --dry-run=1', ['disable-public-link', '--dry-run=1'], 'today'],
       ['FR2.22', 'disable-public-link -n', ['disable-public-link', '-n'], 'today'],
-      ['FR2.23', 'disable-public-link —dry-run (em dash from smart punctuation)', ['disable-public-link', '—dry-run'], 'today'],
+      ['FR2.23', 'disable-public-link \u2014dry-run (em dash from smart punctuation)', ['disable-public-link', '\u2014dry-run'], 'today'],
       ['FR2.24', 'create-version 1.1.0 -n', ['create-version', '1.1.0', '-n'], 'today'],
       ['FR2.25', 'create-version 1.1.0 --dryrun', ['create-version', '1.1.0', '--dryrun'], 'today'],
       ['FR2.26', 'remove-public-link-testers --dryrun (not read as a tester id)', ['remove-public-link-testers', '--dryrun'], 'today'],

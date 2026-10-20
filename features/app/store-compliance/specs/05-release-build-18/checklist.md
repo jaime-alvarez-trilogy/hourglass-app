@@ -139,6 +139,12 @@ Feature: `store-compliance`
 
 ### Step 0: Spec-Implementation Alignment
 - [ ] Run `spec-implementation-alignment` agent (FR1, FR6)
+  - Run 1 (2026-10-20, orchestrator, whole spec) raised no FR1/FR6 finding. Its 3 findings concern FR7 and asc.js; see Phase 2.2 Step 0 and Session Notes.
+  - The FR1/FR6 checks were re-run after this run's fix:
+    - `app-config.test.ts` → 23/23. `expo config` → `1.1.0 18`.
+    - The diff from `9c1652e` is only `buildNumber` 17 → 18 plus `appVersionSource: local`.
+    - Every Phase 1.0 RELEASING.md grep matches, and spec 04's 118 lines are unchanged.
+    - OPS: 3 `(C)` lines, each cites spec 05. The diff touches only lines 9, 10 and 12, and 0 items are ticked.
 - [ ] All FR1/FR6 success criteria verified
 - [ ] Interface contracts match (`buildNumber` string ≥ 18, `appVersionSource: local`)
 - [ ] No scope creep (no other app.json/eas.json keys touched; the OPS.md diff touches only O3, O4 and O6)
@@ -174,6 +180,7 @@ asc.js is untracked, so it has no Jest coverage. The "tests" are the command tra
 - `fake-asc.js`: a pure in-memory router for those states.
 - `mock-https.js`: a `node -r` preload. It replaces `https`/`http` request/get, `fetch`, `net`/`tls` connects and `child_process`, so **nothing leaves the machine**. It answers every non-GET with an error and logs it as `blocked`. It refuses to load without `ASC_MOCK_SCENARIO`.
 - `check.js`: 82 cases (6 characterization), each run with `ASC_TRACE=1`. It asserts exit codes, exact `[dry-run] <METHOD> <path> <json>` lines and bodies, the `[dry-run] <n> write(s) skipped` trailer, one `[http] …` stderr trace line per ASC request, and zero non-GET requests. That last check is the `ASC_TRACE … | grep -E '^\[http\] (POST|PATCH|DELETE)'` → empty check, applied to every case. It also runs static checks on the file.
+  - **97 cases since 2026-10-20** (alignment finding 3): FR2.20–FR2.33 cover argument errors. They are mistyped `--dry-run` flags (`--dryrun`, `--dry-run=1`, `-n`, an em-dash `—dry-run`) on `disable-public-link`, `create-version`, `remove-public-link-testers` and `submit-app-review`, a bare or empty `--type`, an extra positional, and `--type`/`--file` on a command that doesn't read them. Each must exit 1 with **no request of any kind** and no `[dry-run]` lines. FR2.34 is a positive control for `--file=<path>`.
 - Run it from anywhere: `node features/app/store-compliance/specs/05-release-build-18/asc-offline/check.js --target "/Users/Trilogy/Documents/Claude Code/WS/hourglassws/.appstore/asc.js"`. `--red` asserts the red phase. `--transcripts` prints every transcript. `--only <id>` filters cases. `--self-test` checks the fake and the transport.
 - **Red phase, 2026-10-20, against the unmodified asc.js** (sha256 `9d77b903…`): `--red` → `6 passed, 76 failed (82 cases, 6 characterization)`, "red phase OK". The 6 characterization cases pass: FR2.01 `node --check`, FR2.02 `KEY_*` at top, FR2.16 `check-submission` format, FR2.17 `check-submission` on a non-editable newest version, FR2.18 `builds` format, FR2.19 `beta-info` format. No case failed from a fixture gap or a non-fixture host. In 9 cases (FR2.12, FR2.14, FR4.28–FR4.34), the current code ignored `--dry-run` and tried a PATCH. The harness intercepted it in-process (`blocked`), so nothing was sent to Apple. This is the FR2/FR4 bug the cases exist to catch.
 - The runner's passing path was proven against a throwaway spec-shaped stand-in for 23 cases (list-testers, disable-public-link, remove-public-link-testers, create-version, set-urls, and the 403 path). The stand-in was deleted.
@@ -295,6 +302,13 @@ asc.js is untracked, so it has no Jest coverage. The "tests" are the command tra
   - The live error message is `<METHOD> <path> failed: ASC API error: <status> <code> — <title> (<detail>)`. The trailer is printed after a successful command under `--dry-run` (on errors, only the error prints).
 - [x] Argument parsing: strip `--dry-run`, `--type=…`, `--file <p>` before positional args.
   - `--file=<p>` is accepted too. A `--file` followed by another `--` flag counts as missing.
+  - **Hardened 2026-10-20 (alignment finding 3).** Before, any other dash-prefixed arg fell through as a positional, and zero-arg commands ignore positionals, so `disable-public-link --dryrun` sent a live PATCH. The harness's mock blocked it in FR2.20–FR2.27's red run. Main now refuses, before the dispatcher and before any request:
+    - any dash-prefixed arg other than `--dry-run`, `--type…` and `--file…`. "Dash" includes U+2010–U+2015 and U+2212, so a smart-punctuation `—dry-run` counts → `Unknown option: <arg>`.
+    - a bare or empty `--type` → `--type needs a value: --type=PUBLIC_LINK|EMAIL`.
+    - more positionals than the command reads → `Unexpected argument for <cmd>: <arg>`. Each `commands` entry declares `max`: 0 for most, 1 for `create-version`/`attach-build`/`submit-app-review`/`remove-tester`/`submit-review`, 3 for `add-tester`, unbounded for `remove-public-link-testers` and `set-whats-new`.
+    - `--type`/`--file` on a command that doesn't read them → `<cmd> does not take --type|--file`.
+    - A `--file` value that looks like an option is no longer consumed as the path.
+    - `DRY_RUN` is still `process.argv.includes('--dry-run')` (interface contract). Missing args are still each command's own refusal.
 - [x] `getAppId()`: throw `ASC API error: <status> <code> — <title>` when `res.errors`.
   - Also on any status >= 400. The app id is memoized, so a command makes the bundle-id lookup once.
 - [x] `listTesters()`: `?? '<anonymous>'`, `?? ''` for names and inviteType, id column, `--type` filter, per-type counts.
@@ -309,6 +323,11 @@ asc.js is untracked, so it has no Jest coverage. The "tests" are the command tra
   - **New offline transport check** `asc-offline/write-path.js --target <asc.js>` → `10 passed, 0 failed`. It covers what `check.js` can't: `write()`'s live branch (200 resolves the body; 204 empty resolves; 409 + `errors`, 200 + `errors` and a 500 HTML body all throw), `api()` returning only the body, `[http]` tracing of a failed write, and the dry-run print and backstop. It loads asc.js in a `vm` sandbox with no command and a stub `https`. No asc.js command runs, and the sandbox has no `fetch` and refuses `http`/`net`/`tls`/`child_process`. Mutation check: 5 mutants (no throw on errors, no backstop, dry-run sends, `api()` returns `{status, body}`, no trace) were each caught by exactly their case.
   - **Live, read-only GETs, 2026-10-20** (`ASC_TRACE=1`): `builds`, `list-testers`, `check-submission` and `beta-info` each print `[http] GET /v1/apps?filter[bundleId]=com.jalvarez0907.hourglass -> 403` and `Error: ASC API error: 403 FORBIDDEN.REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED — A required agreement is missing or has expired. (This request requires an in-effect agreement that has not been signed or has expired.)`, then exit 1. No more "App not found". The live `list-testers` table, the live `set-review-notes --dry-run` refusal and the live `check-submission` 1.0 record wait for the agreement (Phase 3.0).
   - **Live, refusals before any request** (`ASC_TRACE=1`, 0 `[http]` and 0 `[dry-run]` lines, exit 1 each): `create-version 1.1 --dry-run`, `create-version --dry-run`, `attach-build --dry-run`, `submit-app-review --dry-run`, `set-whats-new --dry-run`, `set-whats-new --file <empty> / <whitespace> / <4001 chars> --dry-run`, `set-whats-new hello --file <f>`, `list-testers --type=BOGUS`, and an unknown command (usage).
+  - **Re-run after the argument fix, 2026-10-20** (asc.js sha256 `52786084…`, 988 lines):
+    - Offline: `check.js` → `97 passed, 0 failed (97 cases, 6 characterization)`, `write-path.js` → `10 passed, 0 failed`, `--self-test` → OK, `node --check` exit 0.
+    - Red baseline: against the pre-fix file (sha256 `f88acb04…`), FR2.20–FR2.33 failed and the other 83 passed. Against the pre-spec backup, `--red` reports `0 behaviour case(s) already passing`. Its one characterization failure is FR2.01, because `node --check` rejects the `.bak-20261019` extension; that happens at HEAD too, so it isn't a regression.
+    - Live re-run: every refusal listed above, plus the new `disable-public-link --dry-run -n` / `--dryrun`, `create-version 1.1.0 --dry-run --dry-run=1`, `remove-public-link-testers --dry-run --dryrun`, `list-testers --type PUBLIC_LINK --dry-run`, `disable-public-link dry-run --dry-run` and `set-review-notes --file <f> --dry-run`. Every one exited 1 with 0 `[http]` and 0 `[dry-run]` lines. The new ones kept a real `--dry-run` in argv, so the `request()` backstop would have blocked a non-GET even if the parser were wrong.
+    - Live read-only: `builds` → the surfaced 403. `set-urls --dry-run` → 3 Pages GETs → 404, `URL not live` ×3, 0 ASC requests.
 
 ### FR3: Public-link lockdown
 - [x] `disable-public-link`: list groups, `write` PATCH for each `publicLinkEnabled === true`, no-op message otherwise.
@@ -354,6 +373,11 @@ asc.js is untracked, so it has no Jest coverage. The "tests" are the command tra
 
 ### Step 0: Spec-Implementation Alignment
 - [ ] Run `spec-implementation-alignment` agent on `.appstore/asc.js` vs spec FR2–FR5 and the command contract table
+  - **Run 1, 2026-10-20 (orchestrator, from the build18 worktree): FAIL, 3 findings.** Dispositions are in Session Notes.
+    - Finding 3 (mistyped flags run live) is fixed: see Phase 2.1 → Argument parsing.
+    - Finding 2: the run couldn't read asc.js, because it is untracked and absent from the worktree. So this item stays open.
+  - [ ] Run 2 must run from the main checkout against `diff -u .appstore/asc.js.bak-20261019 .appstore/asc.js`. The file it should see is sha256 `527860844a57c0107c8fb9e3ae81016d423b52e36fbfcb0bdf625fd54833e4c5`, 988 lines.
+- [x] Address run 1's findings (2026-10-20). One fixed (3), one accepted as a verification gap with no code change (2), one rejected as out of this run's scope (1, Phase 3 / FR7).
 - [ ] All FR2–FR5 success criteria verified (transcripts recorded above)
 - [ ] Interface contracts match (`request`/`write`/`getLatestVersion`/`getNewestVersion`/`getEditableAppInfo`/`attachBuild`, command no-op conditions, exit codes)
 - [ ] No scope creep (`set-metadata` untouched; `set-store-listing`/`set-beta-info` changed only in URLs)
@@ -475,6 +499,7 @@ For every asc.js step: (1) `--dry-run` → paste the transcript; (2) live run �
 
 ### Step 0: Spec-Implementation Alignment
 - [ ] Run `spec-implementation-alignment` agent on this checklist's recorded outputs vs spec FR7 success criteria
+  - Run 1 (2026-10-20) flagged FR7 as unmet (finding 1). That's expected at this checkpoint: Phase 3 hasn't started. It needs J's agreement acceptance (every ASC call returns 403 today), a push, live ASC writes, an EAS cloud build and `eas submit`, all owned by the orchestrator. Re-run this check against FR7 after Phase 3.1 is recorded.
 - [ ] Every live write has a preceding dry-run transcript and a following no-op or `check-submission` record
 - [ ] Final `check-submission` matches the FR7 contract
 - [ ] No `POST /reviewSubmissions` issued live (scope). The `submit-app-review <build18-id> --dry-run` preview is recorded and its trace grep is empty.
@@ -560,3 +585,27 @@ For every asc.js step: (1) `--dry-run` → paste the transcript; (2) live run �
   - Phase 1.2 / 2.2 reviews. The orchestrator runs the reviewers.
   - The live Phase 2.0 baselines. They wait for the agreement.
   - Phase 3. It belongs to the orchestrator: gates, live ASC prep, EAS cloud build, upload, the ITMS-91053 check and smoke.
+
+**2026-10-20 (alignment run 1 findings):** the orchestrator's `spec-implementation-alignment` run returned FAIL with 3 findings. Each was checked against the code.
+- **Finding 1 (blocker): FR7 / Phase 3 not executed. Rejected as a defect of this implementation.**
+  - Phase 3 is the release itself. It needs J to accept the Apple agreement (every ASC call returns 403 `FORBIDDEN.REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED` today), a push to `origin`, live ASC writes, an EAS cloud build, `eas submit` and J's TestFlight smoke.
+  - The checklist gives it to the orchestrator, and this run's rules forbid each of those steps.
+  - The finding itself says this may be an intentional checkpoint. It is: Phase 1.2/2.2 Step 0 gate FR1/FR6 and FR2–FR5, and Phase 3.2 Step 0 gates FR7 separately.
+  - Nothing was changed. A note under Phase 3.2 Step 0 asks for a re-run against FR7 after Phase 3.1 is recorded.
+- **Finding 2 (major): the worktree diff has no trace of the asc.js code. Accepted as a verification gap, no code change.**
+  - asc.js is gitignored and lives only in the main checkout, by design (spec Out of Scope #6, and the Edge Cases row "asc.js is absent in a worktree").
+  - To tie the tracked record to the file a reviewer should inspect, the current sha256 is recorded under Phase 2.2 Step 0: `52786084…`, 988 lines. The pre-spec backup is still `9d77b903…`.
+  - Phase 2.2 Step 0 stays open until run 2 executes from the main checkout against `diff -u .appstore/asc.js.bak-20261019 .appstore/asc.js`.
+- **Finding 3 (major): mistyped flags run writes live. Confirmed and fixed.**
+  - Reproduced under `mock-https.js` (`today`): `disable-public-link --dryrun`, `--dry-run=1` and `-n` each sent `PATCH /v1/betaGroups/bg-test`, which the mock blocked with a 403. `create-version 1.1.0 --dryrun` sent `POST /v1/appStoreVersions`. `list-testers --type PUBLIC_LINK` listed all 14 testers.
+  - Two more inputs had the same root cause and were included: an extra positional on a zero-arg command (`disable-public-link dry-run` also PATCHed), and `--type`/`--file` on a command that silently ignored them.
+  - Tests first: commit `ebfefd9` adds FR2.20–FR2.34 to `check.js`. Against the pre-fix file, 14 failed and 83 passed.
+  - The fix is in `.appstore/asc.js` (untracked, no commit). Only the header comment and the Main block changed. In Main, that's the argv loop, the `commands` table (now `{ max, opts, run }` entries) and the dispatch, which refuses on any `ARGV_ERRORS` before `run()`. Details are under Phase 2.1 → Argument parsing.
+  - The dash class is written as `\u` escapes in both files. Offline, it was checked for U+2010, U+2011, U+2013, U+2014, U+2015 and U+2212: exit 1, 0 requests each.
+  - After the fix: `check.js` 97/97, `write-path.js` 10/10, self-test OK, `node --check` OK. The live, request-free refusals and the read-only probes were re-run (Phase 2.1 → FR2 re-run). `.appstore` is still ignored (`.gitignore:62`), and the backup sha256 is unchanged.
+  - Rollback copy of the pre-fix file: `/tmp/asc.js.pre-argv-fix-20261020` (sha256 `f88acb04…`). It's outside the repo, and `/tmp` may be cleared.
+  - **Choice made where the spec is silent:** spec FR2 only says to strip `--dry-run`, `--type=` and `--file` before reading positionals. Refusing every other option-like token, every surplus positional, and options a command doesn't read is a stricter reading. It uses the existing exit-1 refusal contract and doesn't change `DRY_RUN`'s definition. Inline What's New text can't start with a dash (`-`, `–`, `—`). The FR4 copy uses `•` bullets and the runbook passes `--file`, so neither is affected.
+- **Full suite after the fix:**
+  - `npx jest --silent` → 4953 passed / 1 failed / 4954. The failure is the known out-of-repo `NativeWindSmoke` FR3 SC3.2.
+  - `npx tsc --noEmit` → 541, this worktree's Phase 1.0 count.
+  - `npx expo lint` → 9 errors / 494 warnings, the baseline. `check.js` is ESLint-clean.
