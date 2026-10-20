@@ -131,12 +131,12 @@ Phases 1.0–1.2 go into the implementation PR, which ships in build 18. Phase 1
 - [ ] Live dry run against EAS (needs an EAS login) on the PR branch with a clean tree: `scripts/ota-publish.sh --dry-run "check"`. **Expected before build 18 exists:** exit 1 with `no finished iOS build on channel "production" has runtime <hash>`. Paste the output into Session Notes.
 
 ### FR5: Release runbook
-- [ ] Create `docs/RELEASING.md` with `# Releasing Hourglass` (intro naming both lanes and saying spec 05 appends `## Native release`) and `## OTA updates`. Don't create a `## Native release` heading; spec 05 FR6 appends it. `## OTA updates` contains `### A.` baseline, `### B.` 1.0.0 emergency (from `e7fb801`, no literal runtime on main), `### C.` OTA-safe check, `### D.` rollback and `### E.` the fork table with its caveat row. Add the notes on config-file changes, `npm version` bumps and committed `.env*` files.
-- [ ] `grep -c '^## OTA updates$' docs/RELEASING.md` prints `1`, and `grep -c '^## Native release' docs/RELEASING.md` prints `0`
-- [ ] `grep -c '^### [A-E]\. ' docs/RELEASING.md` prints `5`
-- [ ] `grep -n 'expo-fingerprint' docs/RELEASING.md` prints nothing
-- [ ] Each term is present: `for t in 'scripts/ota-publish.sh' 'EXPO_NO_DOTENV=1' 'runtimeversion:resolve --platform ios' 'e7fb801' 'roll-back-to-embedded' 'fingerprint:compare'; do grep -qF "$t" docs/RELEASING.md || echo "MISSING $t"; done` prints nothing
-- [ ] Spot-check that every `eas …` command in the doc parses: `eas <cmd> --help` lists every flag the doc uses (eas-cli 20.1.0)
+- [x] Create `docs/RELEASING.md` with `# Releasing Hourglass` (intro naming both lanes and saying spec 05 appends `## Native release`) and `## OTA updates`. Don't create a `## Native release` heading; spec 05 FR6 appends it. `## OTA updates` contains `### A.` baseline, `### B.` 1.0.0 emergency (from `e7fb801`, no literal runtime on main), `### C.` OTA-safe check, `### D.` rollback and `### E.` the fork table with its caveat row. Add the notes on config-file changes, `npm version` bumps and committed `.env*` files.
+- [x] `grep -c '^## OTA updates$' docs/RELEASING.md` prints `1`, and `grep -c '^## Native release' docs/RELEASING.md` prints `0`
+- [x] `grep -c '^### [A-E]\. ' docs/RELEASING.md` prints `5`
+- [x] `grep -n 'expo-fingerprint' docs/RELEASING.md` prints nothing
+- [x] Each term is present: `for t in 'scripts/ota-publish.sh' 'EXPO_NO_DOTENV=1' 'runtimeversion:resolve --platform ios' 'e7fb801' 'roll-back-to-embedded' 'fingerprint:compare'; do grep -qF "$t" docs/RELEASING.md || echo "MISSING $t"; done` prints nothing
+- [x] Spot-check that every `eas …` command in the doc parses: `eas <cmd> --help` lists every flag the doc uses (eas-cli 20.1.0)
 
 ---
 
@@ -221,3 +221,24 @@ Phases 1.0–1.2 go into the implementation PR, which ships in build 18. Phase 1
 - Real resolver output at this commit: `{"runtimeVersion":"1.1.0","fingerprintSources":null,"workflow":"managed"}`, which is the shape the `1.1.0` refusal stub uses.
 - tsc: +9 errors, all TS2307/TS2304 (Node built-ins and `__dirname` without `@types/node` in `types`, the same class as spec 03's introspect test). 0 errors in these files with `--types jest,node`. `app-config.test.ts` keeps zero TS errors and passes the spec 03 contract grep. eslint is clean on all three files.
 - Test Design Validation is left for the orchestrator's `red-phase-test-validator` run.
+
+**2026-10-19 (Phase 1.1, green)**: Orchestrator's red-phase validator returned no findings, so Test Design Validation is ticked with no test changes.
+- **FR1.** `npm version 1.1.0 --no-git-tag-version` changed exactly 2 lockfile lines (both root `version` fields). `npx expo-updates runtimeversion:resolve --platform ios` after FR1 alone: `runtimeVersion` `2b0325cf9602a9689181098e223a52d66710ff33`, `workflow` `"managed"`, 184 sources. Introspection `expoPlist`: `EXUpdatesEnabled: true`, `EXUpdatesCheckOnLaunch: 'ALWAYS'`, `EXUpdatesLaunchWaitMs: 0`, `EXUpdatesURL: 'https://u.expo.dev/4ad8a6bd-aec2-45a5-935f-5598d47b605d'`, `EXUpdatesRuntimeVersion: 'file:fingerprint'`.
+- **FR2.** After FR2: `runtimeVersion` `a0123e904dabf5610e315a75f845005f5f814b5c`, `workflow` `"managed"`, 182 sources. `eas.json` is listed with `hash: null` (ignored), there's no `.gitignore` source and no `packageJson:scripts` contents, and the `expoConfig` contents carry no `version` or `ios.buildNumber`. `npx expo-updates fingerprint:generate --platform ios` gives the same hash.
+- **Sensitivity matrix** (scratch worktree `/tmp/ota-matrix` at `bc2fdc4`, removed afterwards). Run twice:
+  - With the checklist's `node_modules` symlink: base `22ac71da948496d875fc13ff82bc8370c8fa661e`. It differs from the working tree's hash because plugin and autolinking paths resolve outside the scratch root (`../../../Users/…/node_modules/…`). Comparisons within the run are still valid.
+  - With an APFS clone instead (`cp -c -R node_modules`): base `a0123e904dabf5610e315a75f845005f5f814b5c`, equal to the working tree's.
+  - Clone run values. Same as base: `buildNumber` 99, `version` 9.9.9, script `foo`, `eas.json` `ascApiKeyId`, a `.gitignore` line, new `features/x.md` + `docs/y.md` + `site/z.html`. Different: `UIBackgroundModes` + `audio` (spec 03 already removed `fetch`) → `0877f4d4f5a446a7a3caa2eefbd3e2fd3f3203f9`; `expo-secure-store` `faceIDPermission` set to a string (spec 03 already set `false`) → `3d54d2d3506726a0afeabce26f02dea4ef19888d`; a line appended to `patches/expo-widgets+55.0.5.patch` → `035f05c219701bc2a21a35060c5701a87fb83094`. The symlink run gave the same 6 same / 3 different split.
+- **FR3.** 40/40 tests pass under `/bin/bash` 3.2.57, which is the `bash` the tests spawn. `bash -n` is clean. shellcheck isn't installed, so it was skipped. `git ls-files -s` shows `100755`. Choices the spec leaves open:
+  - Any argument starting with `-` is refused, not only `--flag`, so a typo like `-n` isn't published as the message. A `--dry-run` after the message gets its own usage line.
+  - The matched build's `runtimeVersion` must equal the resolved runtime. This guards against `--runtime-version` being silently ignored.
+  - An unreadable `app.json` is a refusal.
+- **`.env.local` leak proof.** The worktree has no `.env.local` (it's gitignored), and the main checkout's copy also holds credentials. So a temporary worktree `.env.local` held only `EXPO_PUBLIC_DEV_USERNAME=<synthetic sentinel>`, and it was deleted afterwards. With `--clear` on both exports and `grep -rlaF`: control **1** file, `EXPO_NO_DOTENV=1` **0** files. `env: load .env.local` was logged in the control only.
+  - Without `--clear`, a warm Metro cache made both runs agree (1/1, then 0/0), because the transform cache isn't keyed on `EXPO_PUBLIC_` values.
+  - The real publish is safe anyway: `eas update --environment production` implies `--clear` (eas-cli 20.1.0 `build/commands/update/index.js:532`). A comment in script step 7 says why `--environment` must stay. The checklist command above now carries this correction.
+- **FR5.** `docs/RELEASING.md`: `^## OTA updates$` = 1, `^## Native release` = 0, `^### [A-E]\. ` = 5. Those are the only `### ` headings, as spec 05's heading-order check expects. No `expo-fingerprint`, and every required term is present. All 11 `eas …` commands were flag-checked against `eas <cmd> --help` (eas-cli 20.1.0).
+- **Suite.** `npx jest --silent`: 4950 passed / 1 failed. The failure is the known baseline `NativeWindSmoke.test.tsx:202`. Targeted files: 68/68.
+  - `npx tsc --noEmit`: 541. The error list is identical to the red commit `022e4b1`, so the implementation adds 0. 12 of them are the Node-builtin TS2307/TS2304 errors in the spec 03/04 test files, waiting on spec 07's `@types/node`.
+  - `npx expo lint`: 9 errors / 494 warnings, same as baseline. eslint is clean on the new and changed files.
+  - `npx expo-doctor`: 19/20; only the package-versions check fails.
+- **Left for the orchestrator:** the live EAS `--dry-run "check"` (FR3, last item), all of Phase 1.2, and Phase 1.3.
