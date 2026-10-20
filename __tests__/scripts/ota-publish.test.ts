@@ -387,6 +387,59 @@ describe('FR3: scripts/ota-publish.sh', () => {
     });
   });
 
+  // 10-sdk-58-ios-27 FR1: eas-cli v22.0.0 replaced the build object's `runtimeVersion` and
+  // `channel` with `runtime: { id, version }` and `updateChannel` in `--json` output. The guard
+  // reads `(b.runtime && b.runtime.version) ?? b.runtimeVersion`, so it works on both CLIs.
+  describe('step 4: both eas-cli build JSON shapes (spec 10 FR1)', () => {
+    // eas-cli >= 22 shape: no top-level runtimeVersion or channel.
+    const modernBuild = (version: string): Record<string, unknown> => {
+      const b: Record<string, unknown> = {
+        ...build(),
+        updateChannel: 'production',
+        runtime: { id: 'rt-0001', version },
+      };
+      delete b.runtimeVersion;
+      delete b.channel;
+      return b;
+    };
+
+    it('accepts eas-cli >= 22 build JSON (runtime.version, no runtimeVersion) and publishes once', () => {
+      const fixture = modernBuild(RTV);
+      expect(fixture).not.toHaveProperty('runtimeVersion');
+      const r = run([MSG], { STUB_BUILDS_JSON: JSON.stringify([fixture]) });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('OTA published');
+      expect(r.updateCalls).toHaveLength(1);
+    });
+
+    it('accepts eas-cli 20 build JSON (runtimeVersion, no runtime) and publishes once', () => {
+      const fixture = build();
+      expect(fixture).not.toHaveProperty('runtime');
+      const r = run([MSG], { STUB_BUILDS_JSON: JSON.stringify([fixture]) });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('OTA published');
+      expect(r.updateCalls).toHaveLength(1);
+    });
+
+    it('--dry-run on eas-cli >= 22 JSON names the matched build', () => {
+      const r = run(['--dry-run', MSG], { STUB_BUILDS_JSON: JSON.stringify([modernBuild(RTV)]) });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('Dry run OK');
+      expect(r.stdout).toContain(BUILD_ID);
+      expect(r.stdout).toContain('1.1.0 (18)');
+      expect(r.updateCalls).toEqual([]);
+    });
+
+    it('reads runtime.version for real: a different runtime.version is refused by name', () => {
+      const r = run([MSG], { STUB_BUILDS_JSON: JSON.stringify([modernBuild(OTHER_RTV)]) });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain(
+        `Refusing to publish: eas build:list returned build ${BUILD_ID} with runtime "${OTHER_RTV}", not ${RTV}`,
+      );
+      expect(r.updateCalls).toEqual([]);
+    });
+  });
+
   describe('step 6: --dry-run', () => {
     it('prints Dry run OK with the runtime, the matched build and the exact publish command, and does not publish', () => {
       const r = run(['--dry-run', MSG]);

@@ -90,8 +90,10 @@ build_fields=$(printf '%s' "$builds_json" | node -e '
     process.exit(1);
   }
   const b = builds[0] || {};
+  // eas-cli >= 22 nests the runtime as runtime.version; eas-cli <= 21 has a top-level runtimeVersion.
+  const rtv = (b.runtime && b.runtime.version) ?? b.runtimeVersion;
   const field = (v) => (v == null ? "" : String(v).replace(/[|\r\n]/g, " "));
-  console.log([builds.length, b.id, b.runtimeVersion, b.appVersion, b.appBuildVersion].map(field).join("|"));
+  console.log([builds.length, b.id, rtv, b.appVersion, b.appBuildVersion].map(field).join("|"));
 ') || die "Refusing to publish: \`eas build:list\` did not print a JSON array, so the audience guard cannot run"
 IFS='|' read -r build_count build_id build_rtv build_version build_number <<EOF
 $build_fields
