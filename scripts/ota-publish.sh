@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+# Guarded OTA publisher for Hourglass (iOS only). Runbook: docs/RELEASING.md, "OTA updates".
+#
+#   scripts/ota-publish.sh [--dry-run] "<message>"
+#
+# Publishes the committed tree as an EAS Update on channel "production", but only if a finished
+# iOS production build already has this tree's fingerprint runtime, so the update has an audience.
+# Steps, in order; every refusal prints to stderr and exits 1 before the next step runs:
+#   1. arguments  2. clean tree  3. 40-hex fingerprint runtime  4. audience guard (eas build:list)
+#   5. version check (warning only)  6. --dry-run stops here  7. publish  8. report
+# Exit codes: 0 published or dry run OK; 1 refusal, or a runtime mismatch after publishing;
+# N when `eas update` itself exits N.
+#
+# Must run on macOS's stock bash 3.2: no associative arrays, mapfile or case-modifying
+# expansions, and no arrays at all (an empty array trips `set -u` on 3.2). JSON goes through node.
+
+set -euo pipefail
+
+USAGE='Usage: scripts/ota-publish.sh [--dry-run] "<message>"'
+CHANNEL=production
+
+# die <line>...: print each argument as a line on stderr and exit 1.
+die() {
+  printf '%s\n' "$@" >&2
+  exit 1
+}
+
+usage_error() {
+  die "ota-publish: $1" "$USAGE"
+}
+
+# Work from the repo root whatever the caller's cwd is (CDPATH could make `cd` print the path).
+ROOT=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)
+cd "$ROOT"
+
+# --- 1. Arguments ---------------------------------------------------------------------------
+dry_run=0
+if [ "$#" -gt 0 ] && [ "$1" = "--dry-run" ]; then
+  dry_run=1
+  shift
+fi
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) usage_error "--dry-run must come before the message" ;;
+    # Any other option is refused rather than published as the message (e.g. a typo'd flag).
+    -*) usage_error "unknown option \"$arg\" (a message may not start with \"-\")" ;;
+  esac
+done
+[ "$#" -eq 1 ] || usage_error "expected exactly one quoted message, got $# arguments"
+MESSAGE=$1
+[ -n "${MESSAGE//[[:space:]]/}" ] || usage_error "the message is empty"
+
+# --- 2. Clean tree --------------------------------------------------------------------------
+# An update must be reproducible from a commit, and untracked files can end up in the bundle.
+porcelain=$(git status --porcelain) || die "Refusing to publish: git status failed in $ROOT"
+if [ -n "$porcelain" ]; then
+  die "Refusing to publish: uncommitted changes" "$porcelain" \
+    "Commit or stash them (untracked files too), then retry."
+fi
+COMMIT=$(git rev-parse --short HEAD) || die "Refusing to publish: git rev-parse HEAD failed"
+
+# --- 3. Runtime -----------------------------------------------------------------------------
+rtv_json=$(npx expo-updates runtimeversion:resolve --platform ios) ||
+  die "Refusing to publish: \`npx expo-updates runtimeversion:resolve --platform ios\` failed (output above)"
+RTV=$(printf '%s' "$rtv_json" | node -e '
+  const out = JSON.parse(require("fs").readFileSync(0, "utf8"));
+  if (!out || typeof out.runtimeVersion !== "string") {
+    console.error("no string runtimeVersion field in the resolver output");
+    process.exit(1);
+  }
+  process.stdout.write(out.runtimeVersion);
+') || die "Refusing to publish: could not read runtimeVersion from \`npx expo-updates runtimeversion:resolve --platform ios\`"
+# Explicit hex digits instead of a range, so no locale can let uppercase through.
+if ! [[ "$RTV" =~ ^[0123456789abcdef]{40}$ ]]; then
+  die "Refusing to publish: runtime version \"$RTV\" is not a fingerprint hash" \
+    "  app.json must keep runtimeVersion { \"policy\": \"fingerprint\" }; a literal runtime belongs only on a" \
+    "  runbook emergency branch (docs/RELEASING.md, section B), never on main."
+fi
+
+# --- 4. Audience guard ----------------------------------------------------------------------
+# Fails closed: if EAS can't be asked (offline, logged out), nothing is published.
+builds_json=$(eas build:list --platform ios --status finished --channel "$CHANNEL" \
+  --runtime-version "$RTV" --limit 1 --json --non-interactive) ||
+  die "Refusing to publish: \`eas build:list\` failed (output above), so the audience guard cannot run"
+# One line, "|"-separated, so a single `read` takes it even when trailing fields are empty.
+build_fields=$(printf '%s' "$builds_json" | node -e '
+  const builds = JSON.parse(require("fs").readFileSync(0, "utf8"));
+  if (!Array.isArray(builds)) {
+    console.error("expected a JSON array");
+    process.exit(1);
+  }
+  const b = builds[0] || {};
+  const field = (v) => (v == null ? "" : String(v).replace(/[|\r\n]/g, " "));
+  console.log([builds.length, b.id, b.runtimeVersion, b.appVersion, b.appBuildVersion].map(field).join("|"));
+') || die "Refusing to publish: \`eas build:list\` did not print a JSON array, so the audience guard cannot run"
+IFS='|' read -r build_count build_id build_rtv build_version build_number <<EOF
+$build_fields
+EOF
+if [ "$build_count" = 0 ]; then
+  die "Refusing to publish: no finished iOS build on channel \"$CHANNEL\" has runtime $RTV" \
+    "  Nobody would receive this update. Either:" \
+    "  - your node_modules differ from package-lock.json: run \`npm ci\` and retry, or" \
+    "  - the change is native: ship a new build instead (docs/RELEASING.md, section C)." \
+    "  To see which fingerprint source differs from the latest build:" \
+    "    eas fingerprint:compare --build-id <id> --environment production" \
+    "  (find <id> with: eas build:list --platform ios --channel $CHANNEL --limit 1)"
+fi
+if [ "$build_rtv" != "$RTV" ]; then
+  die "Refusing to publish: eas build:list returned build $build_id with runtime \"$build_rtv\", not $RTV"
+fi
+
+# --- 5. Version check (warning only) --------------------------------------------------------
+# Inside an OTA, Constants.expoConfig comes from the update manifest, so the Settings version row
+# shows the publishing tree's version and buildNumber, not the binary's.
+app_fields=$(node -e '
+  const { expo = {} } = JSON.parse(require("fs").readFileSync("app.json", "utf8"));
+  const field = (v) => (v == null ? "" : String(v).replace(/[|\r\n]/g, " "));
+  console.log([expo.version, (expo.ios || {}).buildNumber].map(field).join("|"));
+') || die "Refusing to publish: could not read expo.version and expo.ios.buildNumber from app.json"
+IFS='|' read -r app_version app_build <<EOF
+$app_fields
+EOF
+if [ "$app_version" != "$build_version" ] || [ "$app_build" != "$build_number" ]; then
+  printf '%s\n' \
+    "WARNING: app.json is $app_version ($app_build) but the target build is $build_version ($build_number)" \
+    "  The update still reaches that build, but its Settings version row will show $app_version ($app_build)." \
+    "  To avoid that, publish from the build's commit (docs/RELEASING.md, section A)." >&2
+fi
+
+# --- 6. Dry run -----------------------------------------------------------------------------
+# Single-quote the message for display so the printed command can be pasted as is.
+q="'"
+quoted_message="'${MESSAGE//$q/$q\\$q$q}'"
+# Keep in sync with the eas update call in step 7.
+publish_command="EXPO_NO_DOTENV=1 eas update --channel $CHANNEL --environment production --platform ios --message $quoted_message --json --non-interactive"
+if [ "$dry_run" = 1 ]; then
+  printf '%s\n' \
+    "Dry run OK: nothing was published" \
+    "  commit:   $COMMIT" \
+    "  runtime:  $RTV" \
+    "  build:    $build_id, $build_version ($build_number)" \
+    "  command:  $publish_command"
+  exit 0
+fi
+
+# --- 7. Publish -----------------------------------------------------------------------------
+# EXPO_NO_DOTENV=1 keeps .env.local (gitignored, never seen by EAS builds) out of the bundle.
+# EAS-side variables still apply through --environment production, which also makes eas-cli
+# bundle with a cleared Metro cache. That matters: Metro's cache isn't keyed on EXPO_PUBLIC_
+# values, so a warm cache from an earlier local export could still carry .env.local values.
+publish_status=0
+update_json=$(EXPO_NO_DOTENV=1 eas update --channel "$CHANNEL" --environment production \
+  --platform ios --message "$MESSAGE" --json --non-interactive) || publish_status=$?
+if [ "$publish_status" -ne 0 ]; then
+  printf '%s\n' "ERROR: eas update failed with exit code $publish_status (output above)" >&2
+  exit "$publish_status"
+fi
+
+# --- 8. Report ------------------------------------------------------------------------------
+update_fields=$(printf '%s' "$update_json" | node -e '
+  const updates = JSON.parse(require("fs").readFileSync(0, "utf8"));
+  const ios = Array.isArray(updates) ? updates.find((u) => u && u.platform === "ios") : undefined;
+  if (!ios) {
+    console.error("no element with platform \"ios\"");
+    process.exit(1);
+  }
+  const field = (v) => (v == null ? "" : String(v).replace(/[|\r\n]/g, " "));
+  console.log([ios.id, ios.group, ios.runtimeVersion].map(field).join("|"));
+') || die "ERROR: eas update exited 0 but its --json output has no iOS update" \
+  "  Check what was published: eas update:list --branch production --json --non-interactive"
+IFS='|' read -r update_id update_group update_rtv <<EOF
+$update_fields
+EOF
+if [ "$update_rtv" != "$RTV" ]; then
+  die "ERROR: eas published to runtime $update_rtv but the guard checked $RTV" \
+    "  Group $update_group may reach a different build than intended, or none." \
+    "  Roll it back now (docs/RELEASING.md, section D), for example:" \
+    "    eas update:roll-back-to-embedded --channel $CHANNEL --runtime-version $update_rtv --platform ios --message \"roll back $update_group\""
+fi
+
+printf '%s\n' \
+  "OTA published" \
+  "  commit:   $COMMIT" \
+  "  runtime:  $RTV" \
+  "  group:    $update_group" \
+  "  update:   $update_id" \
+  "  settings: Update: ${update_id:0:8}" \
+  "Force-quit and relaunch the app twice; Settings should then show the line above."

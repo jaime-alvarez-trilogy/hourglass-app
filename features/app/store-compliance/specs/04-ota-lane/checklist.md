@@ -93,7 +93,7 @@ Phases 1.0–1.2 go into the implementation PR, which ships in build 18. Phase 1
 - [x] Create `fingerprint.config.js`. Use exactly `module.exports = { sourceSkips: ['ExpoConfigVersions', 'PackageJsonScriptsAll', 'GitIgnore'] }` plus the JSDoc `@type {import('expo/fingerprint').Config}` and a one-line *why* comment per entry.
 - [x] Create `.fingerprintignore`: comment lines explaining why, then the single pattern `eas.json`. Don't add `features/**`, `docs/**` and similar; they aren't fingerprint sources.
 - [x] `npx jest __tests__/config/fingerprint-config.test.ts` passes
-- [ ] Sensitivity matrix. Run it in a scratch worktree, never in the working tree, after committing FR1 and FR2:
+- [x] Sensitivity matrix. Run it in a scratch worktree, never in the working tree, after committing FR1 and FR2:
   ```bash
   ROOT="$(pwd)"; WT=/tmp/ota-matrix; git worktree add --detach "$WT" HEAD && ln -s "$ROOT/node_modules" "$WT/node_modules" && cd "$WT"
   rtv(){ npx expo-updates runtimeversion:resolve --platform ios | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).runtimeVersion'; }
@@ -101,25 +101,25 @@ Phases 1.0–1.2 go into the implementation PR, which ships in build 18. Phase 1
   # after each edit: echo "<label> $(rtv)"; git checkout -- . && git clean -fdq -e node_modules   # -e keeps the symlink
   ```
   The following must equal `$BASE`. Record each value.
-  - [ ] `ios.buildNumber` → `"99"`
-  - [ ] `version` → `"9.9.9"`
-  - [ ] add a script `"foo": "echo foo"` to `package.json` `scripts`
-  - [ ] `eas.json` `submit.production.ios.ascApiKeyId` → `"NEWKEY1234"`
-  - [ ] append `tmp-junk/` to `.gitignore`
-  - [ ] new files `features/x.md`, `docs/y.md`, `site/z.html`
+  - [x] `ios.buildNumber` → `"99"`
+  - [x] `version` → `"9.9.9"`
+  - [x] add a script `"foo": "echo foo"` to `package.json` `scripts`
+  - [x] `eas.json` `submit.production.ios.ascApiKeyId` → `"NEWKEY1234"`
+  - [x] append `tmp-junk/` to `.gitignore`
+  - [x] new files `features/x.md`, `docs/y.md`, `site/z.html`
 
   The following must differ from `$BASE`:
-  - [ ] remove `"fetch"` from `ios.infoPlist.UIBackgroundModes`. If spec 03 already removed it, add `"audio"` instead.
-  - [ ] change `"expo-secure-store"` to `["expo-secure-store", { "faceIDPermission": false }]`. If spec 03 already did this, set `faceIDPermission` to a string instead.
-  - [ ] append a line to `patches/expo-widgets+55.0.5.patch`
+  - [x] remove `"fetch"` from `ios.infoPlist.UIBackgroundModes`. If spec 03 already removed it, add `"audio"` instead.
+  - [x] change `"expo-secure-store"` to `["expo-secure-store", { "faceIDPermission": false }]`. If spec 03 already did this, set `faceIDPermission` to a string instead.
+  - [x] append a line to `patches/expo-widgets+55.0.5.patch`
 
   Clean up: `cd "$ROOT" && git worktree remove --force "$WT"`.
 
 ### FR3: Guarded publish script
-- [ ] Create `scripts/ota-publish.sh` per the spec (steps 1–8, exact stderr and stdout strings, bash 3.2 compatible, `node` for JSON). `chmod 755`, and confirm `git ls-files -s scripts/ota-publish.sh` shows `100755`.
-- [ ] `bash -n scripts/ota-publish.sh` passes. Also run `shellcheck scripts/ota-publish.sh` if it's installed, with no errors.
-- [ ] `npx jest __tests__/scripts/ota-publish.test.ts` passes
-- [ ] Prove the `.env.local` leak and the fix (skip this if `.env.local` has no `EXPO_PUBLIC_DEV_USERNAME`):
+- [x] Create `scripts/ota-publish.sh` per the spec (steps 1–8, exact stderr and stdout strings, bash 3.2 compatible, `node` for JSON). `chmod 755`, and confirm `git ls-files -s scripts/ota-publish.sh` shows `100755`.
+- [x] `bash -n scripts/ota-publish.sh` passes. Also run `shellcheck scripts/ota-publish.sh` if it's installed, with no errors.
+- [x] `npx jest __tests__/scripts/ota-publish.test.ts` passes
+- [x] Prove the `.env.local` leak and the fix (skip this if `.env.local` has no `EXPO_PUBLIC_DEV_USERNAME`):
   ```bash
   V=$(sed -n 's/^EXPO_PUBLIC_DEV_USERNAME=//p' .env.local)
   npx expo export --platform ios --output-dir /tmp/ota-leak-on  >/dev/null && grep -rlF "$V" /tmp/ota-leak-on | wc -l   # expect >= 1 (control)
@@ -127,6 +127,7 @@ Phases 1.0–1.2 go into the implementation PR, which ships in build 18. Phase 1
   rm -rf /tmp/ota-leak-on /tmp/ota-leak-off
   ```
   Record both counts in Session Notes. Don't record the value itself.
+  **Correction (2026-10-19, measured):** as written, these commands can't tell the leak from the fix. Pass `--clear` to both exports, because Metro's transform cache isn't keyed on `EXPO_PUBLIC_` values: a warm cache returns whichever value was inlined first. `eas update --environment …` clears the cache itself (eas-cli 20.1.0 `clearCache: flags['clear-cache'] ? true : !!flags['environment']`). Also grep with `-a` (`grep -rlaF`): macOS grep skips the binary `.hbc` bundle, so `-rlF` reports 0 even when the value is there.
 - [ ] Live dry run against EAS (needs an EAS login) on the PR branch with a clean tree: `scripts/ota-publish.sh --dry-run "check"`. **Expected before build 18 exists:** exit 1 with `no finished iOS build on channel "production" has runtime <hash>`. Paste the output into Session Notes.
 
 ### FR5: Release runbook
