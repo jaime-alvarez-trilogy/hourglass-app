@@ -111,7 +111,7 @@ export default function CredentialsScreen() {
             <View style={styles.keychainRow}>
               <Text style={styles.keychainIcon}>🔒</Text>
               <Text style={styles.keychainText}>
-                Your credentials are stored securely in your device's Keychain and never leave your phone.
+                Your credentials are stored securely in your device&apos;s Keychain and never leave your phone.
               </Text>
             </View>
 

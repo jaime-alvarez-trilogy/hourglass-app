@@ -77,14 +77,18 @@ const MockStack = ({ children }: any) => {
   const mockReact = require('react');
   return mockReact.createElement('MockStack', null, children);
 };
-(MockStack as any).Screen = () => null;
+(MockStack as any).Screen = function MockStackScreen() {
+  return null;
+};
 
 jest.mock('expo-router', () => {
   const StackMock = ({ children }: any) => {
     const mockReact = require('react');
     return mockReact.createElement('MockStack', null, children);
   };
-  StackMock.Screen = () => null;
+  StackMock.Screen = function StackMockScreen() {
+    return null;
+  };
   return {
     Stack: StackMock,
     useRouter: () => ({ replace: jest.fn() }),

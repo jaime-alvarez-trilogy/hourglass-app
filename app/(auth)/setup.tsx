@@ -46,7 +46,7 @@ export default function SetupScreen() {
           <View className="mb-6">
             <Text className="font-display-semibold text-3xl text-textPrimary">Set Your Rate</Text>
             <Text className="font-body text-base text-textSecondary mt-2">
-              We couldn't detect your rate automatically. Please enter it below.
+              We couldn&apos;t detect your rate automatically. Please enter it below.
             </Text>
           </View>
 

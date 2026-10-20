@@ -169,17 +169,17 @@ Two PRs are recommended (see spec → Release & Merge Order):
 - [x] Commit: `test(07-ci-typecheck-lint): FR6 fix test and mock type errors`
 
 ### FR7: Lint (PR B)
-- [ ] `'` → `&apos;` at `app/(auth)/credentials.tsx:114`, `app/(auth)/setup.tsx:49`, `app/(tabs)/overview.tsx:649` and `app/+not-found.tsx:9`. No typographic `’`.
-- [ ] `layout-notifications.test.tsx:80,87`: add `displayName` (or use named functions) on `MockStack`/`StackMock`.
-- [ ] `HapticTab.test.tsx:98,120`: pass children as the third `createElement` argument.
-- [ ] `eslint.config.js`: append the `no-restricted-globals` `Buffer` block for `app/**`, `src/**` and `components/**`, ignoring `**/__tests__/**` and `**/*.test.*`.
-- [ ] `npm run lint` exits 0 with `0 errors`.
-- [ ] `npx expo lint --no-cache 2>&1 | tail -3` shows warnings ≤ the Pre-flight count.
-- [ ] Probe: `printf 'export const n = Buffer.byteLength("x");\n' | npx eslint --stdin --stdin-filename src/lib/__probe.ts` exits 1 with `no-restricted-globals`.
-- [ ] Probe: the same input with `--stdin-filename src/lib/__tests__/probe.test.ts` reports no `no-restricted-globals`.
-- [ ] Probe: `printf 'export const n = new TextEncoder().encode("x").length;\n' | npx eslint --stdin --stdin-filename src/lib/__probe.ts` exits 0.
-- [ ] The `ci-gates.test.ts` FR7 case is green. Tests rendering the four edited strings are green.
-- [ ] Commit: `fix(07-ci-typecheck-lint): FR7 lint errors and Hermes Buffer guard`
+- [x] `'` → `&apos;` at `app/(auth)/credentials.tsx:114`, `app/(auth)/setup.tsx:49`, `app/(tabs)/overview.tsx:649` and `app/+not-found.tsx:9`. No typographic `’`.
+- [x] `layout-notifications.test.tsx:80,87`: add `displayName` (or use named functions) on `MockStack`/`StackMock`.
+- [x] `HapticTab.test.tsx:98,120`: pass children as the third `createElement` argument.
+- [x] `eslint.config.js`: append the `no-restricted-globals` `Buffer` block for `app/**`, `src/**` and `components/**`, ignoring `**/__tests__/**` and `**/*.test.*`.
+- [x] `npm run lint` exits 0 with `0 errors`.
+- [x] `npx expo lint --no-cache 2>&1 | tail -3` shows warnings ≤ the Pre-flight count.
+- [x] Probe: `printf 'export const n = Buffer.byteLength("x");\n' | npx eslint --stdin --stdin-filename src/lib/__probe.ts` exits 1 with `no-restricted-globals`.
+- [x] Probe: the same input with `--stdin-filename src/lib/__tests__/probe.test.ts` reports no `no-restricted-globals`.
+- [x] Probe: `printf 'export const n = new TextEncoder().encode("x").length;\n' | npx eslint --stdin --stdin-filename src/lib/__probe.ts` exits 0.
+- [x] The `ci-gates.test.ts` FR7 case is green. Tests rendering the four edited strings are green.
+- [x] Commit: `fix(07-ci-typecheck-lint): FR7 lint errors and Hermes Buffer guard`
 
 ### FR8: CI gates (PR B)
 - [ ] `.github/workflows/test.yml` `app-tests`:
