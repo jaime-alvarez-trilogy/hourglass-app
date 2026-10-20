@@ -66,58 +66,58 @@ All commands run from the app repo root `hourglassws/`. macOS has no `timeout` b
 
 ⚠️ **Validate test design BEFORE implementing.** Weak tests lead to weak implementation.
 
-- [ ] Run `red-phase-test-validator` agent
-- [ ] All FR success criteria have test coverage (FR1–FR5 in Jest; FR1 doctor, FR2 lockfile, FR2–FR4 prebuild and FR6 greps are command checks in Phase 1.1)
-- [ ] Assertions are specific: exact `toEqual` on arrays and objects, `toHaveLength(1)` on the secure-store entry, and no bare `toBeDefined()` or `toContain('remote-notification')` (which would miss a leftover `fetch`)
-- [ ] The introspection suite's non-vacuity guards pass in the red phase, proving plugins actually ran
-- [ ] Mocks: none. Both suites read the real `app.json`/`package.json`, and the introspection suite runs the real CLI
-- [ ] Fix any issues identified before proceeding
+- [x] Run `red-phase-test-validator` agent (run by the orchestrator; 0 findings)
+- [x] All FR success criteria have test coverage (FR1–FR5 in Jest; FR1 doctor, FR2 lockfile, FR2–FR4 prebuild and FR6 greps are command checks in Phase 1.1)
+- [x] Assertions are specific: exact `toEqual` on arrays and objects, `toHaveLength(1)` on the secure-store entry, and no bare `toBeDefined()` or `toContain('remote-notification')` (which would miss a leftover `fetch`)
+- [x] The introspection suite's non-vacuity guards pass in the red phase, proving plugins actually ran
+- [x] Mocks: none. Both suites read the real `app.json`/`package.json`, and the introspection suite runs the real CLI
+- [x] Fix any issues identified before proceeding
 
 ---
 
 ## Phase 1.1: Implementation
 
 ### FR1: Remove schema-invalid config keys
-- [ ] Delete `"newArchEnabled": true,` (`app.json:10`)
-- [ ] Delete `"edgeToEdgeEnabled": true,` (`app.json:36`); leave `predictiveBackGestureEnabled` alone
-- [ ] Run `npx jest __tests__/config/app-config.test.ts -t FR1`: green
+- [x] Delete `"newArchEnabled": true,` (`app.json:10`)
+- [x] Delete `"edgeToEdgeEnabled": true,` (`app.json:36`); leave `predictiveBackGestureEnabled` alone
+- [x] Run `npx jest __tests__/config/app-config.test.ts -t FR1`: green
 
 ### FR2: Remove the unused `fetch` background mode
-- [ ] Set `expo.ios.infoPlist.UIBackgroundModes` to `["remote-notification"]` (keep the multi-line array formatting)
-- [ ] Run `npm uninstall expo-background-fetch expo-task-manager`
-- [ ] Lockfile check prints `lockfile OK`:
+- [x] Set `expo.ios.infoPlist.UIBackgroundModes` to `["remote-notification"]` (keep the multi-line array formatting)
+- [x] Run `npm uninstall expo-background-fetch expo-task-manager`
+- [x] Lockfile check prints `lockfile OK`:
   `node -e 'const l=require("./package-lock.json");const bad=["expo-background-fetch","expo-task-manager","unimodules-app-loader"].filter(n=>l.packages["node_modules/"+n]);const root=Object.keys({...l.packages[""].dependencies,...l.packages[""].devDependencies}).filter(n=>n==="expo-background-fetch"||n==="expo-task-manager");console.log(bad.length||root.length?"FAIL "+JSON.stringify({bad,root}):"lockfile OK")'`
-- [ ] `git diff package-lock.json | grep -E '^\+[^+]'` prints nothing (deletions only). If anything prints, `git checkout package.json package-lock.json`, run `npm ci`, and redo the uninstall. Don't accept other version changes (spec 06)
-- [ ] `git diff package.json` shows exactly 2 removed lines (old lines 32 and 50)
-- [ ] Import sweep prints nothing:
+- [x] `git diff package-lock.json | grep -E '^\+[^+]'` prints nothing (deletions only). If anything prints, `git checkout package.json package-lock.json`, run `npm ci`, and redo the uninstall. Don't accept other version changes (spec 06)
+- [x] `git diff package.json` shows exactly 2 removed lines (old lines 32 and 50)
+- [x] Import sweep prints nothing:
   `grep -rIn 'expo-background-fetch\|expo-task-manager\|TaskManager\.\|registerTaskAsync' app src components hooks scripts tools --include='*.ts' --include='*.tsx' --include='*.js'`
-- [ ] Run `npx jest __tests__/config/app-config.test.ts -t FR2`: green
+- [x] Run `npx jest __tests__/config/app-config.test.ts -t FR2`: green
 
 ### FR3: Remove the Face ID usage description
-- [ ] Replace `"expo-secure-store",` (`app.json:94`) at the same index with `["expo-secure-store", { "faceIDPermission": false }]`, formatted like the neighboring tuple entries
-- [ ] Confirm no other `expo-secure-store` entry remains: `grep -c '"expo-secure-store"' app.json` prints `1`
-- [ ] Run `npx jest __tests__/config/app-config.test.ts -t FR3`: green
+- [x] Replace `"expo-secure-store",` (`app.json:94`) at the same index with `["expo-secure-store", { "faceIDPermission": false }]`, formatted like the neighboring tuple entries
+- [x] Confirm no other `expo-secure-store` entry remains: `grep -c '"expo-secure-store"' app.json` prints `1`
+- [x] Run `npx jest __tests__/config/app-config.test.ts -t FR3`: green
 
 ### FR4: Declare the app-level privacy manifest
-- [ ] Insert `"privacyManifests": { … }` (exact contract object) inside `expo.ios`, between `entitlements` and `buildNumber`. Don't touch the `buildNumber` line
-- [ ] `node -e 'JSON.parse(require("fs").readFileSync("app.json","utf8"))'` exits 0 (valid JSON)
-- [ ] Run `npx jest __tests__/config/app-config.test.ts -t FR4`: green
+- [x] Insert `"privacyManifests": { … }` (exact contract object) inside `expo.ios`, between `entitlements` and `buildNumber`. Don't touch the `buildNumber` line
+- [x] `node -e 'JSON.parse(require("fs").readFileSync("app.json","utf8"))'` exits 0 (valid JSON)
+- [x] Run `npx jest __tests__/config/app-config.test.ts -t FR4`: green
 
 ### FR5: Resolved-config guard goes green
-- [ ] Run `npx jest __tests__/config`: both suites green; the introspection suite finishes in under 10 s
-- [ ] The canonical introspection one-liner prints exactly `{"bg":["remote-notification"],"faceId":null,"newArch":false,"edge":false,"bf":false,"tm":false,"ud":["CA92.1","1C8F.1"]}`
+- [x] Run `npx jest __tests__/config`: both suites green; the introspection suite finishes in under 10 s
+- [x] The canonical introspection one-liner prints exactly `{"bg":["remote-notification"],"faceId":null,"newArch":false,"edge":false,"bf":false,"tm":false,"ud":["CA92.1","1C8F.1"]}`
 
 ### Native verification (command checks for FR1–FR4)
-- [ ] **expo-doctor (FR1):** `npx expo-doctor > /tmp/doctor.txt 2>&1; grep -c '✖ Check Expo config' /tmp/doctor.txt` prints `0`. The only expected failure is "Check that packages match versions required by installed Expo SDK" (spec 06), and its table no longer lists `expo-background-fetch` or `expo-task-manager`. Doctor exits 1 because of that check, so don't chain with `&&`
-- [ ] **Prebuild (FR2–FR4):** confirm `git check-ignore -v ios/` prints `.gitignore:60:/ios`, then run `CI=1 npx expo prebuild -p ios --clean --no-install`
-  - [ ] `plutil -extract UIBackgroundModes json -o - ios/Hourglassxo/Info.plist` prints `["remote-notification"]`
-  - [ ] `plutil -extract NSFaceIDUsageDescription raw -o - ios/Hourglassxo/Info.plist` reports "No value at that key path"
-  - [ ] `plutil -lint ios/Hourglassxo/PrivacyInfo.xcprivacy` prints `OK`
-  - [ ] `grep -c '1C8F.1' ios/Hourglassxo/PrivacyInfo.xcprivacy` prints `1`
-  - [ ] `grep -c 'PrivacyInfo.xcprivacy' ios/Hourglassxo.xcodeproj/project.pbxproj` prints a number ≥ 1 (4 seen in the dry run)
-  - [ ] `git status --porcelain` shows only this spec's intended changes: no `ios/`, and no `package.json` change beyond FR2 (prebuild should report "Updated package.json | no changes")
-  - [ ] `rm -rf ios`
-- [ ] Commit: `fix(03-native-config-cleanup): drop fetch background mode, Face ID string and invalid keys; add privacy manifest`
+- [x] **expo-doctor (FR1):** `npx expo-doctor > /tmp/doctor.txt 2>&1; grep -c '✖ Check Expo config' /tmp/doctor.txt` prints `0`. The only expected failure is "Check that packages match versions required by installed Expo SDK" (spec 06), and its table no longer lists `expo-background-fetch` or `expo-task-manager`. Doctor exits 1 because of that check, so don't chain with `&&`
+- [x] **Prebuild (FR2–FR4):** confirm `git check-ignore -v ios/` prints `.gitignore:60:/ios`, then run `CI=1 npx expo prebuild -p ios --clean --no-install` (run in a `cp -cR` clone under /tmp with its `.git` link removed, per the orchestrator's rule; never in the worktree)
+  - [x] `plutil -extract UIBackgroundModes json -o - ios/Hourglassxo/Info.plist` prints `["remote-notification"]`
+  - [x] `plutil -extract NSFaceIDUsageDescription raw -o - ios/Hourglassxo/Info.plist` reports "No value at that key path"
+  - [x] `plutil -lint ios/Hourglassxo/PrivacyInfo.xcprivacy` prints `OK`
+  - [x] `grep -c '1C8F.1' ios/Hourglassxo/PrivacyInfo.xcprivacy` prints `1`
+  - [x] `grep -c 'PrivacyInfo.xcprivacy' ios/Hourglassxo.xcodeproj/project.pbxproj` prints a number ≥ 1 (4 seen in the dry run)
+  - [x] `git status --porcelain` shows only this spec's intended changes: no `ios/`, and no `package.json` change beyond FR2 (prebuild should report "Updated package.json | no changes")
+  - [x] `rm -rf ios` (the whole /tmp clone was deleted)
+- [x] Commit: `fix(03-native-config-cleanup): drop fetch background mode, Face ID string and invalid keys; add privacy manifest`
 
 ### FR6: Fix documentation drift
 - [ ] `TECH_STACK.md:10`: architecture row → `New Architecture (mandatory on SDK 55 / RN 0.83; there is no app.json toggle)`
@@ -180,3 +180,5 @@ All commands run from the app repo root `hourglassws/`. macOS has no `timeout` b
 - The ActiveKeyboards test also asserts the exact list of four categories. A bare `not.toContain` passes vacuously when there's no manifest.
 
 Green sanity check: in a throwaway `cp -cR` clone in /tmp (since deleted), I applied the target `app.json` and dropped both packages from `package.json`. All 23 tests passed. Note: `npx jest __tests__/config` (no trailing slash) is a regex, so it also matches `__tests__/config-store.test.ts` and `config-types.test.ts`. Use `__tests__/config/` to target only these two suites. `tsc`: the static suite adds 0 errors; the introspection suite adds 3 (`child_process`, `path`, `__dirname`), as expected per Out of Scope #8 (deferred to spec 07). The worktree's own tsc baseline is 529. Full `npx jest --silent`: 4880 passed / 19 failed (18 new red + the pre-existing NativeWindSmoke).
+
+**2026-10-19 (Phase 1.1)**: The red-phase validator returned 0 findings, so the tests are unchanged. Applied FR1–FR4 to `app.json` and ran `npm uninstall expo-background-fetch expo-task-manager`. The lockfile diff is 33 deletions and 0 additions: the 2 root dependency lines, the `node_modules/expo-background-fetch`, `node_modules/expo-task-manager` and `node_modules/unimodules-app-loader` entries, and their nested dependency lines. `npx jest __tests__/config/`: 23/23 passed in about 1 s. The introspection one-liner prints the expected post-spec JSON exactly. `expo-doctor`: 19/20 checks passed. The only failure is the spec 06 package-version check, and neither removed package is listed. Scratch prebuild in a `cp -cR` clone under /tmp (with `.git` removed so git couldn't touch the worktree's gitdir; deleted afterwards): all plutil/grep checks passed (pbxproj count 4), the generated `PrivacyInfo.xcprivacy` matches the contract object, and prebuild reported "Updated package.json | no changes". Full `npx jest --silent`: 4898 passed / 1 failed (only the pre-existing NativeWindSmoke:202). Regression suites: 6/6, 420 tests. `tsc`: 532, the same before and after the `app.json` change. The only `__tests__/config/` errors are the 3 Node built-in errors deferred to spec 07.
