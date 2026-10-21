@@ -75,3 +75,15 @@ describe('resolved config (expo config --type introspect) — 03 native config c
     });
   });
 });
+
+describe('resolved config (expo config --type introspect) — 10-sdk-58-ios-27', () => {
+  it('resolves sdkVersion 58.x', () => {
+    expect(resolved.sdkVersion).toMatch(/^58\./);
+  });
+
+  // Decision 10 (a): config-plugins writes UIRequiresFullScreen = !!ios.requireFullScreen
+  // (RequiresFullScreen.js). Flips to `true` only under Decision 10 (b).
+  it('ios.infoPlist.UIRequiresFullScreen is false', () => {
+    expect(resolved.ios?.infoPlist?.UIRequiresFullScreen).toBe(false);
+  });
+});
