@@ -1166,6 +1166,7 @@ Lifecycle, network and widget additions:
 - [ ] 18. **Countdown honesty:** with the app closed for ≥ 1 h, the widget's "Due in …" label has advanced to match the clock (the `env.date` fix).
 - [ ] 19. **Memory, 10 minutes:** tab switching with charts animating. Use Instruments → Activity Monitor on the TestFlight build if Xcode 27 allows it; otherwise record "dev-build only" and cite the FR7 numbers. 1 min ____ MB / 10 min ____ MB, ratio ≤ 1.5, no jetsam.
 - [ ] 20. **Visual parity:** NativeWind layout, every chart and the NativeTabs glass pill match the build-18 screenshots. The Settings modal header looks right under the iOS 26+ system bar appearance.
+- [ ] 21. **Noise grain (fix after build 19):** once the Skia noise fix is on the device (an EAS Update to build 19, or build 20), the background and glass cards show fine grain, not visible dots. An on-device screenshot (side button + volume up, 1206×2622) repeats every 256 px, not 768 px. If it arrived as an update, check 4's row reads the update, not `embedded`.
 
 Resizability matrix:
 - **iPad:** Split View ⅓ · ½ · ⅔, Slide Over, Stage Manager narrow → wide, portrait ↔ landscape.
@@ -1335,3 +1336,12 @@ Each cell passes when there's no clipping or overlap, every chart re-measures wi
 - Tests: `deps.test.ts` no longer bans patches, only the two retired SDK 55 ones. CI runs on `release/**` pushes.
 - Deferred to the FR11 device smoke (no agent device access): the countdown and its expiry on a home screen after > 24 h with the app closed.
 - Still open: the ITMS-91053 baseline (J; FR11), the Phase A/B validator boxes, and the Phase A.2, B.2 and C review boxes.
+
+**2026-10-21 (noise grain)**: J reported build 19 looking "grainy" on device. Root cause, fix and verification, with all gates green (185 suites; typecheck 0; lint 0 errors). The iOS runtime is unchanged (`56d054fc…`), so the fix is JS-only.
+- **Cause:** `noise.png` (256×256, no `@2x`/`@3x`) was tiled with `ImageBackground`. A release build loads a suffix-less bundled PNG through UIKit at scale 1, so the tile covered 256pt and each noise pixel was a 3×3 block on a 3x iPhone. Dev builds decode it over HTTP at screen scale, which is why the simulator and the App Store screenshots always looked fine. The image path is unchanged between RN 0.83 and 0.88, so builds 17 and 18 had the same grain on device. J's screenshot repeats every 584.5 px = 256pt.
+- **First fix, withdrawn:** `16b2415` added byte-identical `@2x`/`@3x` copies. They fix the embedded bundle only. EAS Update stores assets as `<hash>.png`, and RN loads any `.png` in the home directory through UIKit at scale 1, so an OTA of it would not fix build 19 and the first later OTA would bring the grain back.
+- **Fix:** `ff664a8` plus its follow-up. `src/components/NoiseShader.tsx` draws the noise as a repeating Skia `ImageShader` scaled by `1/PixelRatio`, with nearest sampling. One decode is shared app-wide through Skia's `loadData` (the `useImage` loader). `NoiseOverlay` gets its own Canvas; `GlassCard` and `ApprovalCard` draw inside their existing Canvas.
+- **Verified:** a release-mode bundle in the build-19 simulator app (3x, iOS 26.5) gives a 256 device-px period and 1 px cells in both the overlay and a GlassCard. The grain sd is 2.42, identical to the fine `@3x` UIKit rendering; before, it was a 768 px period with 3×3 blocks. The dev Home screen statistics are unchanged.
+- **Review:** an adversarial critic and a `useImage` asset-path tracer found no blockers. The tracer confirmed the embedded, EAS Update and dev paths all load raw bytes with no image scale.
+- **Cost:** the full-screen overlay is now a Metal surface (about 12 MB on a 3x iPhone) instead of a tiled `UIImageView`. If smoke 19 shows a memory regression, start here.
+- **Still open:** the on-device check (smoke 21) after J chooses an EAS Update to build 19 or build 20. The EAS Update path is verified by source trace only.

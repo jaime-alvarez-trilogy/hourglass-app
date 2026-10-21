@@ -57,7 +57,7 @@ The work is ordered so the app stays runnable at every checkpoint (spec-research
 8. **NativeWind 5 / Tailwind 4.** **Descoped.** NativeWind 5 is RC-only, and css-interop 0.2.7 peers `tailwindcss ~3`.
 9. **`@react-native-async-storage/async-storage` 3.x.** **Descoped.** SDK 58 bundles exactly 2.2.0.
 10. **New SDK 58 features** (App Intents, Live Activities, Router loaders, Expo UI lists) and **iPhone Duo / wide-screen redesign.** **Descoped** (FEATURE non-goal). FR11 fixes resize breakage only.
-11. **Replacing the deprecated `ImageBackground`** (`src/components/NoiseOverlay.tsx:15`). **Descoped.** RN 0.88 deprecates it but doesn't remove it.
+11. **Replacing the deprecated `ImageBackground`.** **Done after build 19** (`ff664a8` and its follow-up). The noise texture was its only use, and release builds drew it as coarse 1pt grain, so `NoiseOverlay`, `GlassCard` and `ApprovalCard` now draw it with Skia (`src/components/NoiseShader.tsx`). See the checklist's 2026-10-21 (noise grain) session note.
 12. **Pinning images for the `development` and `preview` profiles.** **Descoped.** They stay on `auto`, which resolves to the `sdk-58` image.
 13. **Baseline OTA after 1.2.0 is live** (spec 04 runbook A), and **retiring `release/1.1`.** **Deferred to post-release.** FR10 documents both.
 14. **Deleting the dead Expo-starter `app/(tabs)/explore.tsx` and `components/parallax-scroll-view.tsx`.** **Descoped.** expo-router 58 hides the undeclared `explore` route anyway.

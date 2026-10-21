@@ -8,7 +8,7 @@
 import React from 'react';
 import { PixelRatio } from 'react-native';
 import { create, act } from 'react-test-renderer';
-import { useImage } from '@shopify/react-native-skia';
+import { loadData } from '@shopify/react-native-skia';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -51,20 +51,64 @@ describe('NoiseShader', () => {
 });
 
 describe('useNoiseImage', () => {
-  it('loads the bundled noise asset through Skia useImage', () => {
-    (useImage as jest.Mock).mockClear();
-    function Probe(): null {
-      useNoiseImage();
+  function makeProbe(hook: () => unknown, seen: unknown[]) {
+    return function Probe(): null {
+      seen.push(hook());
       return null;
-    }
-    act(() => {
-      create(React.createElement(Probe));
+    };
+  }
+
+  // Runs first in this file, so the module-level cache starts empty.
+  it('decodes once for every consumer and serves later mounts on their first render', async () => {
+    (loadData as jest.Mock).mockClear();
+    // Three cards mounting together before the first load resolves (the Home tab case).
+    const first: unknown[] = [];
+    await act(async () => {
+      for (let i = 0; i < 3; i++) create(React.createElement(makeProbe(useNoiseImage, first)));
     });
-    expect(useImage).toHaveBeenCalledTimes(1);
-    // jest maps *.png to __mocks__/fileMock.js; the call must still be the bundled asset.
+    expect(first.slice(0, 3)).toEqual([null, null, null]); // not loaded on first render
+    expect(first.at(-1)).not.toBeNull(); // then the decoded image arrives
+    expect(loadData).toHaveBeenCalledTimes(1);
+
+    const later: unknown[] = [];
+    act(() => {
+      create(React.createElement(makeProbe(useNoiseImage, later)));
+      create(React.createElement(makeProbe(useNoiseImage, later)));
+    });
+    expect(later).toHaveLength(2);
+    expect(later.every((image) => image === first.at(-1))).toBe(true);
+    expect(loadData).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads the bundled noise asset', () => {
     expect(fs.readFileSync(path.resolve(__dirname, '../NoiseShader.tsx'), 'utf8')).toContain(
-      "useImage(require('../../assets/images/noise.png'))",
+      "loadData(require('../../assets/images/noise.png')",
     );
+  });
+
+  it('retries on the next mount after a failed read', async () => {
+    await jest.isolateModulesAsync(async () => {
+      // Fresh registry: React, the renderer and the Skia mock must come from it too.
+      /* eslint-disable @typescript-eslint/no-require-imports -- needs the isolated registry */
+      const R = require('react');
+      const renderer = require('react-test-renderer');
+      const skia = require('@shopify/react-native-skia');
+      const { useNoiseImage: freshHook } = require('../NoiseShader');
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      skia.loadData.mockImplementationOnce(() => Promise.reject(new Error('read failed')));
+
+      const seen: unknown[] = [];
+      await renderer.act(async () => {
+        renderer.create(R.createElement(makeProbe(freshHook, seen)));
+      });
+      expect(seen.at(-1)).toBeNull();
+
+      await renderer.act(async () => {
+        renderer.create(R.createElement(makeProbe(freshHook, seen)));
+      });
+      expect(seen.at(-1)).not.toBeNull();
+      expect(skia.loadData).toHaveBeenCalledTimes(2);
+    });
   });
 });
 

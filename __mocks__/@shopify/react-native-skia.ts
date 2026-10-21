@@ -46,11 +46,13 @@ module.exports = {
   Fill: ({ children, ...props }: any) => React.createElement('Fill', props, children),
   RoundedRect: (_props: any) => null,
 
-  // Image shader + loader — used by NoiseShader. useImage resolves synchronously to a 256x256
-  // stub so the "image loaded" branch renders; override with mockReturnValueOnce(null) to test
-  // the loading frame.
+  // Image shader + loader — used by NoiseShader. loadData resolves on the next microtask with
+  // whatever the factory returns; Skia.Image.MakeImageFromEncoded returns a 256x256 stub. Mount
+  // inside `await act(async () => …)` to see the loaded branch.
   ImageShader: (props: any) => React.createElement('ImageShader', props),
-  useImage: jest.fn((_source: any) => ({ width: () => 256, height: () => 256 })),
+  loadData: jest.fn((_source: any, factory: (data: any) => any) =>
+    Promise.resolve(factory({ __mockData: true })),
+  ),
   FilterMode: { Nearest: 0, Linear: 1 },
   MipmapMode: { None: 0, Nearest: 1, Linear: 2 },
 
@@ -98,6 +100,9 @@ module.exports = {
       },
     ),
     XYWHRect: jest.fn((x: number, y: number, w: number, h: number) => ({ x, y, w, h })),
+    Image: {
+      MakeImageFromEncoded: jest.fn((_data: any) => ({ width: () => 256, height: () => 256 })),
+    },
     Color: jest.fn((color: string) => color),
   },
 };

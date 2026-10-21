@@ -2,16 +2,15 @@
 // FR4: Noise texture overlay — absolutely positioned, opacity 0.04, pointerEvents none
 //
 // The overlay is a Skia Canvas drawing NoiseShader (see NoiseShader.tsx for why it is no
-// longer an ImageBackground). The Skia mock renders Fill and ImageShader as host elements
-// and resolves useImage synchronously, so the loaded branch is visible to react-test-renderer.
+// longer an ImageBackground). The Skia mock renders Fill and ImageShader as host elements and
+// resolves loadData on the next microtask, so renders are awaited to reach the loaded branch.
 //
 // Mock strategy:
-// - Skia: __mocks__/@shopify/react-native-skia.ts (useImage is a jest.fn)
-// - No resetModules (avoids React context loss)
+// - Skia: __mocks__/@shopify/react-native-skia.ts
+// - No resetModules (avoids React context loss); the loading test isolates its own registry
 
 import React from 'react';
 import { create, act } from 'react-test-renderer';
-import { useImage } from '@shopify/react-native-skia';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -24,9 +23,9 @@ beforeAll(() => {
   NoiseOverlay = require('../NoiseOverlay').default;
 });
 
-function render(): any {
+async function render(): Promise<any> {
   let tree: any;
-  act(() => {
+  await act(async () => {
     tree = create(React.createElement(NoiseOverlay));
   });
   return tree;
@@ -35,31 +34,53 @@ function render(): any {
 // ─── FR4: Runtime render checks ───────────────────────────────────────────────
 
 describe('NoiseOverlay — FR4: component render', () => {
-  it('FR4.1 — renders without error', () => {
-    expect(() => render()).not.toThrow();
+  it('FR4.1 — renders without error', async () => {
+    await expect(render()).resolves.toBeTruthy();
   });
 
-  it('FR4.2 — draws one full-screen Fill at opacity 0.04 inside a Canvas', () => {
-    const root = render().root;
+  it('FR4.2 — draws one full-screen Fill at opacity 0.04 inside a Canvas', async () => {
+    const root = (await render()).root;
     expect(root.findAllByType('Canvas')).toHaveLength(1);
     const fills = root.findAllByType('Fill');
     expect(fills).toHaveLength(1);
     expect(fills[0].props.opacity).toBe(0.04);
   });
 
-  it('FR4.3 — the Fill is shaded by the repeating noise shader', () => {
-    const fill = render().root.findByType('Fill');
+  it('FR4.3 — the Fill is shaded by the repeating noise shader', async () => {
+    const fill = (await render()).root.findByType('Fill');
     const shader = fill.findByType('ImageShader');
     expect(shader.props.tx).toBe('repeat');
     expect(shader.props.ty).toBe('repeat');
     expect(shader.props.image).not.toBeNull();
   });
 
-  it('FR4.4 — draws nothing while the noise image is still loading', () => {
-    (useImage as jest.Mock).mockReturnValueOnce(null);
-    const root = render().root;
-    expect(root.findAllByType('Canvas')).toHaveLength(1);
-    expect(root.findAllByType('Fill')).toHaveLength(0);
+  it('FR4.4 — draws nothing until the noise image has loaded', async () => {
+    await jest.isolateModulesAsync(async () => {
+      // Fresh registry so the shared noise image cache starts empty.
+      /* eslint-disable @typescript-eslint/no-require-imports -- needs the isolated registry */
+      const R = require('react');
+      const renderer = require('react-test-renderer');
+      const skia = require('@shopify/react-native-skia');
+      const Overlay = require('../NoiseOverlay').default;
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      let finishLoad: () => void = () => {};
+      skia.loadData.mockImplementationOnce(
+        (_source: unknown, factory: (data: unknown) => unknown) =>
+          new Promise((resolve) => {
+            finishLoad = () => resolve(factory({}));
+          }),
+      );
+
+      let tree: any;
+      await renderer.act(async () => {
+        tree = renderer.create(R.createElement(Overlay));
+      });
+      expect(tree.root.findAllByType('Canvas')).toHaveLength(1);
+      expect(tree.root.findAllByType('Fill')).toHaveLength(0);
+
+      await renderer.act(async () => finishLoad());
+      expect(tree.root.findAllByType('Fill')).toHaveLength(1);
+    });
   });
 });
 
