@@ -777,7 +777,24 @@ Only FR4's tests are written here. FR5–FR8 write their red tests at the start 
   - Run 1 → exit 0, `56d054fc723984e56892a367dca1efa79a9f8fad`. Run 2 → exit 0, `56d054fc723984e56892a367dca1efa79a9f8fad`. The full JSON output of the two runs (all 55 `fingerprintSources`) is byte-identical (`cmp`). It has no `eas.json`, `packageJson:scripts` or `.gitignore` source.
   - **This is the iOS runtime baseline for FR9 (fingerprint equality), FR10 (docs-only commits don't change it) and FR11.** It's a 40-hex SHA-1, as `runtimeVersion.policy: "fingerprint"` produces.
   - The three gates on that fresh `npm ci` tree: `npm test` → exit 0, 184 suites / 5312 tests; `npm run typecheck` → exit 0; `npm run lint` → exit 0, 486 warnings.
-- [ ] (C) Open a **draft** PR `feat/sdk-58` → `main` and confirm CI is green on both jobs. Record the run URL. Don't merge.
+- [x] (C) Open a **draft** PR `feat/sdk-58` → `main` and confirm CI is green on both jobs. Record the run URL. Don't merge.
+  - Done 2026-10-20. `git push origin feat/sdk-58` (`a502c8f..c42fc4f`), then `gh pr create --draft --base main --head feat/sdk-58 --title "SDK 58 + iOS 27: v1.2.0 (build 19)"` → **https://github.com/jaime-alvarez-trilogy/hourglass-app/pull/4** (`isDraft: true`, base `main`). Not merged; `main` is still `aade79b`.
+  - **Run 1, at `c42fc4f`: red.** https://github.com/jaime-alvarez-trilogy/hourglass-app/actions/runs/39545595006. `server-tests` passed. `app-tests` failed at **Typecheck**: `app/_layout.tsx(1,8): error TS2882: Cannot find module or type declarations for side-effect import of '../global.css'`. Lint and Test still ran (the spec 07 `!cancelled()` rule) and passed. This was the first CI run on any SDK 58 commit: `test.yml` runs only on `pull_request` and on pushes to `main`.
+    - **Root cause.** TypeScript 6.0.3 (from FR4; `main` has 5.9) checks side-effect imports by default (`noUncheckedSideEffectImports !== false` in `typescript.js`, and `expo/tsconfig.base` doesn't set it). The only `*.css` declaration is `declare module '*.css'` in `expo/types/global.d.ts`. The only reference to `expo/types` was the root `expo-env.d.ts`, which is **gitignored** (`.gitignore:10`) and written by `expo start`. Every local typecheck since FR4 saw it (written 2026-10-20 13:58); a fresh CI checkout doesn't have it.
+    - **Reproduced locally.** With `expo-env.d.ts` and `.expo/types` moved aside, `npx tsc --noEmit` gave the same TS2882 (exit 2); restored afterwards.
+    - **Red first.** `__tests__/ci-gates.test.ts` gained `describe('10-sdk-58-ios-27 — FR8: CI typecheck needs no generated file')`, with three cases:
+      - (1) A tracked `.d.ts` (`git ls-files`) inside the tsconfig scope carries `/// <reference types="expo/types" />`.
+      - (2) `expo/types/index.d.ts` imports `./global`, and `global.d.ts` still declares `'*.css'`.
+      - (3) `app/_layout.tsx` still imports `../global.css`.
+      - Red → **1 failed / 24** (case 1: `Expected: >= 1, Received: 0`).
+    - **Fix.** The new tracked `src/types/expo-ambient.d.ts` holds only that reference, with a why comment. `ci-gates` → 24/24.
+    - **Fresh-checkout proof.** A `git archive` export of the staged tree, with no `expo-env.d.ts` and no `.expo/`, plus an APFS clone of `node_modules`: `npx tsc --noEmit` → **exit 0**. The same export without the new file → TS2882, exit 2.
+    - Gates (Node v22.17.0): `npm test` → **exit 0**, 184 suites / **5315** tests (5312 + 3); `npm run typecheck` → **exit 0**; `npm run lint` → **exit 0**, 486 warnings (the new files lint clean). `runtimeversion:resolve --platform ios` → still **`56d054fc723984e56892a367dca1efa79a9f8fad`** (a `.d.ts` isn't a fingerprint source).
+    - Commit `397e667` `fix(10-sdk-58-ios-27): FR8 typecheck in a fresh checkout (TS 6 side-effect imports)`, pushed (`c42fc4f..397e667`).
+  - **Run 2, at `397e667`: green on all jobs.** **https://github.com/jaime-alvarez-trilogy/hourglass-app/actions/runs/39546205087** (`pull_request`, conclusion `success`), on Node v22.23.3:
+    - `app-tests` **pass** (2m29s): `npm ci`, Typecheck, Lint (`✖ 486 problems (0 errors, 486 warnings)`) and Test (`Test Suites: 184 passed`, `Tests: 1 skipped, 5314 passed, 5315 total`). The one skip is FR6's macOS-only `plutil -lint accepts it (macOS only)` (`widget-privacy-plugin.test.ts:200`, skipped by design on `ubuntu-latest`).
+    - `server-tests` **pass** (1m19s): 3 suites / 38 tests.
+  - Pushing this checklist commit (docs only) starts one more PR run. A commit can't record its own run, so that result goes in the FR8 hand-off, and the next FR's checklist entry should note it.
 
 ## Phase B.2: Review (MANDATORY)
 
@@ -1018,3 +1035,22 @@ Each cell passes when there's no clipping or overlap, every chart re-measures wi
 - Identified, not fixed: the RN 0.88 shadow ADVICE is `welcome.tsx` `logoWrap`, whose shadow never renders (it's clipped by `overflow: hidden`). Follow-up for J.
 - Deferred to the FR11 device smoke (no agent device access): swipe approve/reject, both scrubs, the Settings modal, tab-focus entry animations, real-data charts on the four tabs, `className` on the tabs and Settings, fresh widgets, and memory on a device.
 - Still open: the ITMS-91053 baseline (J; FR11), the Phase A/B validator boxes and the Phase A.2 review.
+
+**2026-10-20 (FR8 implemented)**: FR8 is done on SDK 58. All three gates and the server suite pass locally and in CI.
+- Commits on `feat/sdk-58`, all pushed:
+  - `f4bd9cf`: fingerprint config and its tests.
+  - `c42fc4f`: checklist.
+  - `397e667`: the CI typecheck fix.
+  - This checklist commit.
+- `fingerprint.config.js` is the 7 Decision 11 names (I8). `fingerprint-config.test.ts` has the exact list and a new guard that every bit of `DEFAULT_SOURCE_SKIPS` (the balanced preset's skips) is covered. Red before: 2 of 9.
+- **iOS runtime baseline for FR9, FR10 and FR11: `56d054fc723984e56892a367dca1efa79a9f8fad`.** It was resolved twice on a clean tree after a fresh `npm ci`, and both outputs are byte-identical. Before FR8 the runtime was `361293e6…` (the FR7 dev build). Only the `eas.json` entry and the two autolinking-path hashes changed.
+- Draft PR **#4** (https://github.com/jaime-alvarez-trilogy/hourglass-app/pull/4). Not merged.
+  - Run 1 went red at Typecheck: TS2882 on `import '../global.css'`. TypeScript 6 checks side-effect imports by default, and the only `*.css` declaration came through the gitignored `expo-env.d.ts`. That was latent since FR4, and it was the first CI run on SDK 58.
+  - The fix is the tracked `src/types/expo-ambient.d.ts` plus a `ci-gates` guard.
+  - Run 2 (https://github.com/jaime-alvarez-trilogy/hourglass-app/actions/runs/39546205087) is green: `app-tests` and `server-tests` both pass.
+- Deviations:
+  - One extra fingerprint guard case beyond the spec's list.
+  - The CI fix: a new file and three `ci-gates` cases, found by FR8's own CI run.
+- Still open:
+  - The ITMS-91053 baseline (J; FR11).
+  - The Phase A/B validator boxes, and the Phase A.2 and B.2 reviews (B.2 Step 1 runs on PR #4).
