@@ -255,7 +255,7 @@ beforeEach(() => {
   mockApplication = { nativeApplicationVersion: '1.1.0' };
   mockOpenBrowserAsync.mockReset();
   mockOpenBrowserAsync.mockResolvedValue({ type: 'dismiss' });
-  openURLSpy = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+  openURLSpy = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined); // RN 0.88: Promise<void>
   alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 });
 

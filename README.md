@@ -24,7 +24,7 @@ Data is pulled directly from the Crossover API using your own credentials, which
 
 | Layer | Technology |
 |-------|-----------|
-| Framework | Expo SDK 55 + React Native 0.81 |
+| Framework | Expo SDK 58 + React Native 0.88 |
 | Navigation | Expo Router (file-based) |
 | Data fetching | TanStack Query v5 + AsyncStorage persistence |
 | UI | NativeWind v4 (Tailwind CSS for RN) |
@@ -63,7 +63,8 @@ hourglassws/
 │
 ├── features/               # Feature specs and design docs (development reference)
 ├── assets/                 # App icons, splash screen, notification icon
-├── patches/                # patch-package fixes for expo-widgets and reanimated
+├── patches/                # patch-package fixes, if any (none today; see TECH_STACK.md)
+├── plugins/                # Local Expo config plugins for the iOS widget extension
 └── tools/                  # UX tooling (multi-model UI generation scripts)
 ```
 
@@ -73,9 +74,9 @@ hourglassws/
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22.13+ (CI and EAS run Node 22)
 - Expo CLI (`npm install -g expo-cli`)
-- iOS: Xcode 15+ (for simulator or device builds)
+- iOS: Xcode 27 for local simulator builds. Store builds run on EAS cloud only (`docs/RELEASING.md`). The app requires iOS 16.4 or later
 - Android: Android Studio (for emulator builds)
 - A Crossover employee account
 
@@ -129,7 +130,7 @@ Query results are persisted to AsyncStorage so the app shows cached data instant
 App fetches Crossover API
     └── writes to AsyncStorage (widget_data key + App Group shared storage)
             └── iOS/Android widget reads from shared storage
-                    └── Widget re-renders every 15 minutes
+                    └── iOS: widget steps through the stored timeline (every 15 min for 24 h, then hourly to the deadline)
 ```
 
 ---

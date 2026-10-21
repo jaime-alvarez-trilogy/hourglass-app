@@ -39,9 +39,13 @@ export function buildScrubCursor(
   chartHeight: number,
   topPadding: number,
 ): ScrubCursorResult {
-  const linePath = Skia.Path.Make();
-  linePath.moveTo(scrubX, topPadding);
-  linePath.lineTo(scrubX, chartHeight - topPadding);
+  // Parsed from an SVG string rather than built with moveTo/lineTo: Skia 2.14 removes the
+  // mutable SkPath API, and MakeFromSVGString exists in both 2.4.x and 2.14 (spec 10 FR2).
+  // The parse only returns null for malformed input, which finite numbers never produce.
+  const linePath: SkPath =
+    Skia.Path.MakeFromSVGString(
+      `M ${scrubX} ${topPadding} L ${scrubX} ${chartHeight - topPadding}`,
+    ) ?? Skia.Path.MakeFromSVGString('M 0 0')!;
 
   return {
     linePath,

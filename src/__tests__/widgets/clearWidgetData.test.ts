@@ -21,14 +21,16 @@ import type { ApprovalItem, ManualApprovalItem } from '../../lib/approvals';
 import type { ManualRequestEntry } from '../../types/requests';
 
 const mockUpdateTimeline = jest.fn();
-const mockCreateWidget = jest.fn((_name: string, _layout: unknown) => ({
+const mockCreateWidget = jest.fn((_name: string, _layout: unknown, _initialProps?: unknown) => ({
   updateTimeline: mockUpdateTimeline,
 }));
 const mockRequireOptionalNativeModule = jest.fn((_name: string): unknown => ({}));
 
 jest.mock('expo-widgets', () => ({ createWidget: mockCreateWidget }), { virtual: true });
 
-jest.mock('expo-modules-core', () => ({
+// 10-sdk-58-ios-27 FR6: bridge.ts takes requireOptionalNativeModule from 'expo', which re-exports
+// it (expo/build/Expo.d.ts). expo-modules-core is only a transitive dependency of this app.
+jest.mock('expo', () => ({
   requireOptionalNativeModule: (name: string) => mockRequireOptionalNativeModule(name),
 }));
 
@@ -160,7 +162,7 @@ describe('clearWidgetData (iOS)', () => {
 
     await clearWidgetData();
 
-    expect(mockCreateWidget).toHaveBeenLastCalledWith('HourglassWidget', expect.any(String));
+    expect(mockCreateWidget).toHaveBeenLastCalledWith('HourglassWidget', expect.any(String), expect.any(Object));
     const entries = lastTimeline();
     expect(entries).toHaveLength(1);
     expect(entries[0].date).toBeInstanceOf(Date);
@@ -208,7 +210,9 @@ describe('clearWidgetData (iOS)', () => {
   it('updates normally again after a later sign-in', async () => {
     await clearWidgetData();
     await updateWidgetData(makeHoursData(), null, 0, makeConfig());
-    expect(lastTimeline().length).toBe(96);
+    // 96 fifteen-minute entries, then the hourly run out to the deadline (final review 2026-10-21).
+    expect(lastTimeline().length).toBeGreaterThan(96);
+    expect(lastTimeline()[0].props.hoursDisplay).toBe('32.5h');
   });
 
   it('never throws when updateTimeline throws', async () => {
@@ -223,5 +227,74 @@ describe('clearWidgetData (iOS)', () => {
     await expect(clearWidgetData()).resolves.toBeUndefined();
     expect(mockCreateWidget).not.toHaveBeenCalled();
     expect(mockUpdateTimeline).not.toHaveBeenCalled();
+  });
+});
+
+// 10-sdk-58-ios-27 FR6 (e): expo-widgets 58 stores createWidget's third argument as the widget's
+// initial props, which placeholder() and a timeline-less gallery snapshot render. Without it they
+// get `undefined` props. Both call sites pass the signed-out snapshot: no user data, every key.
+describe('createWidget initialProps (expo-widgets 58)', () => {
+  function lastCreateWidgetCall(): unknown[] {
+    const calls = mockCreateWidget.mock.calls as unknown[][];
+    expect(calls.length).toBeGreaterThan(0);
+    return calls[calls.length - 1];
+  }
+
+  it.each([
+    ['updateWidgetData', () => updateWidgetData(makeHoursData(), null, 1, makeConfig(), [makeApproval() as ApprovalItem])],
+    ['clearWidgetData', () => clearWidgetData()],
+  ])('%s passes 3 arguments, the third being the signed-out snapshot', async (_name, run) => {
+    const before = Date.now();
+    await run();
+    const args = lastCreateWidgetCall();
+    expect(args).toHaveLength(3);
+    const [name, layout, initialProps] = args as [string, string, ReturnType<typeof buildSignedOutWidgetData>];
+    expect(name).toBe('HourglassWidget');
+    expect(typeof layout).toBe('string');
+    expect(initialProps.cachedAt).toBeGreaterThanOrEqual(before);
+    expect(initialProps).toEqual(buildSignedOutWidgetData(initialProps.cachedAt));
+  });
+
+  it('the initial props carry none of the signed-in user\'s data', async () => {
+    await updateWidgetData(makeHoursData(), null, 1, makeConfig(), [makeApproval() as ApprovalItem]);
+    const initialProps = JSON.stringify(lastCreateWidgetCall()[2]);
+    expect(JSON.stringify(lastTimeline())).toContain('Direct Report Name');
+    expect(initialProps).not.toContain('Direct Report Name');
+    expect(initialProps).not.toContain('32.5');
+  });
+});
+
+// Final review 2026-10-21: expo-widgets 58's timeline policy is `.atEnd` and build 19 has no
+// 15-minute reload, so the stored timeline itself must reach the deadline. Otherwise, more than
+// 24 h after the last app open, WidgetKit keeps showing the last entry and its frozen countdown.
+describe('updateWidgetData timeline reaches the deadline (iOS)', () => {
+  const MIN = 60 * 1000;
+
+  it('keeps 96 fifteen-minute entries, then ends with an expired entry 1 s after a deadline 3 days out', async () => {
+    const hours = makeHoursData();
+    const deadline = hours.deadline.getTime();
+    const before = Date.now();
+    await updateWidgetData(hours, null, 2, makeConfig(), [makeApproval() as ApprovalItem]);
+    const entries = lastTimeline();
+
+    expect(entries.length).toBeGreaterThan(96);
+    expect(entries[0].date.getTime()).toBeGreaterThanOrEqual(before);
+    for (let i = 1; i < 96; i++) {
+      expect(entries[i].date.getTime() - entries[i - 1].date.getTime()).toBe(15 * MIN);
+    }
+    const last = entries[entries.length - 1];
+    expect(last.date.getTime()).toBe(deadline + 1000);
+    expect(last.props.urgency).toBe('expired');
+    expect(entries.every((e) => e.date.getTime() <= deadline + 1000)).toBe(true);
+  });
+
+  it('a full-week manager timeline stays small enough for App Group UserDefaults (< 512 KB)', async () => {
+    const hours = { ...makeHoursData(), deadline: new Date(Date.now() + 7 * 24 * 60 * MIN) };
+    const approvals = [makeApproval(), makeApproval(), makeApproval()] as ApprovalItem[];
+    await updateWidgetData(hours, null, 3, makeConfig(), approvals);
+    const entries = lastTimeline();
+    expect(entries.length).toBe(96 + (7 * 24 - 24) + 1);
+    const bytes = JSON.stringify(entries.map((e) => ({ timestamp: e.date.getTime(), props: e.props }))).length;
+    expect(bytes).toBeLessThan(512 * 1024);
   });
 });

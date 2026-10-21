@@ -89,7 +89,7 @@ export default function SetupScreen() {
 
           {/* Continue CTA */}
           <View className="mt-8">
-            <GradientButton label="Continue" onPress={handleContinue} loading={isLoading} />
+            <GradientButton label="Continue" onPress={handleContinue} loading={isLoading} testID="setup-continue" />
           </View>
         </View>
       </ScrollView>

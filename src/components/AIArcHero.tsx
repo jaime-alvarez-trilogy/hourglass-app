@@ -4,7 +4,8 @@
 // Visual enhancement:
 //   Arc stroke paint: SweepGradient (cyan #00C2FF → violet #A78BFA → magenta #FF00FF)
 //   Animation: sweepProgress SharedValue 0→aiPct/100 via withSpring (mass=1, stiffness=80, damping=12)
-//   Path trim: Skia Path.copy().trim(0, sweepProgress, false)
+//   Path trim: <Path start={0} end={sweepProgress}> on the full arc (10-sdk-58-ios-27 FR2;
+//   Skia 2.14 removes the mutable SkPath copy()/trim() API, start/end exist in 2.4 and 2.14)
 //
 // External API UNCHANGED:
 //   Props: aiPct, brainliftHours, deltaPercent, ambientColor, size
@@ -15,8 +16,8 @@
 //   - The arc geometry calculation is still used internally (as SVG path string → Skia)
 //
 // Animation safety:
-//   sweepProgress is a SharedValue<number> (0.0 → 1.0).
-//   useDerivedValue trims the path on the Reanimated UI thread — no JS per frame.
+//   sweepProgress is a SharedValue<number> (0.0 → 1.0), bound to the fill Path's `end` prop.
+//   Skia trims the path natively from that value — no worklet, no path copy, no JS per frame.
 //   No string allocation per frame (unlike the old strokeDashoffset approach).
 
 import React, { useEffect } from 'react';
@@ -27,11 +28,7 @@ import {
   SweepGradient,
   Skia,
 } from '@shopify/react-native-skia';
-import Animated, {
-  useSharedValue,
-  useDerivedValue,
-  withSpring,
-} from 'react-native-reanimated';
+import { useSharedValue, withSpring } from 'react-native-reanimated';
 import { colors } from '@/src/lib/colors';
 import Card from '@/src/components/Card';
 import ProgressBar from '@/src/components/ProgressBar';
@@ -128,7 +125,8 @@ export default function AIArcHero({
   const fullArcSvg = arcPath(cx, cy, r, START_ANGLE, START_ANGLE + SWEEP);
 
   // Convert SVG path to Skia Path ONCE — used for both track and trimmed fill
-  const fullSkiaPath = Skia.Path.MakeFromSVGString(fullArcSvg) ?? Skia.Path.Make();
+  const fullSkiaPath =
+    Skia.Path.MakeFromSVGString(fullArcSvg) ?? Skia.Path.MakeFromSVGString('M 0 0')!;
 
   // sweepProgress: 0 (invisible arc) → aiPct/100 (fraction of full sweep visible)
   const sweepProgress = useSharedValue(0);
@@ -141,13 +139,6 @@ export default function AIArcHero({
       damping: 12,
     });
   }, [aiPct]);
-
-  // Trim path on UI thread via useDerivedValue — zero JS per frame
-  const trimmedPath = useDerivedValue(() => {
-    const p = fullSkiaPath.copy();
-    p.trim(0, sweepProgress.value, false);
-    return p;
-  });
 
   // Delta badge styling
   const deltaBadgeColor =
@@ -185,11 +176,13 @@ export default function AIArcHero({
               color="rgba(255,255,255,0.08)"
             />
 
-            {/* Fill arc — trimmed by sweepProgress, SweepGradient paint */}
+            {/* Fill arc — full arc trimmed natively to [0, sweepProgress], SweepGradient paint */}
             {/* color="white" → alpha=1.0 so SweepGradient shader renders at full opacity.   */}
             {/* color="transparent" would zero the paint alpha, making the gradient invisible */}
             <Path
-              path={trimmedPath}
+              path={fullSkiaPath}
+              start={0}
+              end={sweepProgress}
               style="stroke"
               strokeWidth={STROKE_WIDTH}
               strokeCap="round"

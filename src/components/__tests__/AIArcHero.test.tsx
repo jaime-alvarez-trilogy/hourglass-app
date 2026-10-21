@@ -73,7 +73,8 @@ const DEFAULT_PROPS = {
 // ─── FR1 (04-victory-charts): Animation contract — source-level checks ───────
 //
 // FR4 of 04-victory-charts rebuilt AIArcHero from react-native-svg to Skia Canvas
-// + SweepGradient. Animation uses withSpring + useDerivedValue + Path.trim().
+// + SweepGradient. Animation uses withSpring; since 10-sdk-58-ios-27 FR2 the fill is
+// trimmed by the Path start/end props instead of useDerivedValue + Path.trim().
 
 describe('AIArcHero — FR1: Skia animation contract (source-level)', () => {
   let source: string;
@@ -109,13 +110,18 @@ describe('AIArcHero — FR1: Skia animation contract (source-level)', () => {
     expect(source).toContain('#FF00FF');
   });
 
-  it('FR1.6 — useDerivedValue IS used (trims path on UI thread)', () => {
-    expect(source).toContain('useDerivedValue');
+  // 10-sdk-58-ios-27 FR2: Skia 2.14 removes SkPath.trim()/copy() mutation (#4092). The fill
+  // is trimmed natively by <Path start={0} end={sweepProgress}> (PathProps in 2.4.18 and
+  // 2.14.0), so no worklet copies or trims a path per frame. Render-level proof of the
+  // props lives in AIArcHeroSkia.test.tsx.
+  it('FR1.6 — useDerivedValue is NOT used (Path start/end trims natively; 10 FR2)', () => {
+    expect(source).not.toMatch(/\buseDerivedValue\s*\(/);
   });
 
-  it('FR1.7 — path.trim() IS called inside useDerivedValue (arc trimming)', () => {
-    // useDerivedValue callback calls .trim(0, sweepProgress.value, false)
-    expect(source).toMatch(/\.trim\s*\(\s*0/);
+  it('FR1.7 — no path.trim() call; the fill Path gets start={0} end={sweepProgress} (10 FR2)', () => {
+    expect(source).not.toMatch(/\.trim\s*\(/);
+    expect(source).toMatch(/start=\{0\}/);
+    expect(source).toMatch(/end=\{sweepProgress\}/);
   });
 
   it('FR1.8 — strokeDashoffset is NOT in any import statement (Skia trim replaces it)', () => {

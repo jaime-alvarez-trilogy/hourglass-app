@@ -33,6 +33,7 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
+import * as ts from 'typescript';
 
 // ─── Paths ────────────────────────────────────────────────────────────────────
 
@@ -110,24 +111,29 @@ function createSwiftUIStubs(): Record<string, unknown> {
     cornerRadius: (val: unknown) => ({ __modifier: 'cornerRadius', val }),
     blendMode: (val: unknown) => ({ __modifier: 'blendMode', val }),
     widgetURL: (url: unknown) => ({ __modifier: 'widgetURL', url }),
+    // 10-sdk-58-ios-27 FR6: @expo/ui 58's (style, container) modifier.
+    containerBackground: (style: unknown, container: unknown) => ({ __modifier: 'containerBackground', style, container }),
     Link: (args: unknown) => node('Link', args),
   };
 }
+
+/** The layout's (props, env) signature. expo-widgets 58 passes `undefined` props to the placeholder. */
+type WidgetEnv = { widgetFamily?: string; date?: Date };
+type WidgetFn = (props: Record<string, unknown> | undefined, env: WidgetEnv) => unknown;
 
 /**
  * Evaluates the WIDGET_LAYOUT_JS string in a scope with SwiftUI stubs.
  * Returns the widget function.
  */
-function buildWidgetFn(): (props: Record<string, unknown>, env: { widgetFamily: string }) => unknown {
+function buildWidgetFn(): WidgetFn {
   const jsStr = extractWidgetLayoutJs();
   const stubs = createSwiftUIStubs();
   const stubNames = Object.keys(stubs);
   const stubValues = stubNames.map(k => stubs[k]);
 
   // Build a factory function: (stub1, stub2, ...) => widgetFn
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
   const factory = new Function(...stubNames, 'return ' + jsStr);
-  return factory(...stubValues) as (props: Record<string, unknown>, env: { widgetFamily: string }) => unknown;
+  return factory(...stubValues) as WidgetFn;
 }
 
 /**
@@ -577,8 +583,7 @@ describe('FR6: Full-string null safety', () => {
 
   it('SC6.7 — widget function defaults to systemMedium when env is null', () => {
     const fn = getWidgetFn();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = fn(minimalProps(), null as any);
+    const result = fn(minimalProps(), null as unknown as WidgetEnv);
     expect(result).not.toBeNull();
   });
 
@@ -822,5 +827,269 @@ describe('04-cockpit-hud FR5: Priority ordering (iOS — current bridge.ts)', ()
     const fn = getWidgetFn();
     const tree = fn(minimalProps({ paceBadge: 'on_track', approvalItems: [], myRequests: [], aiPct: '71%\u201375%' }), { widgetFamily: 'systemMedium' });
     expect(treeContains(tree, '71%\u201375%')).toBe(true);
+  });
+});
+
+// ─── 10-sdk-58-ios-27 FR6: the expo-widgets 58 runtime ───────────────────────
+//
+// expo-widgets 58 changed what the layout receives and how stacks lay out (spec-research F2.6):
+//   (a) placeholder() and the gallery snapshot pass `undefined` props (#46492);
+//   (b) 56.0.0 removed the native widget background, so each system root sets containerBackground;
+//   (c) @expo/ui 58 stacks use the system default spacing when `spacing` is unset;
+//   (d) env.date is the entry's date, so the countdown must not use the render time (Date.now()).
+// The runtime's globals are exactly the exports of @expo/ui/swift-ui and @expo/ui/swift-ui/modifiers
+// (expo-widgets bundle/ui-globals.ts), so every global the layout calls must be one of them.
+
+const SYSTEM_FAMILIES = ['systemSmall', 'systemMedium', 'systemLarge'] as const;
+const ACCESSORY_FAMILIES = ['accessoryCircular', 'accessoryInline', 'accessoryRectangular'] as const;
+const WIDGET_BG = { __modifier: 'containerBackground', style: '#0D0D1A', container: 'widget' };
+const HOUR_MS = 3600000;
+
+type LayoutNode = { __type?: string; modifiers?: unknown[]; children?: unknown };
+
+function countOccurrences(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
+}
+
+function parseLayout(js: string): ts.SourceFile {
+  return ts.createSourceFile('layout.js', js, ts.ScriptTarget.ES5, true, ts.ScriptKind.JS);
+}
+
+function visitNodes(node: ts.Node, fn: (n: ts.Node) => void): void {
+  fn(node);
+  ts.forEachChild(node, (child) => visitNodes(child, fn));
+}
+
+function lineOf(sf: ts.SourceFile, node: ts.Node): number {
+  return sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+}
+
+/**
+ * Every HStack(...)/VStack(...) call, and the ones whose first argument isn't an object literal
+ * with its own `spacing` key ("Name@line" of the layout string).
+ */
+function stacksWithoutSpacing(js: string): { total: number; missing: string[] } {
+  const sf = parseLayout(js);
+  let total = 0;
+  const missing: string[] = [];
+  visitNodes(sf, (n) => {
+    if (!ts.isCallExpression(n) || !ts.isIdentifier(n.expression)) return;
+    const name = n.expression.text;
+    if (name !== 'HStack' && name !== 'VStack') return;
+    total++;
+    const arg = n.arguments[0];
+    const hasSpacing =
+      arg !== undefined &&
+      ts.isObjectLiteralExpression(arg) &&
+      arg.properties.some((p) => p.name !== undefined && ts.isIdentifier(p.name) && p.name.text === 'spacing');
+    if (!hasSpacing) missing.push(`${name}@${lineOf(sf, n)}`);
+  });
+  return { total, missing };
+}
+
+const JS_BUILTINS = new Set(['String', 'Number', 'Boolean', 'Math', 'Date', 'JSON', 'Object', 'Array', 'parseInt', 'parseFloat', 'isNaN', 'isFinite']);
+
+/** Identifiers the layout calls that it doesn't declare itself and that aren't JS builtins (sorted). */
+function calledGlobals(js: string): string[] {
+  const sf = parseLayout(js);
+  const declared = new Set<string>();
+  const called = new Set<string>();
+  visitNodes(sf, (n) => {
+    if ((ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n)) && n.name) declared.add(n.name.text);
+    if ((ts.isVariableDeclaration(n) || ts.isParameter(n)) && ts.isIdentifier(n.name)) declared.add(n.name.text);
+    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression)) called.add(n.expression.text);
+  });
+  return [...called].filter((name) => !declared.has(name) && !JS_BUILTINS.has(name)).sort();
+}
+
+/** Named exports of @expo/ui/swift-ui and @expo/ui/swift-ui/modifiers, as the widget runtime spreads them. */
+function expoUiExportNames(): Set<string> {
+  const names: string[] = [];
+  jest.isolateModules(() => {
+    // jest-expo/node resolves expo-modules-core's web build, whose native-view factories throw at
+    // import. Only the export names matter here, so those factories are stubbed.
+    jest.doMock('expo-modules-core', () => {
+      const actual = jest.requireActual('expo-modules-core');
+      const stubView = () => () => null;
+      return { ...actual, requireNativeViewManager: stubView, requireNativeView: stubView };
+    });
+    names.push(...Object.keys(jest.requireActual('@expo/ui/swift-ui')));
+    names.push(...Object.keys(jest.requireActual('@expo/ui/swift-ui/modifiers')));
+  });
+  return new Set(names);
+}
+
+describe('10-sdk-58-ios-27 FR6: the layout on the expo-widgets 58 runtime', () => {
+  describe('(a) undefined props (placeholder and gallery)', () => {
+    it('the first statement of the layout function is `props = props || {};`', () => {
+      const sf = parseLayout(extractWidgetLayoutJs());
+      let first: string | undefined;
+      visitNodes(sf, (n) => {
+        if (first === undefined && ts.isFunctionExpression(n) && n.body) first = n.body.statements[0]?.getText(sf);
+      });
+      expect(first).toBe('props = props || {};');
+    });
+
+    it.each([...SYSTEM_FAMILIES, ...ACCESSORY_FAMILIES])('%s renders a node from undefined props without throwing', (family) => {
+      const fn = getWidgetFn();
+      let node: LayoutNode | undefined;
+      expect(() => { node = fn(undefined, { widgetFamily: family }) as LayoutNode; }).not.toThrow();
+      expect(node).toEqual(expect.objectContaining({ __type: expect.any(String) }));
+    });
+
+    it('undefined props and undefined env render the medium layout', () => {
+      const fn = getWidgetFn();
+      const node = fn(undefined, undefined as unknown as WidgetEnv);
+      expect(node).toEqual(fn({}, { widgetFamily: 'systemMedium' }));
+    });
+
+    it.each(SYSTEM_FAMILIES)('%s renders the same tree from undefined props as from {}', (family) => {
+      const fn = getWidgetFn();
+      expect(fn(undefined, { widgetFamily: family })).toEqual(fn({}, { widgetFamily: family }));
+    });
+  });
+
+  describe("(b) containerBackground('#0D0D1A', 'widget') on the system roots", () => {
+    it.each(SYSTEM_FAMILIES)('%s: the root carries it, and nothing else in the tree does', (family) => {
+      const root = getWidgetFn()(minimalProps(), { widgetFamily: family }) as LayoutNode;
+      expect(root.__type).toBe('ZStack');
+      expect(root.modifiers).toContainEqual(WIDGET_BG);
+      expect(countOccurrences(JSON.stringify(root), '"containerBackground"')).toBe(1);
+    });
+
+    it('systemLarge in manager mode (pending approvals) carries it on the root too', () => {
+      const props = minimalProps({
+        isManager: true,
+        pendingCount: 2,
+        approvalItems: [{ name: 'A', hours: '2.0h', category: 'MANUAL' }, { name: 'B', hours: '1.0h', category: 'OVERTIME' }],
+      });
+      const root = getWidgetFn()(props, { widgetFamily: 'systemLarge' }) as LayoutNode;
+      expect(treeContains(root, 'PENDING APPROVALS')).toBe(true);
+      expect(root.modifiers).toContainEqual(WIDGET_BG);
+    });
+
+    it.each(SYSTEM_FAMILIES)('%s carries it with undefined props (the placeholder)', (family) => {
+      const root = getWidgetFn()(undefined, { widgetFamily: family }) as LayoutNode;
+      expect(root.modifiers).toContainEqual(WIDGET_BG);
+    });
+
+    it.each(ACCESSORY_FAMILIES)('%s (lock screen) has no containerBackground', (family) => {
+      const node = getWidgetFn()(minimalProps(), { widgetFamily: family });
+      expect(treeContains(node, 'containerBackground')).toBe(false);
+    });
+  });
+
+  describe('(c) every stack sets spacing', () => {
+    it('no HStack/VStack call in WIDGET_LAYOUT_JS lacks a spacing key (AST scan)', () => {
+      const { total, missing } = stacksWithoutSpacing(extractWidgetLayoutJs());
+      expect(total).toBeGreaterThanOrEqual(20); // positive control: the scan sees the layout's stacks
+      expect(missing).toEqual([]);
+    });
+
+    it('the detector flags unspaced, nested-only and non-literal stacks, and passes spaced ones (fixtures)', () => {
+      const fixture = [
+        '(function(props, env) {',
+        '  var a = HStack({ spacing: 0, children: [] });',
+        '  var b = VStack({ alignment: "leading", spacing: 4, modifiers: [] });',
+        '  var c = HStack({ children: [] });',
+        '  var d = VStack({ children: [HStack({ spacing: 2 })] });',
+        '  var e = HStack(opts);',
+        '  var f = ZStack({ children: [] });',
+        '})',
+      ].join('\n');
+      expect(stacksWithoutSpacing(fixture)).toEqual({ total: 6, missing: ['HStack@4', 'VStack@5', 'HStack@6'] });
+    });
+  });
+
+  describe('(d) the countdown uses env.date, not the render time', () => {
+    const ENTRY = Date.UTC(2026, 9, 20, 12, 0, 0);
+    let nowSpy: jest.SpyInstance;
+    beforeEach(() => {
+      // Render time is two days before the entry date, so a Date.now() countdown reads "2d 3h".
+      nowSpy = jest.spyOn(Date, 'now').mockReturnValue(ENTRY - 48 * HOUR_MS);
+    });
+    afterEach(() => nowSpy.mockRestore());
+
+    it.each(SYSTEM_FAMILIES)('%s reads "Due in 3h" when env.date is 3 h before the deadline', (family) => {
+      const tree = getWidgetFn()(minimalProps({ deadline: ENTRY + 3 * HOUR_MS }), { widgetFamily: family, date: new Date(ENTRY) });
+      expect(treeContains(tree, 'Due in 3h')).toBe(true);
+      expect(treeContains(tree, 'Due in 2d')).toBe(false);
+    });
+
+    it('isEOWUrgent follows env.date: the PENDING pill shows inside the entry date\'s last 24 h', () => {
+      const fn = getWidgetFn();
+      const props = minimalProps({ deadline: ENTRY + 3 * HOUR_MS, pendingCount: 2 });
+      expect(treeContains(fn(props, { widgetFamily: 'systemSmall', date: new Date(ENTRY) }), '2 PENDING')).toBe(true);
+      // The same props for an entry 51 h before the deadline: no urgency pill.
+      expect(treeContains(fn(props, { widgetFamily: 'systemSmall', date: new Date(ENTRY - 48 * HOUR_MS) }), '2 PENDING')).toBe(false);
+    });
+
+    it('an entry date past the deadline shows no countdown', () => {
+      const tree = getWidgetFn()(minimalProps({ deadline: ENTRY - HOUR_MS }), { widgetFamily: 'systemMedium', date: new Date(ENTRY) });
+      expect(treeContains(tree, 'Due in')).toBe(false);
+    });
+
+    it('falls back to Date.now() when env has no date', () => {
+      nowSpy.mockReturnValue(ENTRY);
+      const tree = getWidgetFn()(minimalProps({ deadline: ENTRY + 3 * HOUR_MS }), { widgetFamily: 'systemSmall' });
+      expect(treeContains(tree, 'Due in 3h')).toBe(true);
+    });
+
+    // Final review (2026-10-21): the timeline policy is `.atEnd`, so once the stored entries
+    // run out WidgetKit keeps re-rendering the last one, whose env.date is fixed. Real time
+    // later than env.date must win, or the countdown freezes past the deadline.
+    describe('real time later than env.date (a stale entry re-rendered after its date)', () => {
+      const DEADLINE = ENTRY + 3 * HOUR_MS;
+
+      it.each(SYSTEM_FAMILIES)('%s: after the deadline, no countdown, no PENDING pill and no EOW overlay', (family) => {
+        nowSpy.mockReturnValue(DEADLINE + HOUR_MS);
+        const props = minimalProps({ deadline: DEADLINE, pendingCount: 2, isManager: true });
+        const tree = getWidgetFn()(props, { widgetFamily: family, date: new Date(ENTRY) });
+        expect(treeContains(tree, 'Due in')).toBe(false);
+        expect(treeContains(tree, '2 PENDING')).toBe(false);
+        expect(treeContains(tree, '#F43F5E00')).toBe(false);
+      });
+
+      it('control: the same entry rendered at its own date is urgent (pill and overlay present)', () => {
+        nowSpy.mockReturnValue(ENTRY);
+        const props = minimalProps({ deadline: DEADLINE, pendingCount: 2, isManager: true });
+        const tree = getWidgetFn()(props, { widgetFamily: 'systemSmall', date: new Date(ENTRY) });
+        expect(treeContains(tree, 'Due in 3h')).toBe(true);
+        expect(treeContains(tree, '2 PENDING')).toBe(true);
+        expect(treeContains(tree, '#F43F5E00')).toBe(true);
+      });
+
+      it('before the deadline, the countdown follows real time, not the older entry date', () => {
+        // Entry date is 30 h before the deadline ("1d 6h"); real time is 3 h before it.
+        nowSpy.mockReturnValue(DEADLINE - 3 * HOUR_MS);
+        const tree = getWidgetFn()(minimalProps({ deadline: DEADLINE }), {
+          widgetFamily: 'systemMedium',
+          date: new Date(DEADLINE - 30 * HOUR_MS),
+        });
+        expect(treeContains(tree, 'Due in 3h')).toBe(true);
+        expect(treeContains(tree, 'Due in 1d')).toBe(false);
+      });
+    });
+  });
+
+  describe('runtime globals', () => {
+    it('every global the layout calls is a named export of @expo/ui/swift-ui or /modifiers', () => {
+      const called = calledGlobals(extractWidgetLayoutJs());
+      // Positive control: the scan sees views and modifiers.
+      expect(called).toEqual(expect.arrayContaining(['HStack', 'Text', 'VStack', 'ZStack', 'font', 'foregroundStyle', 'frame']));
+      const exported = expoUiExportNames();
+      expect(exported.has('containerBackground')).toBe(true);
+      expect(called.filter((name) => !exported.has(name))).toEqual([]);
+    });
+
+    it('the harness stubs every global the layout calls, so the evaluation tests exercise them all', () => {
+      const stubs = createSwiftUIStubs();
+      expect(calledGlobals(extractWidgetLayoutJs()).filter((name) => !(name in stubs))).toEqual([]);
+    });
+
+    it('calledGlobals ignores locals, parameters, builtins and method calls (fixture)', () => {
+      const fixture = '(function(props, env) { function own() {} var v = own(); VStack({}); String(1); Math.floor(1); v.map(own); env(); })';
+      expect(calledGlobals(fixture)).toEqual(['VStack']);
+    });
   });
 });

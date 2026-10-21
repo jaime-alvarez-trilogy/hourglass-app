@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
+  type TextInputInstance,
 } from 'react-native'
 
 interface Props {
@@ -24,7 +25,7 @@ interface Props {
 
 export function RejectionSheet({ visible, onConfirm, onCancel, initialReason = 'Not approved' }: Props) {
   const [reason, setReason] = useState(initialReason)
-  const inputRef = useRef<TextInput>(null)
+  const inputRef = useRef<TextInputInstance>(null)
 
   // Pre-fill and auto-focus when sheet opens
   useEffect(() => {

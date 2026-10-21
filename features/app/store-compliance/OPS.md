@@ -17,7 +17,7 @@ Things that happen in App Store Connect, GitHub settings or the local filesystem
 - [ ] **O8 (J+C) — Rotate the ASC API key to least privilege.** J: revoke `W4UV4XTKPC` (Admin) and create an **App Manager** key. C: update `eas.json` (submit block), `.appstore/asc.js`, `.appstore/query-listing.js` and `.appstore/config.json`, and **regenerate** `.appstore/api_key.json`, which embeds a second inline copy of the key. Verify with `node .appstore/asc.js builds`. While in ASC, audit Users and Access and Certificates.
 - [ ] **O9 (C) — Purge local checkpoint refs** in the outer repo after O8: `git -C WS for-each-ref --format='%(refname)' refs/t3 | xargs -n1 git -C WS update-ref -d && git -C WS reflog expire --expire=now --all && git -C WS gc --prune=now`.
 - [ ] **O10 (C) — Untrack `hourglassws/` from the outer `WS` repo.** In one commit: `git rm -r --cached hourglassws/` and add `hourglassws/` to `WS/.gitignore`. No submodule. The 95 unpushed outer commits stay local (the repo is archived).
-- [ ] **O11 (C) — Baseline OTA.** See spec 04 FR4.
+- [ ] **O11 (C) — Baseline OTA.** See spec 04 FR4. Follow `docs/RELEASING.md` section A, checking out `7b0e328` (`aade79b` + the `ota-publish.sh` fix for eas-cli ≥ 22), not `aade79b` (section A step 3).
 
 ## Dated reminders
 

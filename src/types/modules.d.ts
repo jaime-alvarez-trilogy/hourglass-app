@@ -46,16 +46,3 @@ declare module 'react-native-android-widget' {
   export function registerWidgetTaskHandler(handler: (props: unknown) => Promise<void>): void;
   export function updateWidget(params: unknown): Promise<void>;
 }
-
-declare module 'expo-widgets' {
-  type WidgetProps = Record<string, unknown>;
-  type WidgetComponent<P extends WidgetProps = WidgetProps> = (props: P) => JSX.Element | null;
-
-  export function createWidget<P extends WidgetProps>(
-    name: string,
-    component: WidgetComponent<P>
-  ): {
-    updateTimeline: (entries: Array<{ date: Date; props: P }>) => Promise<void>;
-    reload: () => Promise<void>;
-  };
-}

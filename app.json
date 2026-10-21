@@ -2,7 +2,7 @@
   "expo": {
     "name": "Hourglass.xo",
     "slug": "hourglassws",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "hourglassws",
@@ -73,7 +73,7 @@
           }
         ]
       },
-      "buildNumber": "18"
+      "buildNumber": "19"
     },
     "android": {
       "package": "com.jalvarez0907.hourglass",
@@ -95,6 +95,8 @@
     },
     "plugins": [
       "expo-router",
+      "./plugins/withHourglassWidgetPrivacyManifest",
+      "./plugins/withHourglassWidgetBackground",
       [
         "expo-widgets",
         {

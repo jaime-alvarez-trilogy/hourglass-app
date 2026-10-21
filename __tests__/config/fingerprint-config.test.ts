@@ -1,16 +1,26 @@
-// 04-ota-lane FR1 (lockfile root version) + FR2 (fingerprint scope).
+// 04-ota-lane FR1 (lockfile root version) + FR2 (fingerprint scope), and
+// 10-sdk-58-ios-27 FR8 (Decision 11: our skips plus the balanced preset's).
 // This file reads from disk on purpose; app-config.test.ts is restricted to typed JSON
 // imports by spec 03's test-file contract.
 
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { SourceSkips } from 'expo/fingerprint';
+import { DEFAULT_SOURCE_SKIPS, SourceSkips } from 'expo/fingerprint';
 import appJson from '@/app.json';
 
 const ROOT = path.resolve(__dirname, '../..');
 
-const EXPECTED_SOURCE_SKIPS = ['ExpoConfigVersions', 'GitIgnore', 'PackageJsonScriptsAll'];
+// Sorted. Spec 04's three, plus the four the balanced preset adds (spec 10 Decision 11).
+const EXPECTED_SOURCE_SKIPS = [
+  'AutolinkingConfigPaths',
+  'EasJson',
+  'Easignore',
+  'ExpoConfigRuntimeVersionIfString',
+  'ExpoConfigVersions',
+  'GitIgnore',
+  'PackageJsonScriptsAll',
+];
 
 type FingerprintConfig = Record<string, unknown> & { sourceSkips?: unknown };
 
@@ -43,11 +53,35 @@ describe('FR1: lockfile root version', () => {
 
 describe('FR2: fingerprint scope', () => {
   describe('fingerprint.config.js', () => {
-    it('exports exactly { sourceSkips } with ExpoConfigVersions, PackageJsonScriptsAll and GitIgnore', () => {
+    it('exports exactly { sourceSkips } with the 7 Decision 11 names', () => {
       const config = loadFingerprintConfig();
       expect(Object.keys(config)).toEqual(['sourceSkips']);
       expect(Array.isArray(config.sourceSkips)).toBe(true);
       expect([...(config.sourceSkips as string[])].sort()).toEqual(EXPECTED_SOURCE_SKIPS);
+    });
+
+    // A user sourceSkips array replaces the preset's skips instead of merging with them
+    // (@expo/fingerprint normalizeOptionsAsync spreads the config over the preset), so every
+    // skip of the default (balanced) preset must be listed here too. PackageJsonScriptsAll
+    // skips all scripts, a superset of the preset's PackageJsonAndroidAndIosScriptsIfNotContainRun.
+    // If a later @expo/fingerprint adds a preset skip, this fails and the new skip needs a
+    // decision (and a native build, since adding it forks the runtime).
+    it("covers every skip of @expo/fingerprint's default preset", () => {
+      const enumValues = SourceSkips as unknown as Record<string, number>;
+      const ours = (loadFingerprintConfig().sourceSkips as string[]).reduce(
+        (mask, name) => mask | (enumValues[name] ?? 0),
+        0,
+      );
+      const covered =
+        ours & SourceSkips.PackageJsonScriptsAll
+          ? ours | SourceSkips.PackageJsonAndroidAndIosScriptsIfNotContainRun
+          : ours;
+      const missing = DEFAULT_SOURCE_SKIPS & ~covered;
+      const missingNames = Object.keys(enumValues).filter(
+        (name) => Number.isNaN(Number(name)) && enumValues[name] !== 0 && (missing & enumValues[name]) !== 0,
+      );
+      expect(DEFAULT_SOURCE_SKIPS).not.toBe(SourceSkips.None);
+      expect(missingNames).toEqual([]);
     });
 
     // @expo/fingerprint's normalizeSourceSkips silently drops unknown names, so a typo

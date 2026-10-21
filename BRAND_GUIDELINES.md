@@ -91,8 +91,8 @@ Every glass card surface carries a **white noise texture overlay at 0.03 opacity
 
 - Opacity: **0.03** — barely perceptible individually, but collectively removes synthetic sterility
 - Blend mode: `overlay`
-- Asset: tileable white noise PNG at 256×256px, repeated to fill
-- Position: `AbsoluteFill` inside the card, above BackdropFilter canvas, below content
+- Asset: tileable white noise PNG at 256×256px, repeated to fill at **one noise pixel per device pixel**. It is drawn as a Skia `ImageShader` scaled by `1/PixelRatio` (`src/components/NoiseShader.tsx`); an `ImageBackground` tile draws 1pt grain in release builds.
+- Position: inside the card's Skia Canvas, above the BackdropFilter fill and inner shadow, below content
 
 ---
 
@@ -166,7 +166,7 @@ Animated.View              Spring scale wrapper (pressable cards only)
     Canvas (AbsoluteFill)  Skia rendering layer
       BackdropFilter(16)   Blurs animated mesh — creates refraction
         RoundedRect        Fills with GLASS_FILL rgba(22,21,31,0.6)
-  NoiseOverlay (AbsFill)   White noise PNG at 0.03 opacity / overlay blend
+      RoundedRect          NoiseShader, white noise at 0.03 opacity (1 noise px = 1 device px)
   ShadowView (inset)       Physical glass thickness simulation
     top edge               rgba(0,0,0,0.6), offset {0,4}, blur 8
     bottom edge            rgba(255,255,255,0.10) reflected highlight
@@ -477,7 +477,7 @@ Current state of the running app vs. this spec. These are bugs.
 | 8 | **Text colors** | ✅ Fixed | `colors.ts` already has correct tokens; `#E0E0E0`, `#A0A0A0`, `#757575` |
 | 9 | **Animated mesh** | ✅ Fixed | Split combined `{x,y}` DerivedValues into separate `cx`/`cy` for Skia UI-thread reactivity; opacity 0.15 |
 | 10 | **Tabular nums** | ✅ Fixed | `MetricValue` and `DailyAIRow` both enforce `fontVariant: ['tabular-nums']` |
-| 11 | **Noise texture** | ✅ Fixed | Added `ImageBackground noise.png` at `0.03 opacity` inside `GlassCard` glass body |
+| 11 | **Noise texture** | ✅ Fixed | Added `ImageBackground noise.png` at `0.03 opacity` inside `GlassCard` glass body. Since 2026-10-21 a Skia `NoiseShader` inside the card Canvas (release builds drew the `ImageBackground` as 1pt grain) |
 | 12 | **Border color** | ✅ Fixed | `Card` accepts `borderAccentColor` prop; `index.tsx` passes gold/cyan/panelState; AI tab uses cyan |
 
 ---

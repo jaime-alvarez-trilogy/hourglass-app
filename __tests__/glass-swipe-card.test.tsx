@@ -157,8 +157,10 @@ describe('FR1: Inline Glass Surface — source constraints', () => {
     expect(source).toMatch(/from ['"]expo-linear-gradient['"]/);
   });
 
-  it('FR1: imports ImageBackground for noise overlay', () => {
-    expect(source).toContain('ImageBackground');
+  it('FR1: draws the noise with the shared NoiseShader, not an ImageBackground', () => {
+    expect(source).toContain('useNoiseImage()');
+    expect(source).toContain('<NoiseShader image={noise} />');
+    expect(source).not.toContain('ImageBackground');
   });
 
   it('FR1: imports useState for dims state', () => {
@@ -205,12 +207,15 @@ describe('FR1: Inline Glass Surface — source constraints', () => {
     expect(code).not.toContain('bg-surface');
   });
 
-  it('FR1: noise.png image referenced for noise overlay', () => {
-    expect(source).toContain('noise.png');
+  it('FR1: noise drawn inside the Skia Canvas, after the inner shadow', () => {
+    const shader = source.indexOf('<NoiseShader');
+    expect(shader).toBeGreaterThan(source.lastIndexOf('<SkiaLinearGradient'));
+    expect(shader).toBeLessThan(source.indexOf('</Canvas>'));
   });
 
   it('FR1: noise overlay at 0.03 opacity (brand §1.5)', () => {
-    expect(source).toMatch(/opacity.*0\.03|0\.03.*opacity/);
+    expect(source).toMatch(/NOISE_OPACITY\s*=\s*0\.03/);
+    expect(source).toContain('opacity={NOISE_OPACITY}');
   });
 
   it('FR1: SHADOW_TOP inner shadow color defined', () => {

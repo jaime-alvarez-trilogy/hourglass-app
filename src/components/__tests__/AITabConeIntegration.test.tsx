@@ -83,6 +83,7 @@ jest.mock('react-native-web/dist/exports/ActivityIndicator/index.js', () => {
 jest.mock('expo-router', () => ({
   useRouter: () => ({ replace: jest.fn() }),
   useFocusEffect: (cb: () => void) => { cb(); },
+  useIsFocused: () => true,
 }));
 
 jest.mock('@/src/hooks/useAppBreakdown', () => ({
@@ -149,18 +150,11 @@ jest.mock('@/src/lib/aiCone', () => ({
   computeAICone: (...args: any[]) => mockComputeAICone(...args),
 }));
 
-// useFocusKey — mock to return a stable key (0)
-// Also mock @react-navigation/native since useFocusKey uses useIsFocused which
-// requires a NavigationContainer — not available in jest-expo/node environment
+// useFocusKey — mock to return a stable key (0). The expo-router mock above also stubs
+// useIsFocused (which needs a NavigationContainer, absent in jest-expo/node).
 const mockUseFocusKey = jest.fn(() => 0);
 jest.mock('@/src/hooks/useFocusKey', () => ({
   useFocusKey: () => mockUseFocusKey(),
-}));
-
-jest.mock('@react-navigation/native', () => ({
-  useIsFocused: () => true,
-  useNavigation: () => ({ navigate: jest.fn(), replace: jest.fn(), push: jest.fn() }),
-  useRoute: () => ({ params: {} }),
 }));
 
 // useConfig — mock returning config with weeklyLimit

@@ -4,11 +4,13 @@
 // Strategy:
 // - Call buildScrubCursor directly (pure function, no React needed)
 // - Assert returned coordinates and path object
-// - Skia mock in __mocks__/@shopify/react-native-skia.ts handles Skia.Path()
+// - Skia mock in __mocks__/@shopify/react-native-skia.ts handles Skia.Path.MakeFromSVGString
+//   (spied per test to assert the exact SVG string; 10-sdk-58-ios-27 FR2)
 // - Test all edge cases: left edge, right edge, normal case
 
 import * as path from 'path';
 import * as fs from 'fs';
+import { Skia } from '@shopify/react-native-skia'; // the shared mock (__mocks__/@shopify)
 
 // ─── File path constants ───────────────────────────────────────────────────────
 
@@ -69,34 +71,52 @@ describe('FR3: buildScrubCursor', () => {
     });
   });
 
-  describe('line path construction', () => {
-    it('calls moveTo on linePath (line starts at top)', () => {
-      const result = buildScrubCursor(100, 50, 200, 10);
-      expect(result.linePath.moveTo).toHaveBeenCalledWith(100, 10);
+  // 10-sdk-58-ios-27 FR2: the line is parsed from an SVG string, not mutated with
+  // moveTo/lineTo (Skia 2.14 removes the mutable SkPath API; MakeFromSVGString exists in
+  // both 2.4.18 and 2.14.0). The spy wraps the shared Skia mock and calls through.
+  describe('line path construction (10 FR2: MakeFromSVGString)', () => {
+    let makeFromSvg: jest.SpyInstance;
+
+    beforeEach(() => {
+      makeFromSvg = jest.spyOn(Skia.Path, 'MakeFromSVGString');
     });
 
-    it('calls lineTo on linePath (line ends at bottom)', () => {
+    afterEach(() => {
+      makeFromSvg.mockRestore();
+    });
+
+    it('builds the line from exactly "M 40 8 L 40 112" for (scrubX=40, chartHeight=120, topPadding=8)', () => {
+      buildScrubCursor(40, 60, 120, 8);
+      expect(makeFromSvg).toHaveBeenCalledTimes(1);
+      expect(makeFromSvg).toHaveBeenCalledWith('M 40 8 L 40 112');
+    });
+
+    it('linePath is the path MakeFromSVGString returned', () => {
       const result = buildScrubCursor(100, 50, 200, 10);
-      expect(result.linePath.lineTo).toHaveBeenCalledWith(100, 190); // 200 - 10
+      expect(result.linePath).toBe(makeFromSvg.mock.results[0].value);
     });
 
     it('line top y = topPadding', () => {
-      const result = buildScrubCursor(50, 100, 300, 25);
-      expect(result.linePath.moveTo).toHaveBeenCalledWith(50, 25);
+      buildScrubCursor(50, 100, 300, 25);
+      expect(makeFromSvg.mock.calls[0][0]).toMatch(/^M 50 25 /);
     });
 
     it('line bottom y = chartHeight - topPadding', () => {
-      const result = buildScrubCursor(50, 100, 300, 25);
-      expect(result.linePath.lineTo).toHaveBeenCalledWith(50, 275); // 300 - 25
+      buildScrubCursor(50, 100, 300, 25);
+      expect(makeFromSvg.mock.calls[0][0]).toMatch(/ L 50 275$/); // 300 - 25
     });
 
-    it('line x coordinate matches scrubX in both moveTo and lineTo', () => {
-      const scrubX = 77;
-      const result = buildScrubCursor(scrubX, 40, 160, 8);
-      const moveCall = result.linePath.moveTo.mock.calls[0];
-      const lineCall = result.linePath.lineTo.mock.calls[0];
-      expect(moveCall[0]).toBe(scrubX);
-      expect(lineCall[0]).toBe(scrubX);
+    it('line x coordinate matches scrubX at both ends', () => {
+      buildScrubCursor(77, 40, 160, 8);
+      expect(makeFromSvg).toHaveBeenCalledWith('M 77 8 L 77 152');
+    });
+
+    it('falls back to the "M 0 0" path if the SVG string fails to parse', () => {
+      const fallback = { fallback: true };
+      makeFromSvg.mockReturnValueOnce(null).mockReturnValueOnce(fallback);
+      const result = buildScrubCursor(10, 20, 100, 5);
+      expect(makeFromSvg.mock.calls.map((c) => c[0])).toEqual(['M 10 5 L 10 95', 'M 0 0']);
+      expect(result.linePath).toBe(fallback);
     });
   });
 
@@ -115,9 +135,13 @@ describe('FR3: buildScrubCursor', () => {
     });
 
     it('scrubX = chartWidth — line path still built correctly', () => {
-      const result = buildScrubCursor(300, 100, 200, 10);
-      expect(result.linePath.moveTo).toHaveBeenCalledWith(300, 10);
-      expect(result.linePath.lineTo).toHaveBeenCalledWith(300, 190);
+      const makeFromSvg = jest.spyOn(Skia.Path, 'MakeFromSVGString');
+      try {
+        buildScrubCursor(300, 100, 200, 10);
+        expect(makeFromSvg).toHaveBeenCalledWith('M 300 10 L 300 190');
+      } finally {
+        makeFromSvg.mockRestore();
+      }
     });
   });
 });
@@ -144,7 +168,7 @@ describe('FR3: ScrubCursor — source contract', () => {
     expect(source).toMatch(/dotRadius:\s*4/);
   });
 
-  it('uses Skia.Path to create the line path', () => {
-    expect(source).toMatch(/Skia\.Path/);
+  it('uses Skia.Path.MakeFromSVGString to create the line path (10 FR2)', () => {
+    expect(source).toMatch(/Skia\.Path\.MakeFromSVGString\(/);
   });
 });

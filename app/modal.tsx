@@ -84,6 +84,10 @@ export default function ModalScreen() {
           await unregisterPushToken().catch(() => {});
           try {
             await clearAll();
+          } catch (err) {
+            // Finish signing out even if storage refuses: the steps below clear the in-memory
+            // cache, the notifications, the widget timeline and the log (final review 2026-10-21).
+            console.warn('[settings] sign-out: clearAll failed; continuing', err);
           } finally {
             // Spec 04 FR7: wipe the in-memory auth-token cache even if clearAll throws.
             invalidateAuthToken();

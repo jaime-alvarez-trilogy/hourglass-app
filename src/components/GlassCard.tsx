@@ -10,7 +10,7 @@
 //   Animated.View  → dark bg fallback (#16151F) + spring scale wrapper (pressable=true only)
 //   MaskedView     → gradient border: LinearGradient through 1.5px perimeter mask
 //   Canvas         → BackdropFilter(blur=16) + RoundedRect fill + Skia inner shadow gradient
-//   View (noise)   → white noise PNG at 0.03 opacity (brand §1.5)
+//                    + NoiseShader at 0.03 opacity (brand §1.5, see NoiseShader.tsx)
 //   View (content) → plain View with padding — no react-native-inner-shadow
 //
 // Why not react-native-inner-shadow:
@@ -38,7 +38,6 @@ import {
   ViewStyle,
   StyleSheet,
   Pressable,
-  ImageBackground,
 } from 'react-native';
 import {
   Canvas,
@@ -49,6 +48,7 @@ import {
   vec,
 } from '@shopify/react-native-skia';
 import { LinearGradient } from 'expo-linear-gradient';
+import { NoiseShader, useNoiseImage } from './NoiseShader';
 import Animated, {
   useSharedValue,
   withSpring,
@@ -58,6 +58,7 @@ import Animated, {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const BLUR_RADIUS = { base: 16, elevated: 20 };
+const NOISE_OPACITY = 0.03;
 
 const BORDER_RADIUS = { 'xl': 12, '2xl': 16 };
 
@@ -110,6 +111,8 @@ export default function GlassCard({
   testID,
 }: GlassCardProps): React.JSX.Element {
   const [dims, setDims] = useState({ w: 0, h: 0 });
+  // Before the layerBudget early return: hook order must not depend on props.
+  const noise = useNoiseImage();
 
   const blurRadius = elevated ? BLUR_RADIUS.elevated : BLUR_RADIUS.base;
   const borderRadiusPx = BORDER_RADIUS[radius];
@@ -225,21 +228,22 @@ export default function GlassCard({
                 positions={[0, 0.12, 0.85, 1]}
               />
             </RoundedRect>
+            {/* Noise texture — white noise at 0.03 opacity, one noise pixel per device   */}
+            {/* pixel. Above the blur and shadow, below content (brand §1.5).            */}
+            {noise && (
+              <RoundedRect
+                x={0}
+                y={0}
+                width={dims.w}
+                height={dims.h}
+                r={borderRadiusPx}
+                opacity={NOISE_OPACITY}
+              >
+                <NoiseShader image={noise} />
+              </RoundedRect>
+            )}
           </Canvas>
         )}
-      </View>
-
-      {/* Noise texture — white noise PNG at 0.03 opacity, tiled to fill card surface */}
-      {/* Position: above BackdropFilter canvas, below content (brand §1.5). */}
-      <View
-        style={[StyleSheet.absoluteFill, { opacity: 0.03 }]}
-        pointerEvents="none"
-      >
-        <ImageBackground
-          source={require('../../assets/images/noise.png')}
-          style={StyleSheet.absoluteFill}
-          resizeMode="repeat"
-        />
       </View>
 
       {/* Content — plain View with padding. react-native-inner-shadow removed    */}

@@ -51,9 +51,6 @@ jest.mock('@/src/components/FadeInScreen', () => {
     default: ({ children }: any) => mockReact.createElement(mockReact.Fragment, null, children),
   };
 });
-jest.mock('@react-navigation/native', () => ({
-  useIsFocused: () => true,
-}));
 
 // useStaggeredEntry — return plain styles (no Reanimated shared values in tests)
 jest.mock('@/src/hooks/useStaggeredEntry', () => ({
@@ -64,6 +61,7 @@ jest.mock('@/src/hooks/useStaggeredEntry', () => ({
 }));
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: jest.fn() }),
+  useIsFocused: () => true,
 }));
 
 // @expo/vector-icons — ApprovalUrgencyCard renders an Ionicons glyph whose real

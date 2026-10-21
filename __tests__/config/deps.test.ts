@@ -1,0 +1,703 @@
+// 06-dependency-hygiene — static dependency guards (FR1–FR4), ported and adapted by
+// 10-sdk-58-ios-27 FR1: spec 06's FR5 (SDK 55 patch-line floors) is dropped, FR4 is the
+// "install.exclude iff patched" rule, and react-native-inner-shadow stays removed.
+// 10-sdk-58-ios-27 FR4 adds the "SDK 58 line" floors and retires both patches.
+// Reads package.json, package-lock.json and patches/ from disk on purpose (no mocks), so the
+// guard sees exactly what `npm ci` + `postinstall` will see. Runs offline inside `npm test`.
+
+import * as fs from 'fs';
+import * as path from 'path';
+
+type PatchDetails = {
+  name: string;
+  version: string;
+  path: string; // e.g. 'node_modules/expo-widgets'
+  isNested: boolean;
+  patchFilename: string;
+  packageNames: string[]; // top-level first: 'a++b+1.0.0.patch' → ['a', 'b']
+};
+
+// patch-package ships no .d.ts; use its own parser + discovery so this guard reads
+// patches/ exactly as `postinstall` does (scoped, nested `++`, `.dev`, sequence names).
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { getPackageDetailsFromPatchFilename } = require('patch-package/dist/PackageDetails') as {
+  getPackageDetailsFromPatchFilename(f: string): PatchDetails | null;
+};
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { getPatchFiles } = require('patch-package/dist/patchFs') as {
+  getPatchFiles(dir: string): string[];
+};
+
+const ROOT = path.resolve(__dirname, '../..');
+
+type DepSection = 'dependencies' | 'devDependencies';
+
+type PackageJson = {
+  version?: string;
+  scripts?: Record<string, string>;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  expo?: { install?: { exclude?: string[] }; autolinking?: { android?: { exclude?: string[] } } };
+};
+
+type PackageLock = {
+  packages: Record<
+    string,
+    {
+      version?: string;
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
+    }
+  >;
+};
+
+const EXACT_VERSION = /^\d+\.\d+\.\d+$/;
+
+/** Which package.json section declares `name`, if any. */
+function declaringSection(pkg: PackageJson, name: string): DepSection | undefined {
+  if (pkg.dependencies && name in pkg.dependencies) return 'dependencies';
+  if (pkg.devDependencies && name in pkg.devDependencies) return 'devDependencies';
+  return undefined;
+}
+
+/** Pure. Returns one human-readable problem per violation; [] means aligned. */
+function collectPatchProblems(
+  pkg: PackageJson,
+  lock: PackageLock,
+  patchFilenames: string[],
+): string[] {
+  const problems: string[] = [];
+
+  for (const file of patchFilenames) {
+    const details = getPackageDetailsFromPatchFilename(file);
+    // Rule 1: patch-package itself would skip this file with a warning.
+    if (!details) {
+      problems.push(`Unrecognized patch file: ${file}`);
+      continue;
+    }
+
+    const { name, version } = details;
+
+    if (!details.isNested) {
+      const section = declaringSection(pkg, name);
+      if (!section) {
+        // Rule 2
+        problems.push(`${name}: patched but not a direct dependency`);
+      } else {
+        const declared = pkg[section]![name];
+        // Rule 3
+        if (!EXACT_VERSION.test(declared) || declared !== version) {
+          problems.push(`${name}: declared "${declared}" must be exactly "${version}" (${file})`);
+        }
+        // Rule 6
+        const lockRootSpec = lock.packages['']?.[section]?.[name];
+        if (lockRootSpec !== declared) {
+          problems.push(
+            `${name}: package-lock root spec "${lockRootSpec}" != package.json "${declared}"`,
+          );
+        }
+      }
+    }
+
+    const lockPath = details.path.split(path.sep).join('/');
+    const lockEntry = lock.packages[lockPath];
+    if (!lockEntry) {
+      // Rule 4
+      problems.push(`${name}: not in package-lock.json at ${lockPath}`);
+    } else if (lockEntry.version !== version) {
+      // Rule 5
+      problems.push(
+        `${name}: lockfile has ${lockEntry.version}, patch is for ${version} (orphaned patch)`,
+      );
+    }
+  }
+
+  return problems;
+}
+
+/**
+ * Pure. The top-level package each patch file targets: `patches/X+*.patch` → X. A nested
+ * `a++b+1.0.0.patch` targets `a`, the direct dependency whose bump would orphan it.
+ * Unparseable filenames are rule 1's business, so they are skipped here.
+ */
+function patchedTopLevelPackages(patchFilenames: string[]): string[] {
+  const names = new Set<string>();
+  for (const file of patchFilenames) {
+    const details = getPackageDetailsFromPatchFilename(file);
+    if (details) names.add(details.packageNames[0]);
+  }
+  return [...names].sort();
+}
+
+/**
+ * Pure. `expo.install.exclude` must contain X if and only if a `patches/X+*.patch` exists, and
+ * every entry must be a direct dependency. An absent or empty list is valid with no patches.
+ * Returns one human-readable problem per violation; [] means aligned.
+ */
+function collectExcludeProblems(pkg: PackageJson, patchFilenames: string[]): string[] {
+  const exclude = pkg.expo?.install?.exclude ?? [];
+  const patched = patchedTopLevelPackages(patchFilenames);
+  const problems: string[] = [];
+  for (const name of patched) {
+    if (!exclude.includes(name)) {
+      problems.push(`${name}: patched but missing from expo.install.exclude`);
+    }
+  }
+  for (const name of exclude) {
+    if (!patched.includes(name)) {
+      problems.push(`${name}: in expo.install.exclude but no patches/${name}+*.patch exists`);
+    }
+    if (declaringSection(pkg, name) === undefined) {
+      problems.push(`${name}: in expo.install.exclude but not a direct dependency`);
+    }
+  }
+  return problems;
+}
+
+/** Numeric x.y.z comparison (no prerelease handling needed for these packages). */
+function versionAtLeast(actual: string, floor: string): boolean {
+  const parse = (v: string): number[] => {
+    const m = /^(\d+)\.(\d+)\.(\d+)/.exec(v);
+    if (!m) throw new Error(`versionAtLeast: not an x.y.z version: "${v}"`);
+    return [Number(m[1]), Number(m[2]), Number(m[3])];
+  };
+  const a = parse(actual);
+  const f = parse(floor);
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== f[i]) return a[i] > f[i];
+  }
+  return true;
+}
+
+const readJson = <T>(file: string): T =>
+  JSON.parse(fs.readFileSync(path.join(ROOT, file), 'utf8')) as T;
+
+let pkg: PackageJson;
+let lock: PackageLock;
+let patchFiles: string[];
+
+beforeAll(() => {
+  pkg = readJson<PackageJson>('package.json');
+  lock = readJson<PackageLock>('package-lock.json');
+  patchFiles = getPatchFiles(path.join(ROOT, 'patches'));
+});
+
+const lockVersion = (name: string): string | undefined =>
+  lock.packages[`node_modules/${name}`]?.version;
+
+// ---------------------------------------------------------------------------
+// Fixture builders: lockfile v3 shapes, aligned by default so each negative
+// fixture differs from a passing tree in exactly one way.
+// ---------------------------------------------------------------------------
+
+const WIDGETS_PATCH = 'expo-widgets+55.0.5.patch';
+
+function alignedPkg(overrides: Partial<PackageJson> = {}): PackageJson {
+  return {
+    dependencies: { 'expo-widgets': '55.0.5', react: '19.2.0' },
+    devDependencies: { 'patch-package': '^8.0.1' },
+    ...overrides,
+  };
+}
+
+function alignedLock(
+  packages: PackageLock['packages'] = {},
+  rootOverrides: Partial<PackageLock['packages']['']> = {},
+): PackageLock {
+  return {
+    packages: {
+      '': {
+        dependencies: { 'expo-widgets': '55.0.5', react: '19.2.0' },
+        devDependencies: { 'patch-package': '^8.0.1' },
+        ...rootOverrides,
+      },
+      'node_modules/expo-widgets': { version: '55.0.5' },
+      'node_modules/react': { version: '19.2.0' },
+      'node_modules/patch-package': { version: '8.0.1' },
+      ...packages,
+    },
+  };
+}
+
+describe('FR1: patched packages are pinned to their patch version', () => {
+  describe('real tree', () => {
+    // spec 10 FR4 retires both patches, so an empty patches/ is valid here. Any future patch
+    // must still parse and be exact-pinned (collectPatchProblems below).
+    it('every filename in patches/ parses (an empty patches/ is valid)', () => {
+      const unparsed = patchFiles.filter((f) => getPackageDetailsFromPatchFilename(f) === null);
+      expect(unparsed).toEqual([]);
+    });
+
+    it('collectPatchProblems(package.json, package-lock.json, patches/) is []', () => {
+      expect(collectPatchProblems(pkg, lock, patchFiles)).toEqual([]);
+    });
+  });
+
+  describe('collectPatchProblems fixtures', () => {
+    it('control: an aligned tree has no problems', () => {
+      expect(collectPatchProblems(alignedPkg(), alignedLock(), [WIDGETS_PATCH])).toEqual([]);
+    });
+
+    it('control: a scoped, exact-pinned devDependency patch has no problems', () => {
+      const p = alignedPkg({ devDependencies: { '@scope/tool': '2.1.0' } });
+      const l = alignedLock(
+        { 'node_modules/@scope/tool': { version: '2.1.0' } },
+        { devDependencies: { '@scope/tool': '2.1.0' } },
+      );
+      expect(collectPatchProblems(p, l, ['@scope+tool+2.1.0.patch'])).toEqual([]);
+    });
+
+    it('rule 3: a range spec (^55.0.5) is rejected', () => {
+      const p = alignedPkg({ dependencies: { 'expo-widgets': '^55.0.5' } });
+      const l = alignedLock({}, { dependencies: { 'expo-widgets': '^55.0.5' } });
+      const problems = collectPatchProblems(p, l, [WIDGETS_PATCH]);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toContain('expo-widgets');
+      expect(problems[0]).toContain('exactly "55.0.5"');
+    });
+
+    it('rule 3: an exact spec for a different version is rejected', () => {
+      const p = alignedPkg({ dependencies: { 'expo-widgets': '55.0.6' } });
+      const l = alignedLock({}, { dependencies: { 'expo-widgets': '55.0.6' } });
+      const problems = collectPatchProblems(p, l, [WIDGETS_PATCH]);
+      expect(problems).toEqual([
+        expect.stringContaining('expo-widgets: declared "55.0.6" must be exactly "55.0.5"'),
+      ]);
+    });
+
+    it('rule 5: lockfile drift (55.0.20 vs patch 55.0.5) is an orphaned patch', () => {
+      const l = alignedLock({ 'node_modules/expo-widgets': { version: '55.0.20' } });
+      const problems = collectPatchProblems(alignedPkg(), l, [WIDGETS_PATCH]);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toContain('expo-widgets');
+      expect(problems[0]).toContain('55.0.20');
+      expect(problems[0]).toContain('orphaned patch');
+    });
+
+    it('rule 4: a patched package missing from package-lock.json is reported', () => {
+      const l = alignedLock();
+      delete l.packages['node_modules/expo-widgets'];
+      const problems = collectPatchProblems(alignedPkg(), l, [WIDGETS_PATCH]);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toContain('expo-widgets');
+      expect(problems[0]).toContain('not in package-lock.json');
+      expect(problems[0]).toContain('node_modules/expo-widgets');
+    });
+
+    it('rule 2: a patch for a package not declared in package.json is reported', () => {
+      const l = alignedLock({ 'node_modules/left-pad': { version: '1.3.0' } });
+      const problems = collectPatchProblems(alignedPkg(), l, ['left-pad+1.3.0.patch']);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toContain('left-pad');
+      expect(problems[0]).toContain('not a direct dependency');
+    });
+
+    it('rule 1: an unparseable patch filename is reported', () => {
+      expect(collectPatchProblems(alignedPkg(), alignedLock(), ['garbage.patch'])).toEqual([
+        'Unrecognized patch file: garbage.patch',
+      ]);
+    });
+
+    it('rule 6: lockfile root spec ^55.0.5 vs package.json 55.0.5 is reported', () => {
+      const l = alignedLock({}, { dependencies: { 'expo-widgets': '^55.0.5', react: '19.2.0' } });
+      const problems = collectPatchProblems(alignedPkg(), l, [WIDGETS_PATCH]);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toContain('expo-widgets');
+      expect(problems[0]).toContain('package-lock root spec');
+      expect(problems[0]).toContain('"^55.0.5"');
+    });
+
+    it('nested a++b+1.0.0.patch only needs the nested lock entry (b need not be direct)', () => {
+      const l = alignedLock({ 'node_modules/a/node_modules/b': { version: '1.0.0' } });
+      expect(collectPatchProblems(alignedPkg(), l, ['a++b+1.0.0.patch'])).toEqual([]);
+    });
+
+    it('nested patch with lock drift at the nested path is still an orphaned patch', () => {
+      const l = alignedLock({ 'node_modules/a/node_modules/b': { version: '1.0.1' } });
+      const problems = collectPatchProblems(alignedPkg(), l, ['a++b+1.0.0.patch']);
+      expect(problems).toEqual([
+        expect.stringContaining('b: lockfile has 1.0.1, patch is for 1.0.0 (orphaned patch)'),
+      ]);
+    });
+  });
+});
+
+describe('FR2: a failed or mismatched patch fails the install', () => {
+  it('postinstall runs patch-package with --error-on-fail and --error-on-warn', () => {
+    const postinstall = pkg.scripts?.postinstall ?? '';
+    expect(postinstall).toMatch(/^patch-package(\s|$)/);
+    const argv = postinstall.split(/\s+/);
+    expect(argv).toEqual(expect.arrayContaining(['--error-on-fail', '--error-on-warn']));
+  });
+
+  it('patch-package stays a devDependency', () => {
+    expect(pkg.devDependencies?.['patch-package']).toBeDefined();
+  });
+});
+
+describe('FR3: the unused dev tunnel helper is removed', () => {
+  it('@expo/ngrok is in neither dependencies nor devDependencies', () => {
+    expect(pkg.dependencies ?? {}).not.toHaveProperty(['@expo/ngrok']);
+    expect(pkg.devDependencies ?? {}).not.toHaveProperty(['@expo/ngrok']);
+  });
+
+  it('package-lock.json has no node_modules/@expo/ngrok* entries', () => {
+    const ngrokKeys = Object.keys(lock.packages).filter((k) =>
+      k.startsWith('node_modules/@expo/ngrok'),
+    );
+    expect(ngrokKeys).toEqual([]);
+  });
+});
+
+describe('FR3 (spec 10 FR1): the dead inner-shadow dependency is removed', () => {
+  // Zero imports (GlassCard.tsx explains why) and JS-only, so removing it changes no native code.
+  it('react-native-inner-shadow is in neither dependencies nor devDependencies', () => {
+    expect(pkg.dependencies ?? {}).not.toHaveProperty(['react-native-inner-shadow']);
+    expect(pkg.devDependencies ?? {}).not.toHaveProperty(['react-native-inner-shadow']);
+  });
+
+  it('package-lock.json has no node_modules/react-native-inner-shadow entry', () => {
+    expect(lockVersion('react-native-inner-shadow')).toBeUndefined();
+  });
+});
+
+describe('FR4 (spec 10 FR1): expo.install.exclude lists exactly the patched packages', () => {
+  describe('real tree', () => {
+    it('expo.install.exclude contains X if and only if a patches/X+*.patch file exists', () => {
+      const exclude = [...(pkg.expo?.install?.exclude ?? [])].sort();
+      expect(exclude).toEqual(patchedTopLevelPackages(patchFiles));
+    });
+
+    it('every expo.install.exclude entry is a direct dependency (no stale entries)', () => {
+      const stale = (pkg.expo?.install?.exclude ?? []).filter(
+        (name) => declaringSection(pkg, name) === undefined,
+      );
+      expect(stale).toEqual([]);
+    });
+
+    it('collectExcludeProblems(package.json, patches/) is []', () => {
+      expect(collectExcludeProblems(pkg, patchFiles)).toEqual([]);
+    });
+  });
+
+  describe('collectExcludeProblems fixtures', () => {
+    const withExclude = (exclude?: string[]): PackageJson =>
+      alignedPkg(exclude === undefined ? {} : { expo: { install: { exclude } } });
+
+    it('control: no patches and no exclude list is valid', () => {
+      expect(collectExcludeProblems(withExclude(), [])).toEqual([]);
+    });
+
+    it('control: no patches and an empty exclude list is valid', () => {
+      expect(collectExcludeProblems(withExclude([]), [])).toEqual([]);
+    });
+
+    it('control: one patch, excluded, is valid', () => {
+      expect(collectExcludeProblems(withExclude(['expo-widgets']), [WIDGETS_PATCH])).toEqual([]);
+    });
+
+    it('a patched package missing from the exclude list is reported', () => {
+      expect(collectExcludeProblems(withExclude(), [WIDGETS_PATCH])).toEqual([
+        'expo-widgets: patched but missing from expo.install.exclude',
+      ]);
+    });
+
+    it('an exclude entry with no patch file is reported (exclude only while a patch exists)', () => {
+      expect(collectExcludeProblems(withExclude(['expo-widgets']), [])).toEqual([
+        'expo-widgets: in expo.install.exclude but no patches/expo-widgets+*.patch exists',
+      ]);
+    });
+
+    it('an exclude entry that is not a direct dependency is reported', () => {
+      const problems = collectExcludeProblems(withExclude(['left-pad']), ['left-pad+1.3.0.patch']);
+      expect(problems).toEqual(['left-pad: in expo.install.exclude but not a direct dependency']);
+    });
+
+    it('a scoped patch maps to the scoped package name', () => {
+      const p = alignedPkg({
+        devDependencies: { '@scope/tool': '2.1.0' },
+        expo: { install: { exclude: ['@scope/tool'] } },
+      });
+      expect(collectExcludeProblems(p, ['@scope+tool+2.1.0.patch'])).toEqual([]);
+    });
+
+    it('a nested a++b patch requires the top-level package a, not b', () => {
+      const nested = (exclude: string[]): PackageJson =>
+        alignedPkg({ dependencies: { a: '1.0.0' }, expo: { install: { exclude } } });
+      expect(collectExcludeProblems(nested(['a']), ['a++b+1.0.0.patch'])).toEqual([]);
+      expect(collectExcludeProblems(nested(['b']), ['a++b+1.0.0.patch'])).toEqual([
+        'a: patched but missing from expo.install.exclude',
+        'b: in expo.install.exclude but no patches/b+*.patch exists',
+        'b: in expo.install.exclude but not a direct dependency',
+      ]);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// spec 10 FR4: the SDK 58 dependency line. Floors, not windows: every case must still pass
+// on SDK 59+, so majors are compared against expo's own major and versions with >=.
+// Single-copy checks read lockfile keys (node_modules/<a>/node_modules/<pkg>), not npm ls.
+// ---------------------------------------------------------------------------
+
+// semver ships no .d.ts here; hoisted at the root by many packages (only satisfies() is used).
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const semver = require('semver') as { satisfies(version: string, range: string): boolean };
+
+const majorOf = (v: string): number => {
+  const m = /^(\d+)\.\d+\.\d+/.exec(v);
+  if (!m) throw new Error(`majorOf: not an x.y.z version: "${v}"`);
+  return Number(m[1]);
+};
+
+/** `0.N` minor of a 0.x version (react-native's real "major"). */
+const rnMinorOf = (v: string): number => {
+  const m = /^0\.(\d+)\.\d+/.exec(v);
+  if (!m) throw new Error(`rnMinorOf: not a 0.N.x version: "${v}"`);
+  return Number(m[1]);
+};
+
+/** Lockfile keys that install a second, nested copy of `name`. */
+function nestedCopies(l: PackageLock, name: string): string[] {
+  const suffix = `/node_modules/${name}`;
+  return Object.keys(l.packages).filter((k) => k.endsWith(suffix) && k !== `node_modules/${name}`);
+}
+
+/** Every `@react-navigation/*` name declared in dependencies or devDependencies. */
+function declaredReactNavigation(p: PackageJson): string[] {
+  return [...Object.keys(p.dependencies ?? {}), ...Object.keys(p.devDependencies ?? {})]
+    .filter((n) => n.startsWith('@react-navigation/'))
+    .sort();
+}
+
+const lockVersionOrThrow = (name: string): string => {
+  const v = lockVersion(name);
+  if (v === undefined) throw new Error(`package-lock.json has no node_modules/${name}`);
+  return v;
+};
+
+/** The two patch files spec 10 FR4 retired with the SDK 55 line. */
+const RETIRED_SDK55_PATCHES: readonly string[] = [
+  'expo-widgets+55.0.5.patch',
+  'react-native-reanimated+4.2.1.patch',
+];
+
+/**
+ * Pure. One problem per retired SDK 55 patch file still present. Any other patch is allowed here:
+ * collectPatchProblems (exact pin, lockfile) and collectExcludeProblems (install.exclude iff
+ * patched) are what govern it.
+ */
+function retiredPatchProblems(patchFilenames: string[]): string[] {
+  return patchFilenames
+    .filter((file) => RETIRED_SDK55_PATCHES.includes(file))
+    .map((file) => `${file}: retired with the SDK 55 line (spec 10 FR4)`);
+}
+
+const SINGLE_COPY = [
+  'react',
+  'react-native',
+  'expo-widgets',
+  '@expo/ui',
+  'test-renderer',
+  'react-native-css-interop',
+] as const;
+
+describe('SDK 58 line (spec 10 FR4)', () => {
+  describe('helpers (fixtures)', () => {
+    it('majorOf / rnMinorOf parse x.y.z and reject ranges', () => {
+      expect(majorOf('58.0.16')).toBe(58);
+      expect(rnMinorOf('0.88.0')).toBe(88);
+      expect(() => majorOf('~58.0.16')).toThrow('not an x.y.z version');
+      expect(() => rnMinorOf('1.0.0')).toThrow('not a 0.N.x version');
+    });
+
+    it('nestedCopies finds node_modules/<a>/node_modules/<pkg> keys only', () => {
+      const l = alignedLock({
+        'node_modules/x/node_modules/react': { version: '19.0.0' },
+        'node_modules/x/node_modules/react-dom': { version: '19.0.0' },
+        'node_modules/@expo/ui': { version: '58.0.21' },
+        'node_modules/expo-widgets/node_modules/@expo/ui': { version: '58.0.20' },
+      });
+      expect(nestedCopies(l, 'react')).toEqual(['node_modules/x/node_modules/react']);
+      expect(nestedCopies(l, '@expo/ui')).toEqual(['node_modules/expo-widgets/node_modules/@expo/ui']);
+      expect(nestedCopies(l, 'expo-widgets')).toEqual([]);
+    });
+
+    it('declaredReactNavigation reads both sections', () => {
+      expect(
+        declaredReactNavigation({
+          dependencies: { '@react-navigation/native': '^7', expo: '~58.0.16' },
+          devDependencies: { '@react-navigation/elements': '^2' },
+        }),
+      ).toEqual(['@react-navigation/elements', '@react-navigation/native']);
+      expect(declaredReactNavigation(alignedPkg())).toEqual([]);
+    });
+  });
+
+  it('lockfile expo is an exact release (no prerelease) with major >= 58', () => {
+    const v = lockVersionOrThrow('expo');
+    expect(v).toMatch(EXACT_VERSION);
+    expect(majorOf(v)).toBeGreaterThanOrEqual(58);
+  });
+
+  it('lockfile react-native is 0.N.x with N >= 88', () => {
+    const v = lockVersionOrThrow('react-native');
+    expect(v).toMatch(EXACT_VERSION);
+    expect(rnMinorOf(v)).toBeGreaterThanOrEqual(88);
+  });
+
+  it('expo-widgets and @expo/ui lockfile majors equal the expo major', () => {
+    const expoMajor = majorOf(lockVersionOrThrow('expo'));
+    expect({
+      'expo-widgets': majorOf(lockVersionOrThrow('expo-widgets')),
+      '@expo/ui': majorOf(lockVersionOrThrow('@expo/ui')),
+    }).toEqual({ 'expo-widgets': expoMajor, '@expo/ui': expoMajor });
+  });
+
+  it('@expo/ui is a direct dependencies entry (app code requires @expo/ui/swift-ui)', () => {
+    expect(pkg.dependencies ?? {}).toHaveProperty(['@expo/ui']);
+  });
+
+  it('react-native-reanimated >= 4.7.1, and react-native-worklets satisfies its peer range', () => {
+    const reanimated = lockVersionOrThrow('react-native-reanimated');
+    expect(versionAtLeast(reanimated, '4.7.1')).toBe(true);
+    const peer =
+      lock.packages['node_modules/react-native-reanimated']?.peerDependencies?.[
+        'react-native-worklets'
+      ];
+    expect(peer).toBeDefined();
+    const worklets = lockVersionOrThrow('react-native-worklets');
+    expect({ worklets, peer, ok: semver.satisfies(worklets, peer!) }).toEqual({
+      worklets,
+      peer,
+      ok: true,
+    });
+  });
+
+  it('@shopify/react-native-skia >= 2.14.0 and victory-native major >= 42', () => {
+    expect(versionAtLeast(lockVersionOrThrow('@shopify/react-native-skia'), '2.14.0')).toBe(true);
+    expect(majorOf(lockVersionOrThrow('victory-native'))).toBeGreaterThanOrEqual(42);
+  });
+
+  it('@react-native-async-storage/async-storage is exactly 2.2.0 (declared and locked)', () => {
+    expect(pkg.dependencies?.['@react-native-async-storage/async-storage']).toBe('2.2.0');
+    expect(lockVersion('@react-native-async-storage/async-storage')).toBe('2.2.0');
+  });
+
+  it('react-test-renderer is declared and its lockfile version equals react', () => {
+    expect(pkg.devDependencies ?? {}).toHaveProperty(['react-test-renderer']);
+    expect(lockVersionOrThrow('react-test-renderer')).toBe(lockVersionOrThrow('react'));
+  });
+
+  it('@react-native/jest-preset 0.N equals react-native 0.N', () => {
+    expect(rnMinorOf(lockVersionOrThrow('@react-native/jest-preset'))).toBe(
+      rnMinorOf(lockVersionOrThrow('react-native')),
+    );
+  });
+
+  it.each(SINGLE_COPY)('single copy of %s (root entry, no nested lockfile key)', (name) => {
+    expect(lockVersion(name)).toBeDefined();
+    expect(nestedCopies(lock, name)).toEqual([]);
+  });
+
+  it('root react-native-css-interop equals the version nativewind depends on', () => {
+    const spec = lock.packages['node_modules/nativewind']?.dependencies?.['react-native-css-interop'];
+    expect(spec).toBeDefined();
+    expect(lockVersionOrThrow('react-native-css-interop')).toBe(spec);
+  });
+
+  it('no @react-navigation/* in dependencies or devDependencies (expo-router 58 has none)', () => {
+    expect(declaredReactNavigation(pkg)).toEqual([]);
+  });
+
+  // Final review 2026-10-21: this used to be `expect(patchFiles).toEqual([])`, which banned every
+  // future patch, including the spec's own fallback for an extension-link failure ("pin exactly
+  // and add install.exclude, as spec 06 does") and RELEASING.md's patches policy. FR1 rules 1–6
+  // and the exclude-iff-patch rule govern any patch; this case only keeps the SDK 55 ones out.
+  it('neither retired SDK 55 patch is back', () => {
+    expect(retiredPatchProblems(patchFiles)).toEqual([]);
+  });
+
+  describe('patches on the SDK 58 line (fixtures)', () => {
+    it('retiredPatchProblems flags only the two retired SDK 55 patch files', () => {
+      expect(
+        retiredPatchProblems([
+          'expo-widgets+55.0.5.patch',
+          'react-native-reanimated+4.2.1.patch',
+          'expo-widgets+58.0.21.patch',
+          'react-native-reanimated+4.7.1.patch',
+        ]),
+      ).toEqual([
+        'expo-widgets+55.0.5.patch: retired with the SDK 55 line (spec 10 FR4)',
+        'react-native-reanimated+4.2.1.patch: retired with the SDK 55 line (spec 10 FR4)',
+      ]);
+    });
+
+    it('the documented fallback (exact pin, locked, install.exclude) passes every patch guard', () => {
+      const PATCH = 'expo-widgets+58.0.21.patch';
+      const p = alignedPkg({
+        dependencies: { 'expo-widgets': '58.0.21', react: '19.2.0' },
+        expo: { install: { exclude: ['expo-widgets'] } },
+      });
+      const l = alignedLock(
+        { 'node_modules/expo-widgets': { version: '58.0.21' } },
+        { dependencies: { 'expo-widgets': '58.0.21', react: '19.2.0' } },
+      );
+      expect({
+        pinned: collectPatchProblems(p, l, [PATCH]),
+        excluded: collectExcludeProblems(p, [PATCH]),
+        retired: retiredPatchProblems([PATCH]),
+      }).toEqual({ pinned: [], excluded: [], retired: [] });
+    });
+
+    it('control: the same patch without install.exclude, or with a range, is still rejected', () => {
+      const PATCH = 'expo-widgets+58.0.21.patch';
+      const l = alignedLock(
+        { 'node_modules/expo-widgets': { version: '58.0.21' } },
+        { dependencies: { 'expo-widgets': '~58.0.21', react: '19.2.0' } },
+      );
+      const ranged = alignedPkg({ dependencies: { 'expo-widgets': '~58.0.21', react: '19.2.0' } });
+      expect(collectPatchProblems(ranged, l, [PATCH])).toEqual([
+        'expo-widgets: declared "~58.0.21" must be exactly "58.0.21" (expo-widgets+58.0.21.patch)',
+      ]);
+      expect(collectExcludeProblems(ranged, [PATCH])).toEqual([
+        'expo-widgets: patched but missing from expo.install.exclude',
+      ]);
+    });
+  });
+});
+
+describe('expo-widgets stays off Android (spec 10 FR6, Decision 15)', () => {
+  // expo-widgets 58 is apple + android (Glance, WorkManager, a Hermes runtime). Android widgets render
+  // through react-native-android-widget, and bridge.ts only requires expo-widgets on iOS.
+  it('package.json expo.autolinking.android.exclude contains expo-widgets', () => {
+    expect(pkg.expo?.autolinking?.android?.exclude ?? []).toContain('expo-widgets');
+  });
+
+  it('expo-widgets is not excluded from apple autolinking', () => {
+    const appleExclude = (pkg.expo?.autolinking as { apple?: { exclude?: string[] }; ios?: { exclude?: string[] } } | undefined) ?? {};
+    expect(appleExclude.apple?.exclude ?? []).not.toContain('expo-widgets');
+    expect(appleExclude.ios?.exclude ?? []).not.toContain('expo-widgets');
+  });
+});
+
+describe('helpers', () => {
+  // Kept for the SDK 58 floors (spec 10 FR4); spec 06's SDK 55 patch-line floors are gone.
+  describe('versionAtLeast', () => {
+    it.each([
+      ['58.0.16', '58.0.16', true],
+      ['58.0.9', '58.0.16', false],
+      ['0.88.10', '0.88.2', true],
+      ['0.13.4', '0.13.4', true],
+      ['0.88.2', '0.88.10', false],
+      ['59.0.0', '58.0.16', true],
+    ])('versionAtLeast(%s, %s) is %s', (actual, floor, expected) => {
+      expect(versionAtLeast(actual, floor)).toBe(expected);
+    });
+
+    it('throws on a non x.y.z version instead of comparing NaN', () => {
+      expect(() => versionAtLeast('~58.0.16', '58.0.16')).toThrow('not an x.y.z version');
+    });
+  });
+});

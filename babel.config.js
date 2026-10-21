@@ -14,10 +14,9 @@ module.exports = function (api) {
     presets: isTest
       ? ['babel-preset-expo']
       : [['babel-preset-expo', { jsxImportSource: 'nativewind' }], 'nativewind/babel'],
-    // react-native-reanimated/plugin MUST be last. It transforms worklet functions
-    // and shared value refs at compile time. Without it, Reanimated's animated style
-    // proxy objects are opaque to React DevTools → _requiresAnimatedComponent getter
-    // throws when DevTools tries to inspect props → crashes React's commit phase.
+    // react-native-reanimated/plugin MUST be the last plugin. It rewrites worklet
+    // functions and shared-value access at compile time, and Reanimated requires it to
+    // run after every other plugin. Skipped in tests, where no worklet runs on a UI thread.
     plugins: !isTest ? ['react-native-reanimated/plugin'] : [],
   };
 };
