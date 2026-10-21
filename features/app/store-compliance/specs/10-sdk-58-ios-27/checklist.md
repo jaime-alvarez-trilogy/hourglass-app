@@ -1101,25 +1101,26 @@ Only FR4's tests are written here. FR5–FR8 write their red tests at the start 
 ## Phase D: Build 19 to "ready to submit" (FR11)
 
 ### Gates (all required before the build)
-- [ ] (C) Phases A–C complete. Draft PR CI green. HEAD recorded: ______
-- [ ] (C) The image row was re-checked today and the pin is unchanged, or the update is recorded.
-- [ ] (C) The build number is confirmed unused: ______
-- [ ] (J) The ASC agreement is accepted (asc.js read-only call no longer returns 403).
-- [ ] (C) The ASC key is reachable from this worktree (Decision 16): `test -f .appstore/AuthKey_W4UV4XTKPC.p8 && git check-ignore -q .appstore/AuthKey_W4UV4XTKPC.p8`, or the EAS-stored key under (b). Otherwise stop with "blocked: ASC key access".
+- [x] (C) Phases A–C complete. Draft PR CI green. HEAD recorded: `d94aee5` (2026-10-21; PR #4 checks app-tests + server-tests SUCCESS)
+- [x] (C) The image row was re-checked today and the pin is unchanged, or the update is recorded. (2026-10-21: docs.expo.dev/build-reference/infrastructure lists `macos-tahoe-26.6-xcode-27.0` and `-27.1`; pin unchanged.)
+- [x] (C) The build number is confirmed unused: 19 (2026-10-21 `asc.js builds --dry-run` from the main checkout; highest was 18)
+- [x] (J) The ASC agreement is accepted (asc.js read-only call no longer returns 403). (Accepted 2026-10-20; read-only calls return 200.)
+- [x] (C) Decision 16 = (c): the key stays in the main checkout, and `eas submit --id` ran from `WS/hourglassws`. The original gate text: The ASC key is reachable from this worktree (Decision 16): `test -f .appstore/AuthKey_W4UV4XTKPC.p8 && git check-ignore -q .appstore/AuthKey_W4UV4XTKPC.p8`, or the EAS-stored key under (b). Otherwise stop with "blocked: ASC key access".
 
 ### Build and verify (C)
-- [ ] `eas build -p ios --profile production` on cloud. Record:
-  - the EAS build id: ______
-  - `gitCommitHash` (= HEAD): ______
+- [x] `eas build -p ios --profile production` on cloud (2026-10-21, queued 00:28, finished 00:35 CST). Record:
+  - the EAS build id: `356b0589-25fa-448b-9fe5-b0f921298ad0`
+  - `gitCommitHash` (= HEAD): `d94aee50562db0490bc81f135747fa306310fb56`
+  - Log: `- Xcode 27.1 (27A9275)`, `- CocoaPods 1.17.0`. 49 `[Expo-precompiled]` lines. Six pods built from source because their prebuilt tarball wasn't found: RNReanimated, RNCSafeAreaContext, RNScreens, RNSVG, RNWorklets, RNCAsyncStorage. The fallback (Decision 9) wasn't needed.
   - the log line naming `macos-tahoe-26.6-xcode-27.1` / Xcode 27.1 (27A9275);
   - the `[Expo-precompiled]` lines.
-- [ ] `eas build:list --platform ios --status finished --channel production --app-build-version 19 --limit 1 --json --non-interactive` returns that id, and `runtime.version` equals the local resolve: ______
+- [ ] `eas build:list --platform ios --status finished --channel production --app-build-version 19 --limit 1 --json --non-interactive` returns that id, and `runtime.version` equals the local resolve: `56d054fc723984e56892a367dca1efa79a9f8fad` (= FR8 baseline) ✔
 - [ ] IPA (`D=$(mktemp -d)`, download `artifacts.buildUrl`, unzip):
-  - `DTSDKName` ______ (iphoneos27*), `DTSDKBuild` ______ (24*), `DTXcode` ______ (27*).
-  - `CFBundleShortVersionString` 1.2.0, `CFBundleVersion` 19, `MinimumOSVersion` 16.4.
-  - The scene delegate class ends with `.SceneDelegate`.
-  - Appex: `Info.plist` has no scene manifest. `PrivacyInfo.xcprivacy` exists with `CA92.1`/`1C8F.1`/`C617.1`/`35F9.1`. `test ! -e "$D"/Payload/*.app/PlugIns/ExpoWidgetsTarget.appex/Frameworks`.
-- [ ] `eas submit -p ios --profile production --id <build id>`: **TestFlight upload only**.
+  - `DTSDKName` iphoneos27.1 (iphoneos27*), `DTSDKBuild` 24A94232 (24*), `DTXcode` 2710 (27*); `DTXcodeBuild` 27A9275.
+  - `CFBundleShortVersionString` 1.2.0, `CFBundleVersion` 19, `MinimumOSVersion` 16.4. ✔ (`UIRequiresFullScreen` false)
+  - The scene delegate class ends with `.SceneDelegate`. ✔ `Hourglassxo.SceneDelegate`, multiple scenes false.
+  - Appex: `Info.plist` has no scene manifest. `PrivacyInfo.xcprivacy` exists with `CA92.1`/`1C8F.1`/`C617.1`/`35F9.1`. `test ! -e "$D"/Payload/*.app/PlugIns/ExpoWidgetsTarget.appex/Frameworks`. ✔ The appex has no scene manifest and no Frameworks/, and its PrivacyInfo reasons are 1C8F.1 35F9.1 C617.1 CA92.1. Also checked (FR9 deferral): there's no `*.debug.dylib` or `__preview.dylib`, and the appex is 1.2.0 (19). App PrivacyInfo reasons: 0A2A.1 1C8F.1 35F9.1 3B52.1 85F4.1 C617.1 CA92.1 E174.1.
+- [x] `eas submit -p ios --profile production --id <build id>`: **TestFlight upload only**. (2026-10-21, from the main checkout per Decision 16 (c), submission `91050f8b-aac7-4053-8794-8674b9ff0435`. ASC build `0ca80f66-8328-43e3-81e4-a619531ef435` was VALID at 00:40, APP_STORE_ELIGIBLE; internal IN_BETA_TESTING; expires 2027-01-18.)
 - [ ] **ITMS-91053 result for build 19** (every binary, including `ExpoWidgetsTarget`): ______. Compare it with the FR1 baseline (build 17: ______ / build 18: ______), then take one branch:
   - **None:** proceed.
   - **It names only `ExpoWidgetsTarget`:**
@@ -1127,8 +1128,8 @@ Only FR4's tests are written here. FR5–FR8 write their red tests at the start 
     - All already declared: record it, don't block, and open a follow-up.
   - **It names the main app binary:** add the reason to `ios.privacyManifests` and the spec 03 contract test, then rebuild with the next unused build number.
   - **Build 19 never reaches `VALID`:** this is a release blocker. Stop and escalate.
-- [ ] ASC `sdkBuild` `24…`, or "skipped": ______
-- [ ] `eas update:list --branch production --limit 3 --json --non-interactive`. Record whether an automatic embedded-bundle entry appeared (edge case).
+- [x] ASC `sdkBuild` `24…`, or "skipped": skipped. The builds resource doesn't expose sdkBuild; the IPA's `DTSDKBuild` 24A94232 stands.
+- [x] `eas update:list --branch production --limit 3 --json --non-interactive`. Record whether an automatic embedded-bundle entry appeared (edge case). (2026-10-21: no. The newest 3 entries are the old runtime-1.0.0 OTAs from 6 months ago; build 19 added nothing.)
 
 ### TestFlight smoke (J performs on iOS 27, C records)
 
