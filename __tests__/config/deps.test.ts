@@ -477,6 +477,23 @@ const lockVersionOrThrow = (name: string): string => {
   return v;
 };
 
+/** The two patch files spec 10 FR4 retired with the SDK 55 line. */
+const RETIRED_SDK55_PATCHES: readonly string[] = [
+  'expo-widgets+55.0.5.patch',
+  'react-native-reanimated+4.2.1.patch',
+];
+
+/**
+ * Pure. One problem per retired SDK 55 patch file still present. Any other patch is allowed here:
+ * collectPatchProblems (exact pin, lockfile) and collectExcludeProblems (install.exclude iff
+ * patched) are what govern it.
+ */
+function retiredPatchProblems(patchFilenames: string[]): string[] {
+  return patchFilenames
+    .filter((file) => RETIRED_SDK55_PATCHES.includes(file))
+    .map((file) => `${file}: retired with the SDK 55 line (spec 10 FR4)`);
+}
+
 const SINGLE_COPY = [
   'react',
   'react-native',
@@ -594,8 +611,60 @@ describe('SDK 58 line (spec 10 FR4)', () => {
     expect(declaredReactNavigation(pkg)).toEqual([]);
   });
 
-  it('patches/ contains no .patch files (both SDK 55 patches are retired)', () => {
-    expect(patchFiles).toEqual([]);
+  // Final review 2026-10-21: this used to be `expect(patchFiles).toEqual([])`, which banned every
+  // future patch, including the spec's own fallback for an extension-link failure ("pin exactly
+  // and add install.exclude, as spec 06 does") and RELEASING.md's patches policy. FR1 rules 1–6
+  // and the exclude-iff-patch rule govern any patch; this case only keeps the SDK 55 ones out.
+  it('neither retired SDK 55 patch is back', () => {
+    expect(retiredPatchProblems(patchFiles)).toEqual([]);
+  });
+
+  describe('patches on the SDK 58 line (fixtures)', () => {
+    it('retiredPatchProblems flags only the two retired SDK 55 patch files', () => {
+      expect(
+        retiredPatchProblems([
+          'expo-widgets+55.0.5.patch',
+          'react-native-reanimated+4.2.1.patch',
+          'expo-widgets+58.0.21.patch',
+          'react-native-reanimated+4.7.1.patch',
+        ]),
+      ).toEqual([
+        'expo-widgets+55.0.5.patch: retired with the SDK 55 line (spec 10 FR4)',
+        'react-native-reanimated+4.2.1.patch: retired with the SDK 55 line (spec 10 FR4)',
+      ]);
+    });
+
+    it('the documented fallback (exact pin, locked, install.exclude) passes every patch guard', () => {
+      const PATCH = 'expo-widgets+58.0.21.patch';
+      const p = alignedPkg({
+        dependencies: { 'expo-widgets': '58.0.21', react: '19.2.0' },
+        expo: { install: { exclude: ['expo-widgets'] } },
+      });
+      const l = alignedLock(
+        { 'node_modules/expo-widgets': { version: '58.0.21' } },
+        { dependencies: { 'expo-widgets': '58.0.21', react: '19.2.0' } },
+      );
+      expect({
+        pinned: collectPatchProblems(p, l, [PATCH]),
+        excluded: collectExcludeProblems(p, [PATCH]),
+        retired: retiredPatchProblems([PATCH]),
+      }).toEqual({ pinned: [], excluded: [], retired: [] });
+    });
+
+    it('control: the same patch without install.exclude, or with a range, is still rejected', () => {
+      const PATCH = 'expo-widgets+58.0.21.patch';
+      const l = alignedLock(
+        { 'node_modules/expo-widgets': { version: '58.0.21' } },
+        { dependencies: { 'expo-widgets': '~58.0.21', react: '19.2.0' } },
+      );
+      const ranged = alignedPkg({ dependencies: { 'expo-widgets': '~58.0.21', react: '19.2.0' } });
+      expect(collectPatchProblems(ranged, l, [PATCH])).toEqual([
+        'expo-widgets: declared "~58.0.21" must be exactly "58.0.21" (expo-widgets+58.0.21.patch)',
+      ]);
+      expect(collectExcludeProblems(ranged, [PATCH])).toEqual([
+        'expo-widgets: patched but missing from expo.install.exclude',
+      ]);
+    });
   });
 });
 

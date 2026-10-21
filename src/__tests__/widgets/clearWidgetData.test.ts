@@ -210,7 +210,9 @@ describe('clearWidgetData (iOS)', () => {
   it('updates normally again after a later sign-in', async () => {
     await clearWidgetData();
     await updateWidgetData(makeHoursData(), null, 0, makeConfig());
-    expect(lastTimeline().length).toBe(96);
+    // 96 fifteen-minute entries, then the hourly run out to the deadline (final review 2026-10-21).
+    expect(lastTimeline().length).toBeGreaterThan(96);
+    expect(lastTimeline()[0].props.hoursDisplay).toBe('32.5h');
   });
 
   it('never throws when updateTimeline throws', async () => {
@@ -259,5 +261,40 @@ describe('createWidget initialProps (expo-widgets 58)', () => {
     expect(JSON.stringify(lastTimeline())).toContain('Direct Report Name');
     expect(initialProps).not.toContain('Direct Report Name');
     expect(initialProps).not.toContain('32.5');
+  });
+});
+
+// Final review 2026-10-21: expo-widgets 58's timeline policy is `.atEnd` and build 19 has no
+// 15-minute reload, so the stored timeline itself must reach the deadline. Otherwise, more than
+// 24 h after the last app open, WidgetKit keeps showing the last entry and its frozen countdown.
+describe('updateWidgetData timeline reaches the deadline (iOS)', () => {
+  const MIN = 60 * 1000;
+
+  it('keeps 96 fifteen-minute entries, then ends with an expired entry 1 s after a deadline 3 days out', async () => {
+    const hours = makeHoursData();
+    const deadline = hours.deadline.getTime();
+    const before = Date.now();
+    await updateWidgetData(hours, null, 2, makeConfig(), [makeApproval() as ApprovalItem]);
+    const entries = lastTimeline();
+
+    expect(entries.length).toBeGreaterThan(96);
+    expect(entries[0].date.getTime()).toBeGreaterThanOrEqual(before);
+    for (let i = 1; i < 96; i++) {
+      expect(entries[i].date.getTime() - entries[i - 1].date.getTime()).toBe(15 * MIN);
+    }
+    const last = entries[entries.length - 1];
+    expect(last.date.getTime()).toBe(deadline + 1000);
+    expect(last.props.urgency).toBe('expired');
+    expect(entries.every((e) => e.date.getTime() <= deadline + 1000)).toBe(true);
+  });
+
+  it('a full-week manager timeline stays small enough for App Group UserDefaults (< 512 KB)', async () => {
+    const hours = { ...makeHoursData(), deadline: new Date(Date.now() + 7 * 24 * 60 * MIN) };
+    const approvals = [makeApproval(), makeApproval(), makeApproval()] as ApprovalItem[];
+    await updateWidgetData(hours, null, 3, makeConfig(), approvals);
+    const entries = lastTimeline();
+    expect(entries.length).toBe(96 + (7 * 24 - 24) + 1);
+    const bytes = JSON.stringify(entries.map((e) => ({ timestamp: e.date.getTime(), props: e.props }))).length;
+    expect(bytes).toBeLessThan(512 * 1024);
   });
 });

@@ -379,41 +379,66 @@ function buildWidgetData(
 
 // ─── FR2: buildTimelineEntries ────────────────────────────────────────────────
 
+const HOUR_MS = 60 * 60 * 1000;
+/** Hourly entries land 1 s after each hour boundary before the deadline; the last one 1 s after it. */
+const TIMELINE_EXPIRY_OFFSET_MS = 1000;
+/** 8 days: covers a full week from a Monday 00:00 open, with margin. */
+const TIMELINE_MAX_HOURLY_ENTRIES = 8 * 24;
+
 /**
  * Generates an array of timeline entries for iOS WidgetKit.
  * Each entry is {date, props} where props is a copy of baseData with
  * urgency recomputed for that entry's date vs deadline.
  *
+ * With `extendToDeadline`, entries continue past the `count` fine-grained ones until the
+ * deadline: one per hour at `deadline − k h + 1 s` (so each lands just after the widget's
+ * hourly "Due in …" label changes), ending with an expired entry at `deadline + 1 s`. The
+ * timeline policy is `.atEnd` (expo-widgets 58) and nothing reloads it between app opens,
+ * so WidgetKit keeps showing the last entry once they run out: without this, a deadline more
+ * than `count × intervalMinutes` away would freeze the countdown and the end-of-week urgency
+ * on the last entry (final review 2026-10-21). The hourly run is capped at 8 days.
+ *
  * @param baseData  - Current WidgetData snapshot
- * @param count     - Number of entries to generate (default 60)
- * @param intervalMinutes - Minutes between entries (default 15)
+ * @param count     - Number of fine-grained entries (default 60)
+ * @param intervalMinutes - Minutes between fine-grained entries (default 15)
+ * @param options.extendToDeadline - Append the hourly run and the expiry entry (default false)
  */
 export function buildTimelineEntries(
   baseData: WidgetData,
   count: number = 60,
-  intervalMinutes: number = 15
+  intervalMinutes: number = 15,
+  options: { extendToDeadline?: boolean } = {}
 ): Array<{ date: Date; props: WidgetData }> {
   const intervalMs = intervalMinutes * 60 * 1000;
   const startTime = Date.now();
   const entries: Array<{ date: Date; props: WidgetData }> = [];
 
-  for (let i = 0; i < count; i++) {
-    const entryTimeMs = startTime + i * intervalMs;
-    const entryDate = new Date(entryTimeMs);
+  const entryAt = (entryTimeMs: number): { date: Date; props: WidgetData } => {
     const urgency: WidgetUrgency = getUrgencyLevel(baseData.deadline - entryTimeMs);
-
     // Recompute hoursRemaining display for entries past deadline
     const hoursRemaining =
       urgency === 'expired' ? '0h left' : baseData.hoursRemaining;
-
-    entries.push({
-      date: entryDate,
+    return {
+      date: new Date(entryTimeMs),
       props: {
         ...baseData,
         urgency,
         hoursRemaining,
       },
-    });
+    };
+  };
+
+  for (let i = 0; i < count; i++) {
+    entries.push(entryAt(startTime + i * intervalMs));
+  }
+
+  if (options.extendToDeadline && baseData.deadline > 0) {
+    const lastMs = entries.length > 0 ? entries[entries.length - 1].date.getTime() : startTime - 1;
+    // Largest k with deadline − k h + 1 s still after the last fine entry, capped.
+    const fitting = Math.ceil((baseData.deadline + TIMELINE_EXPIRY_OFFSET_MS - lastMs) / HOUR_MS) - 1;
+    for (let k = Math.min(fitting, TIMELINE_MAX_HOURLY_ENTRIES); k >= 0; k--) {
+      entries.push(entryAt(baseData.deadline - k * HOUR_MS + TIMELINE_EXPIRY_OFFSET_MS));
+    }
   }
 
   return entries;
@@ -462,9 +487,11 @@ export async function readWidgetData(): Promise<WidgetData | null> {
 //     containerBackground('#0D0D1A', 'widget'), the build-18 native color. Lock-screen
 //     accessories don't (the system draws their background).
 //   - Stacks without `spacing` now get the system default, so every HStack/VStack sets it.
-//   - env.date is the timeline entry's date. The countdown reads it, not Date.now(): an
-//     entry can be evaluated at a different time than its date (WidgetKit renders timeline
-//     entries ahead of time), and the 96 entries span 24 h of one app open.
+//   - env.date is the timeline entry's date. The countdown reads the later of env.date and
+//     Date.now(): WidgetKit renders entries ahead of their date (so env.date, not the render
+//     time), and after the last entry it keeps showing that one (.atEnd), so real time past
+//     env.date wins. The timeline itself runs to just past the deadline: 96 fifteen-minute
+//     entries, then hourly ones (buildTimelineEntries extendToDeadline, final review 2026-10-21).
 //
 // 02-ios-visual: Full brand redesign — mesh bg simulation, glass panels,
 // pace badge, week delta text, brainliftTarget-driven progress bars.
@@ -515,7 +542,11 @@ const WIDGET_LAYOUT_JS = `(function(props, env) {
   var deadlineLabel = '';
   var msLeft = 0;
   var isEOWUrgent = false;
-  var nowMs = (env && env.date) ? env.date.getTime() : Date.now();
+  // The later of the entry's date and real time: WidgetKit renders entries ahead of their date
+  // (env.date wins), and keeps re-rendering the last one after the timeline runs out (.atEnd),
+  // when real time must win or the countdown freezes past the deadline.
+  var entryMs = (env && env.date) ? env.date.getTime() : 0;
+  var nowMs = Math.max(entryMs, Date.now());
   if (deadline) {
     msLeft = deadline - nowMs;
     if (msLeft > 0) {
@@ -937,7 +968,7 @@ export async function updateWidgetData(
     if (!createWidget) return;
     try {
       const widget = createWidget('HourglassWidget', WIDGET_LAYOUT_JS, buildSignedOutWidgetData(Date.now()));
-      const entries = buildTimelineEntries(data, 96, 15);
+      const entries = buildTimelineEntries(data, 96, 15, { extendToDeadline: true });
       widget.updateTimeline(entries);
       console.log('[bridge] widget timeline updated,', entries.length, 'entries, urgency:', data.urgency);
     } catch (err) {

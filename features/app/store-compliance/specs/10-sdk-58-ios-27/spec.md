@@ -237,6 +237,7 @@ One atomic step. It includes every package version, the 58-only source edits nee
   - Root `react-native-css-interop` version equals `nativewind`'s declared dependency.
   - No `@react-navigation/*` in `dependencies` or `devDependencies`.
   - `patches/` contains no `.patch` files.
+    - **Amended 2026-10-21 (final review):** narrowed to "neither retired SDK 55 patch file is back". A blanket ban contradicted this spec's own patch-package fallback and the patches policy (exact pin + `install.exclude` while a patch exists), which FR1's rules already enforce.
 - **`sdk58-migration.test.ts` adds:** no `from '@react-navigation/`, no `expo-router/unstable-native-tabs`, no `import { … Tabs … } from 'expo-router'`, no `initialRouteName=`, and `app/(auth)/_layout.tsx` exports `unstable_settings.anchor === 'welcome'`. A second walk over test files (`__tests__/`, `*.test.*`, `__mocks__/`) finds no `jest.mock('@react-navigation/` and no `requireActual('@react-navigation/`.
 - **Checkpoint B (device):**
   - `eas build -p ios --profile development` on EAS cloud. `auto` resolves to the `sdk-58` image.
@@ -302,6 +303,7 @@ Replace what the 55 patch did, and adapt `WIDGET_LAYOUT_JS` to the 58 runtime (s
   - (b) The small, medium and large roots (`:666`, `:711`, `:808`) get `modifiers: [containerBackground('#0D0D1A', 'widget')]`. That's the build-18 native color `Color(0.051, 0.051, 0.102)`. Accessory families stay unchanged.
   - (c) Add `spacing: 0` to the `HStack`s at `:600`, `:617`, `:702`, `:735` and `:779`. @expo/ui 58 no longer collapses an unset spacing to 0.
   - (d) The countdown and `isEOWUrgent` use `var nowMs = (env && env.date) ? env.date.getTime() : Date.now();` instead of `Date.now()` (`:507`).
+    - **Amended 2026-10-21 (final review):** `var entryMs = (env && env.date) ? env.date.getTime() : 0; var nowMs = Math.max(entryMs, Date.now());`. Under `.atEnd`, WidgetKit keeps re-rendering the last entry once the timeline runs out, so with `env.date` alone the countdown froze on that entry's date, past the deadline.
   - (e) Pass `initialProps` at both call sites: `createWidget('HourglassWidget', WIDGET_LAYOUT_JS, buildSignedOutWidgetData(Date.now()))` (`:920`, `:980`). Widen the local `CreateWidget` type (`:839`).
 - **Module hygiene:**
   - Import `requireOptionalNativeModule` from `'expo'` instead of `'expo-modules-core'` (`:9`), and move the `jest.mock` in `src/__tests__/widgets/clearWidgetData.test.ts:31` to match.
@@ -321,6 +323,7 @@ Replace what the 55 patch did, and adapt `WIDGET_LAYOUT_JS` to the 58 runtime (s
   - Until 1.2.0 is opened once, an upgrader's widget **placeholder** evaluates build 18's stored layout with `undefined` props and renders the red box. So does a never-opened fresh install's gallery preview.
   - (a) and (e) fix this only after the first open. The default is to accept it as transient. FR11 smoke 17 records what's actually seen. `ios.initialLayout` is a follow-up option, not part of this FR.
 - **Timeline.** Keep 58's `.atEnd` policy; drop the 15-minute reload. (d) is what keeps the countdown honest between app opens.
+  - **Amended 2026-10-21 (final review):** 96 × 15 min covers only 24 h, so `updateWidgetData` calls `buildTimelineEntries(data, 96, 15, { extendToDeadline: true })`, which appends one entry per hour at `deadline − k h + 1 s` and an expired entry at `deadline + 1 s` (hourly run capped at 8 days). A full week is 241 entries, about 260 KB.
 - **Android.** `package.json` gets `"expo": { "autolinking": { "android": { "exclude": ["expo-widgets"] } } }` (Decision 15), and `react-native-android-widget` is `^0.23.0` (already in FR4).
 - **Tests:**
   - **`src/widgets/__tests__/widgetLayoutJs.test.ts`:**

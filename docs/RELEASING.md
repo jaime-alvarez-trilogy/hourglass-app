@@ -33,6 +33,7 @@ Run this once each new native build is READY_FOR_SALE. It proves that the local 
    ```bash
    git switch --detach <gitCommitHash> && npm ci
    ```
+   **Build 18: check out `7b0e328` instead of `aade79b`.** `7b0e328` is `aade79b` plus only the `ota-publish.sh` fix (the first commit on `release/1.1`). `aade79b`'s own script reads a top-level `runtimeVersion`, which eas-cli ≥ 22 no longer prints, so its step 5 refuses with `runtime ""`. Scripts aren't a fingerprint input, so step 4 still resolves build 18's runtime, and `app.json` there is 1.1.0 (18), so step 5 prints no `WARNING:`. Never work around a refusal with a hand-run `eas update` (that's only for section B's branch, which has no script). If a section B2 hotfix has already been published to build 18, skip this baseline: that publish and its step-7 check already prove the lane, and a baseline from `7b0e328` would roll the hotfix back. From build 19 on, the build's own commit has the fix.
 4. `npx expo-updates runtimeversion:resolve --platform ios` must print the build's `runtime.version` (in its own `runtimeVersion` field).
 5. Dry run. It must print `Dry run OK` and no `WARNING:`:
    ```bash
@@ -72,15 +73,15 @@ Never merge this branch, and never publish main with a literal `1.0.0` runtime: 
 
 While 1.2.0 (build 19, Expo SDK 58) is in TestFlight or App Review, App Store users are on 1.1.0 (build 18, SDK 55). Build 19 has a different runtime, so nothing published from the 1.2 tree reaches them. Some never move: 1.2.0 needs iOS 16.4, and 1.1.0 runs on iOS 15.1, so devices on iOS 15.1–16.3 stay on build 18.
 
-**The lane.** `release/1.1` was cut from `aade79b`, the build-18 commit, which is tagged `build-18` (`git rev-parse 'build-18^{commit}'` prints `aade79b…`). It also carries the `ota-publish.sh` fix for eas-cli ≥ 22's build JSON (`7b0e328`, cherry-picked from `feat/sdk-58`). Scripts aren't a fingerprint input, so the branch still resolves build 18's runtime. The branch's own copy of this file predates spec 10; follow this one.
+**The lane.** `release/1.1` was cut from `aade79b`, the build-18 commit, which is tagged `build-18` (`git rev-parse 'build-18^{commit}'` prints `aade79b…`). It also carries the `ota-publish.sh` fix for eas-cli ≥ 22's build JSON (`7b0e328`, cherry-picked from `feat/sdk-58`), and the `Test` workflow trigger for `release/**` pushes (`92545fb`). Scripts aren't a fingerprint input, so the branch still resolves build 18's runtime. The branch's own copy of this file predates spec 10; follow this one. Build 18's section A baseline (Post-release step 1, OPS O11) also runs from `7b0e328`, not from `aade79b` (section A step 3).
 
 A JS-only fix goes out as an OTA from `release/1.1`:
 
 1. `git switch release/1.1 && rm -rf node_modules && npm ci`.
 2. Commit the fix there. `npm test`, `npm run typecheck` and `npm run lint` exit 0.
-3. `npx expo-updates runtimeversion:resolve --platform ios` must print build 18's runtime: the `runtime.version` of `eas build:list --platform ios --status finished --channel production --app-build-version 18 --limit 1 --json --non-interactive`.
-4. `scripts/ota-publish.sh --dry-run "<msg>"` must print `Dry run OK` and name build 18. Then publish with `scripts/ota-publish.sh "<msg>"`, and verify on a build-18 install as in section A step 7.
-5. `git push origin release/1.1`.
+3. Push, and wait for CI to pass **before** publishing: `git push origin release/1.1`, then `gh run list --branch release/1.1 --limit 1` and `gh run watch <run-id> --exit-status`, which must exit 0. The `Test` workflow runs on `release/**` pushes. A local pass isn't enough: spec 10 FR8's first CI run failed on a type declaration that only existed in the local checkout. Record the run URL with the hotfix. If the run is red, fix it on the branch and push again. Never publish a commit whose run isn't green.
+4. `npx expo-updates runtimeversion:resolve --platform ios` must print build 18's runtime: the `runtime.version` of `eas build:list --platform ios --status finished --channel production --app-build-version 18 --limit 1 --json --non-interactive`.
+5. `scripts/ota-publish.sh --dry-run "<msg>"` must print `Dry run OK` and name build 18. Then publish with `scripts/ota-publish.sh "<msg>"`, and verify on a build-18 install as in section A step 7.
 6. Cherry-pick the fix forward: `git switch feat/sdk-58 && git cherry-pick -x <sha>` (onto `main` instead, once 1.2.0 has merged). Then run `rm -rf node_modules && npm ci` before recording any runtime there, because `runtimeversion:resolve` reads the local `node_modules`.
 
 A native fix (App Review rejects build 18, or the fix touches a native input) is a rebuild from `release/1.1`: follow `## Native release` in this file, building from that branch with the next unused build number. 1.2.0 then takes the number after it; its tests assert a range, so they still pass. The branch's `eas.json` has no image pin, so the build runs on the `sdk-55` image (Build step 1).
@@ -156,9 +157,9 @@ Use this for every App Store build, that is, for any change section E marks "Nat
 3. (C) `npx jest --runInBand` → 0 failures. Always required. `--runInBand` because the Android widget suite flakes under parallel workers.
 4. (C) `npm run typecheck` and `npm run lint` both exit 0. They're CI gates since spec 07.
 5. (C) `npx expo config --type introspect --json`: `UIBackgroundModes` is `["remote-notification"]` only, there's no `NSFaceIDUsageDescription`, `runtimeVersion` has policy `fingerprint`, and `ios.buildNumber` is the new number.
-6. (C) `npx expo-doctor` exits 0 (20/20 checks on SDK 58, spec 10 FR9).
+6. (C) `npx expo-doctor` exits 0 (20/20 checks on SDK 58, spec 10 FR9). For a 1.1.x rebuild from `release/1.1` (SDK 55), the config-schema check must pass, but the package-version check may stay red, as that branch's own copy of this file says: its `expo-widgets` is patched (`patches/expo-widgets+55.0.5.patch`), and it has no `expo.install.exclude`.
 7. (C) `scripts/check-legal-pages.sh` exits 0: all three legal URLs return 200 (spec 01).
-8. (C) Clean, pushed tree: `git status --porcelain` prints nothing and `git rev-list --count origin/main..main` prints `0`. Record the HEAD SHA. The Build step checks the EAS record against it.
+8. (C) Clean, pushed tree on the branch being built: `main`, `feat/sdk-58` for 1.2.0, or `release/1.1` for a 1.1.x rebuild. `git status --porcelain` prints nothing, and `git rev-list --count @{u}..HEAD` prints `0`. If the branch has no upstream, that command fails: push it with `git push -u origin <branch>` first. Record the branch name and the HEAD SHA. The Build step checks the EAS record against it. An unpushed commit is how build 15's recorded commit (`1b45a8a`) went missing (section B).
 9. (J) Give the go-ahead for live App Store Connect writes.
 
 ### App Store Connect prep (asc.js)
@@ -247,13 +248,13 @@ Worked example: for build 18, OPS O6 closed after steps 1–2, O4 after step 4 a
 
 ### Post-release
 
-1. (C) Once the version is READY_FOR_SALE, run the baseline OTA in section A above (spec 04 runbook A) for this build.
+1. (C) Once the version is READY_FOR_SALE, run the baseline OTA in section A above (spec 04 runbook A) for this build. For build 18 (OPS O11), run it from `7b0e328`, not `aade79b` (section A step 3).
 2. (C) Then work through any open "After build N is live" items in `features/app/store-compliance/OPS.md`. For build 18 these are O8–O10; O8's key revocation is (J).
 3. (C) For 1.2.0 (build 19): tag the build's `gitCommitHash` as `build-19` and run section A for it. `feat/sdk-58` merges into `main` only once build 18's review is resolved and build 19 has passed the TestFlight smoke. The merge also publishes `site/` through `pages.yml`, including the support page's iOS 16.4 line. Keep `release/1.1` until it can be retired (section B2).
 
 ### If something fails
 
-- (C) A smoke check fails, or the processing email names the main app binary: fix it on `main`, take the next unused build number (never reuse one), and repeat Pre-flight, Build, Upload and Attach and verify. `attach-build <new-buildId>` replaces the attached build, and the guard refuses the older one. Don't submit the failed build.
+- (C) A smoke check fails, or the processing email names the main app binary: fix it on the branch the build was made from. That's `feat/sdk-58` for 1.2.0 until it merges, `release/1.1` for 1.1.x (then cherry-pick it forward, section B2 step 6), and `main` otherwise. SDK 58 work never goes onto `main` before the merge (Post-release step 3). Then take the next unused build number (never reuse one), and repeat Pre-flight, Build, Upload and Attach and verify. `attach-build <new-buildId>` replaces the attached build, and the guard refuses the older one. Don't submit the failed build.
 - (C) An asc.js command refuses. `No editable App Store version … Run: node .appstore/asc.js create-version <x.y.z>` means: create the version first. `URL not live` means: finish spec 01 / OPS O2 first. `ASC API error: 403 …` means: (J) accepts the agreement. `socialMedia not exposed by the API` means: (J) does OPS O3 in the ASC UI. Any other ASC API error on a write means (J) makes that change in the ASC UI, then (C) confirms it with `check-submission` or `list-testers`.
 - (C) The cloud build's `runtime.version` differs from the local resolve: stop and run `eas fingerprint:compare --build-id <id>`. Fix `fingerprint.config.js` / `.fingerprintignore` before trusting the baseline OTA.
 - (C) Someone ran `eas build --local` anyway: never upload that artifact. If it was already uploaded, that build number is burned: take the next unused one and rebuild on EAS cloud.

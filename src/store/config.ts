@@ -92,8 +92,19 @@ export async function clearAll(): Promise<void> {
       'prev_approval_ids',
       'HOURGLASS_QUERY_CACHE',  // TanStack Query persisted cache
     ]),
-    // Credentials stored in SecureStore on iOS (no-op if not available)
-    secureDelete(USERNAME_KEY),
-    secureDelete(PASSWORD_KEY),
+    // Credentials stored in SecureStore on iOS (no-op if not available). Best-effort:
+    // expo-secure-store 58 rejects with a KeyChainException when SecItemDelete returns
+    // anything but success / not-found (SDK 55 resolved), and a rejection here must not
+    // stop the rest of sign-out (final review 2026-10-21).
+    bestEffortSecureDelete(USERNAME_KEY),
+    bestEffortSecureDelete(PASSWORD_KEY),
   ]);
+}
+
+async function bestEffortSecureDelete(key: string): Promise<void> {
+  try {
+    await secureDelete(key);
+  } catch (err) {
+    console.warn(`[config] clearAll: keychain delete of ${key} failed; continuing sign-out`, err);
+  }
 }

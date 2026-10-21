@@ -469,4 +469,23 @@ describe('05-onboarding-defense FR7: Not-Contributor Screen', () => {
     await fireEvent.press(screen.getByText(/sign out/i));
     await waitFor(() => expect(replace).toHaveBeenCalledWith('/(auth)/welcome'));
   });
+
+  // Final review 2026-10-21: expo-secure-store 58 can reject the credential delete, and a
+  // clearAll rejection used to skip the redirect, leaving the user on this screen.
+  it('pressing Sign Out still invalidates the token and navigates to welcome when clearAll rejects', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      mockClearAll.mockRejectedValueOnce(new Error('KeyChainException: -25308'));
+      const { replace } = makeRouter();
+      mockUseOnboarding.mockReturnValue(
+        makeSetupResult({ step: 'not-contributor', nonContributorRoles: ['MANAGER'] }),
+      );
+      await render(<NotContributorScreen />);
+      await fireEvent.press(screen.getByText(/sign out/i));
+      await waitFor(() => expect(replace).toHaveBeenCalledWith('/(auth)/welcome'));
+      expect(mockInvalidateAuthToken).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });

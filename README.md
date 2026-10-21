@@ -130,7 +130,7 @@ Query results are persisted to AsyncStorage so the app shows cached data instant
 App fetches Crossover API
     └── writes to AsyncStorage (widget_data key + App Group shared storage)
             └── iOS/Android widget reads from shared storage
-                    └── Widget re-renders every 15 minutes
+                    └── iOS: widget steps through the stored timeline (every 15 min for 24 h, then hourly to the deadline)
 ```
 
 ---

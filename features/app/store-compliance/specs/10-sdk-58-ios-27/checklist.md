@@ -643,6 +643,7 @@ Only FR4's tests are written here. FR5–FR8 write their red tests at the start 
   - Done 2026-10-20 (`965538a`). (a) `props = props || {};` is the first statement. (b) `modifiers: [containerBackground('#0D0D1A', 'widget')]` sits literally on the `small`, `medium` and `large` roots (`bridge.ts:678, 723, 820`); the accessories are unchanged. (c) `spacing: 0` on the five HStacks. (d) `var nowMs = (env && env.date) ? env.date.getTime() : Date.now();`, then `msLeft = deadline - nowMs;` (feeds `isEOWUrgent` too). (e) Both call sites pass `createWidget('HourglassWidget', WIDGET_LAYOUT_JS, buildSignedOutWidgetData(Date.now()))`, and the `as any` and its eslint-disable are gone.
   - `CreateWidget`: the old type was already variadic `(...args: unknown[])`, so "widen" became **spelling out** `(name: string, layout: string, initialProps?: WidgetData)` with typed timeline entries. The comment explains the layout is a string, not the shipped types' `'widget'`-directive component.
   - Comment header above the layout updated (58 runtime notes). `grep -n "expo-modules-core" src/widgets/bridge.ts` → nothing.
+  - **Amended 2026-10-21 (final review, finding 1):** (d) is now `Math.max(entryMs, Date.now())`, and `updateWidgetData` extends the timeline to just past the deadline. See "Final review fixes (2026-10-21)" below.
 - [x] (C) Delete the ambient `declare module 'expo-widgets'` block (`src/types/modules.d.ts:50-61`). Fix any call that doesn't match the shipped types.
   - Done 2026-10-20. `grep -n "declare module 'expo-widgets'" src/types/modules.d.ts` → nothing. `npm run typecheck` → exit 0 with no call changes: bridge.ts `require`s expo-widgets behind its own `CreateWidget` cast, and `src/widgets/ios/HourglassWidget.tsx` uses an untyped `require`.
 - [x] (C) Create `plugins/withHourglassWidgetBackground.js` (I7) and `plugins/withHourglassWidgetPrivacyManifest.js` (I10). List them in `app.json` as `…, "./plugins/withHourglassWidgetPrivacyManifest", "./plugins/withHourglassWidgetBackground", ["expo-widgets", {…}], …`.
@@ -806,6 +807,7 @@ Only FR4's tests are written here. FR5–FR8 write their red tests at the start 
 
 ### Step 2: Address Feedback
 - [ ] Fix HIGH/MEDIUM findings and re-run the gates.
+  - 2026-10-21: the six findings of the final branch review are fixed and the gates re-run; see "Final review fixes (2026-10-21)" after the Phase C review. This box stays open for the `pr-review-toolkit:review-pr` pass of Step 1.
 
 ### Step 3: Test Quality Optimization
 - [ ] Run `test-optimiser` on the Phase B tests.
@@ -1051,6 +1053,49 @@ Only FR4's tests are written here. FR5–FR8 write their red tests at the start 
 ## Phase C Review (MANDATORY)
 - [ ] `spec-implementation-alignment` for FR9–FR10. Run `pr-review-toolkit:review-pr` on the docs diff and address the findings. Three gates green.
 
+### Final review fixes (2026-10-21)
+> Six findings from the final review of `feat/sdk-58` (lenses native-ios27, js-regressions, tests-ci-release; each survived a skeptic), fixed on top of `7c73e85`, Node v22.17.0. Code, tests, docs and this record are in one commit, `fix(10-sdk-58-ios-27): address final review`. Every change is JS, tests, docs or CI: the iOS runtime is still **`56d054fc723984e56892a367dca1efa79a9f8fad`** (`npx expo-updates runtimeversion:resolve --platform ios`), so it all ships in build 19, not as a production OTA.
+
+- [x] (C) **Red first.** The regression cases were written before any fix: `npx jest` on the 8 touched suites → **16 failed / 400, 7 suites failed**, each for its intended reason:
+  - `widgetLayoutJs` 4: with `Date.now()` = deadline + 1 h and `env.date` = deadline − 3 h, small, medium and large still showed `Due in 3h`, the `2 PENDING` pill and the EOW overlay (`Expected: false, Received: true`); with real time 3 h before the deadline and `env.date` 30 h before it, the label read `Due in 1d 6h`.
+  - `bridge` 4: `buildTimelineEntries(…, { extendToDeadline: true })` returned 96 entries (no hourly run, no expiry entry; the cap case `Expected: 289, Received: 96`); the scenario case showed the Sunday 19:45 entry, not an expired one, on Monday.
+  - `clearWidgetData` 3: `updateWidgetData`'s iOS timeline was 96 entries for a deadline 3 days out (`Expected: > 96`), and 96 instead of 241 for a full week. The existing "updates normally again after a later sign-in" case asserted exactly 96, so it was rewritten to `> 96` plus a real-data check.
+  - `config-store` 1: `clearAll()` rejected with `KeyChainException: -25308` when `SecureStore.deleteItemAsync` rejected.
+  - `modal-signout` 2: with the real `clearAll` and a rejecting `deleteItemAsync`, and with any `clearAll` rejection, the destructive handler rejected before `clearWidgetData`, `log.clear` and `router.replace`.
+  - `auth-screens` 1: the not-contributor screen never called `router.replace('/(auth)/welcome')` when `clearAll` rejected.
+  - `ci-gates` 1: `push.branches` was `["main"]`.
+  - `deps`: no red case. The fix removes an over-broad assertion. The replacement and its fixtures are guards, green by design, and the fixture shows a compliant patch is rejected by nothing while a ranged or unexcluded one still is.
+- [x] (C) **Finding 1 (major): the widget countdown froze once the stored timeline ran out.** Under expo-widgets 58's `.atEnd` policy, with no 15-minute reload, WidgetKit keeps re-rendering the last of the 96 entries (24 h), whose `env.date` is fixed.
+  - Layout: `var entryMs = (env && env.date) ? env.date.getTime() : 0; var nowMs = Math.max(entryMs, Date.now());` (`bridge.ts:548-549`). Pre-rendered entries keep their own date; a stale entry rendered later uses real time.
+  - Timeline: `buildTimelineEntries(baseData, count, intervalMinutes, { extendToDeadline })`. After the `count` fine entries it appends one entry per hour at `deadline − k h + 1 s` (each lands just after the hourly "Due in …" label changes), then one at `deadline + 1 s` with urgency `expired` and `hoursRemaining` `0h left`. The hourly run is capped at 8 days, and nothing is added for a past or missing deadline. Without the option, the count contract is unchanged. `updateWidgetData` passes `{ extendToDeadline: true }` (`:971`).
+  - Size: a full week (a Monday 00:00 open) is **241 entries, 266,543 bytes** of `{timestamp, props}` JSON for a manager with 3 approvals (the 96 alone: 106,177). A case keeps it under 512 KB.
+  - **On the real 58 widget runtime:** the built `ExpoWidgetsTarget.appex/ExpoWidgets.bundle` from FR6/FR7's local build (167,981 bytes, the size FR6 recorded; sha256 `a3c98d40…`) run in `jsc` on the new layout (harness in `/tmp/finalreview-jsc.*`, deleted). Entry Sunday 20:59:59 UTC, deadline Sunday 23:59:59, manager with 2 pending: `Date.now()` 48 h before the entry and at the entry both give `Due in 3h` with the pill and overlay (small, medium); `Date.now()` = deadline + 1 h gives no countdown, no pill and no overlay in all three families.
+  - Tests: `widgetLayoutJs` +5, `bridge` +10, `clearWidgetData` +2 (plus the rewritten 96 case). Docs: `docs/ARCHITECTURE.md` §7.1/§7.2 (rule, entry shape, size, refreshed line numbers), `src/widgets/README.md`, `README.md` data-flow line, and the two spec.md FR6 amendments.
+  - Showing the countdown and its expiry on a real home screen after more than 24 h with the app closed: deferred to FR11 device smoke (no agent device access). It's the spec's "countdown after > 1 h with the app closed" check, extended past the deadline.
+- [x] (C) **Finding 2 (minor): a keychain refusal stopped sign-out halfway.** expo-secure-store 58 rejects `deleteItemAsync` with `KeyChainException` (`SecureStoreModule.swift:43-57`; CHANGELOG 58.0.0), where SDK 55 resolved.
+  - `clearAll()` deletes the credentials best-effort (`bestEffortSecureDelete`, a `console.warn` on failure). AsyncStorage `multiRemove` errors still propagate (the existing "does not swallow" case stays green). This matches build 18's behavior for the keychain.
+  - `app/modal.tsx` and `app/(auth)/not-contributor.tsx` catch a `clearAll` rejection (with a `console.warn`) and finish signing out. `invalidateAuthToken()` stays in `finally`.
+  - Tests: `config-store` +1, `modal-signout` +2 (one runs the **real** `clearAll` through `jest.requireActual` with a rejecting `deleteItemAsync`, and awaits the whole destructive handler), `auth-screens` +1.
+  - A keychain refusal can't be induced on a device; the TestFlight sign-out check (FR11 smoke 15 and Native release smoke 8) covers the normal path.
+- [x] (C) **Finding 3 (major): section A's build-18 baseline would refuse on eas-cli 25.** `aade79b`'s `ota-publish.sh:94` reads `b.runtimeVersion`, which eas-cli ≥ 22 doesn't print, so it dies with `runtime ""`.
+  - `docs/RELEASING.md` section A step 3: build 18 checks out `7b0e328` (`aade79b` + only the script fix; `git diff --stat aade79b 7b0e328` → `scripts/ota-publish.sh` and its test). Step 4 still proves build 18's runtime, and `app.json` there is 1.1.0 (18). Also: never hand-run `eas update` to get around a refusal; skip the baseline if a B2 hotfix has already been published (a `7b0e328` baseline would roll it back).
+  - The same pointer is in B2's lane paragraph, Post-release step 1 and `features/app/store-compliance/OPS.md` O11.
+  - No jest case: docs only. The script's eas-cli 25 behavior is already covered by `__tests__/scripts/ota-publish.test.ts`.
+- [x] (C) **Finding 4 (minor): `## Native release` assumed `main` and SDK 58.**
+  - Pre-flight 8 is branch-agnostic: `git status --porcelain` empty and `git rev-list --count @{u}..HEAD` prints `0` on the branch being built (`main`, `feat/sdk-58` or `release/1.1`). If there's no upstream, push with `-u` first. Record the branch name and HEAD.
+  - Pre-flight 6: a `release/1.1` (SDK 55) rebuild needs the config-schema check only. Its package-version check may stay red, because that branch has `patches/expo-widgets+55.0.5.patch`, `expo-widgets ^55.0.5` and no `install.exclude` (checked with `git show release/1.1:package.json`).
+  - "If something fails": fix on the branch the build came from (`feat/sdk-58` until the merge, `release/1.1` then cherry-pick forward, otherwise `main`). SDK 58 work never goes onto `main` before the merge.
+  - No jest case: docs only.
+- [x] (C) **Finding 5 (minor): `deps.test.ts` banned every future patch.** `patches/ contains no .patch files` is replaced by `neither retired SDK 55 patch is back` (`retiredPatchProblems`: `expo-widgets+55.0.5.patch`, `react-native-reanimated+4.2.1.patch`).
+  - Fixtures: the helper flags only those two names. The spec's documented fallback (`expo-widgets+58.0.21.patch`, exact pin, locked, `install.exclude`) passes `collectPatchProblems`, `collectExcludeProblems` and `retiredPatchProblems`. A ranged, unexcluded copy is still rejected by both policy guards.
+  - The spec.md FR4 criterion is amended to match. "No `patches/*.patch` files" in the B.2 Final Verification is still true today; it's a fact about the tree, not a test.
+- [x] (C) **Finding 6 (minor): CI never ran on the 1.1.x hotfix lane.**
+  - `.github/workflows/test.yml` push branches are `[main, 'release/**']` on `feat/sdk-58`, guarded by 3 `ci-gates` cases (the list, `pull_request` unfiltered, a parser fixture). `pages.yml` stays `main`-only.
+  - The same one-line change on **`release/1.1` as `92545fb`** (`ci(10-sdk-58-ios-27): run Test on pushes to release/** (final review)`), a fast-forward of `7b0e328`. It was made with a temporary index (`git read-tree` / `update-index` / `commit-tree` / `update-ref`), because this worktree had uncommitted `feat/sdk-58` changes and the two branches' `test.yml` differ (Node 22 vs 20). Pushed: `7b0e328..92545fb`.
+  - **The first CI run ever on `release/1.1`:** https://github.com/jaime-alvarez-trilogy/hourglass-app/actions/runs/39554822758 (event `push`, head `92545fb`) is **green**. `app-tests` passed (Node 20; Lint `✖ 499 problems (0 errors, 499 warnings)`; Test `180 passed` suites / `5091 passed` tests), and so did `server-tests` (3 suites / 38 tests). So `7b0e328`'s script fix has now passed CI too.
+  - B2 is reordered: push, then `gh run watch <id> --exit-status` must exit 0 **before** the runtime check and the publish. The run URL goes in the hotfix record.
+- [x] (C) **Gates.** `npm test` → **exit 0, 184 suites / 5343 tests** (5316 + 27). `npm run typecheck` → **exit 0**. `npm run lint` → **exit 0**, `✖ 486 problems (0 errors, 486 warnings)` (unchanged; the two warnings the new tests first added were fixed). `(cd server && npm test)` → **exit 0**, 3 suites / 38 tests.
+
 ---
 
 ## Phase D: Build 19 to "ready to submit" (FR11)
@@ -1280,3 +1325,12 @@ Each cell passes when there's no clipping or overlap, every chart re-measures wi
   - The ITMS-91053 baseline (J; FR11).
   - The Phase A/B validator boxes, and the Phase A.2, B.2 and C reviews.
   - FR11's What's New text.
+
+**2026-10-21 (final review fixes)**: The six confirmed findings of the final branch review are fixed, with all gates green (184 suites / 5343 tests; typecheck 0; lint 0 errors / 486 warnings; server 3 / 38). The iOS runtime is unchanged (`56d054fc…`), so everything ships in build 19.
+- Commits: `92545fb` on `release/1.1` (the CI trigger only; pushed), and on `feat/sdk-58` the single commit `fix(10-sdk-58-ios-27): address final review` (code, tests, docs, this record).
+- Widget: the countdown reads `Math.max(env.date, Date.now())`, and the stored timeline runs hourly to an expired entry 1 s after the deadline (241 entries / ~260 KB for a full week). Verified on the built expo-widgets 58 runtime in `jsc`.
+- Sign-out: keychain deletes are best-effort in `clearAll`, and both sign-out handlers finish even if `clearAll` rejects.
+- Docs: RELEASING section A (build 18's baseline from `7b0e328`), Pre-flight 6 and 8, B2 (CI green before the publish), "If something fails", Post-release 1; OPS O11; ARCHITECTURE §7.1/§7.2; spec.md FR4/FR6 amendments.
+- Tests: `deps.test.ts` no longer bans patches, only the two retired SDK 55 ones. CI runs on `release/**` pushes.
+- Deferred to the FR11 device smoke (no agent device access): the countdown and its expiry on a home screen after > 24 h with the app closed.
+- Still open: the ITMS-91053 baseline (J; FR11), the Phase A/B validator boxes, and the Phase A.2, B.2 and C review boxes.

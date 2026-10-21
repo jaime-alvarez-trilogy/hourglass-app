@@ -160,4 +160,22 @@ describe('FR9: clearAll', () => {
     (mockAsyncStorage.multiRemove as jest.Mock).mockRejectedValueOnce(error);
     await expect(clearAll()).rejects.toThrow('AsyncStorage multiRemove failed');
   });
+
+  // Final review 2026-10-21: expo-secure-store 58 rejects deleteItemAsync with a
+  // KeyChainException when SecItemDelete returns anything but success / not-found
+  // (e.g. errSecInteractionNotAllowed). SDK 55 resolved. The credential deletes are
+  // best-effort, so sign-out never stops halfway.
+  it('clearAll resolves when SecureStore.deleteItemAsync rejects, after removing the AsyncStorage keys', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockSecureStore.deleteItemAsync.mockRejectedValue(new Error('KeyChainException: -25308'));
+    try {
+      await expect(clearAll()).resolves.toBeUndefined();
+      expect(mockSecureStore.deleteItemAsync).toHaveBeenCalledWith('crossover_username');
+      expect(mockSecureStore.deleteItemAsync).toHaveBeenCalledWith('crossover_password');
+      expect(mockAsyncStorage.multiRemove).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });

@@ -1034,6 +1034,42 @@ describe('10-sdk-58-ios-27 FR6: the layout on the expo-widgets 58 runtime', () =
       const tree = getWidgetFn()(minimalProps({ deadline: ENTRY + 3 * HOUR_MS }), { widgetFamily: 'systemSmall' });
       expect(treeContains(tree, 'Due in 3h')).toBe(true);
     });
+
+    // Final review (2026-10-21): the timeline policy is `.atEnd`, so once the stored entries
+    // run out WidgetKit keeps re-rendering the last one, whose env.date is fixed. Real time
+    // later than env.date must win, or the countdown freezes past the deadline.
+    describe('real time later than env.date (a stale entry re-rendered after its date)', () => {
+      const DEADLINE = ENTRY + 3 * HOUR_MS;
+
+      it.each(SYSTEM_FAMILIES)('%s: after the deadline, no countdown, no PENDING pill and no EOW overlay', (family) => {
+        nowSpy.mockReturnValue(DEADLINE + HOUR_MS);
+        const props = minimalProps({ deadline: DEADLINE, pendingCount: 2, isManager: true });
+        const tree = getWidgetFn()(props, { widgetFamily: family, date: new Date(ENTRY) });
+        expect(treeContains(tree, 'Due in')).toBe(false);
+        expect(treeContains(tree, '2 PENDING')).toBe(false);
+        expect(treeContains(tree, '#F43F5E00')).toBe(false);
+      });
+
+      it('control: the same entry rendered at its own date is urgent (pill and overlay present)', () => {
+        nowSpy.mockReturnValue(ENTRY);
+        const props = minimalProps({ deadline: DEADLINE, pendingCount: 2, isManager: true });
+        const tree = getWidgetFn()(props, { widgetFamily: 'systemSmall', date: new Date(ENTRY) });
+        expect(treeContains(tree, 'Due in 3h')).toBe(true);
+        expect(treeContains(tree, '2 PENDING')).toBe(true);
+        expect(treeContains(tree, '#F43F5E00')).toBe(true);
+      });
+
+      it('before the deadline, the countdown follows real time, not the older entry date', () => {
+        // Entry date is 30 h before the deadline ("1d 6h"); real time is 3 h before it.
+        nowSpy.mockReturnValue(DEADLINE - 3 * HOUR_MS);
+        const tree = getWidgetFn()(minimalProps({ deadline: DEADLINE }), {
+          widgetFamily: 'systemMedium',
+          date: new Date(DEADLINE - 30 * HOUR_MS),
+        });
+        expect(treeContains(tree, 'Due in 3h')).toBe(true);
+        expect(treeContains(tree, 'Due in 1d')).toBe(false);
+      });
+    });
   });
 
   describe('runtime globals', () => {

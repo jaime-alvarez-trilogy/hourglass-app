@@ -380,6 +380,114 @@ describe('buildTimelineEntries (FR2)', () => {
   });
 });
 
+// ─── Final review 2026-10-21: the stored timeline reaches the deadline ────────
+// expo-widgets 58 uses the `.atEnd` policy and build 19 has no 15-minute reload, so after the
+// last stored entry WidgetKit keeps showing it. 96 × 15 min covers 24 h only: a deadline
+// further away needs entries up to (and just past) it, or the countdown freezes.
+
+describe('buildTimelineEntries extendToDeadline (final review 2026-10-21)', () => {
+  const HOUR = 60 * 60 * 1000;
+  const MIN = 60 * 1000;
+  // Friday 2026-10-23 09:07 UTC; the week's deadline is Sunday 23:59:59 UTC.
+  const NOW = Date.UTC(2026, 9, 23, 9, 7, 0);
+  const SUNDAY_DEADLINE = Date.UTC(2026, 9, 25, 23, 59, 59);
+  let nowSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    nowSpy = jest.spyOn(Date, 'now').mockReturnValue(NOW);
+  });
+  afterEach(() => nowSpy.mockRestore());
+
+  function base(deadline: number): WidgetData {
+    return {
+      hours: '32.5', hoursDisplay: '32.5h', earnings: '$1,300', earningsRaw: 1300, today: '6.2h',
+      hoursRemaining: '7.5h left', aiPct: '71%–75%', brainlift: '3.2h', deadline,
+      urgency: 'none', pendingCount: 2, isManager: true, cachedAt: NOW, useQA: false, daily: [],
+      approvalItems: [], myRequests: [], actionBg: '', paceBadge: 'none', weekDeltaHours: '',
+      weekDeltaEarnings: '', brainliftTarget: '5h', todayDelta: '',
+    };
+  }
+
+  const times = (entries: { date: Date }[]) => entries.map((e) => e.date.getTime());
+
+  it('control: without the option the count contract holds, and the timeline stops 24 h out', () => {
+    const entries = buildTimelineEntries(base(SUNDAY_DEADLINE), 96, 15);
+    expect(entries).toHaveLength(96);
+    expect(entries[95].date.getTime()).toBe(NOW + 95 * 15 * MIN);
+    expect(entries[95].date.getTime()).toBeLessThan(SUNDAY_DEADLINE);
+  });
+
+  it('keeps the 96 fifteen-minute entries unchanged at the front', () => {
+    const plain = buildTimelineEntries(base(SUNDAY_DEADLINE), 96, 15);
+    const extended = buildTimelineEntries(base(SUNDAY_DEADLINE), 96, 15, { extendToDeadline: true });
+    expect(extended.slice(0, 96)).toEqual(plain);
+  });
+
+  it('then adds hourly entries at deadline − k h + 1 s, ending with one expired entry 1 s after the deadline', () => {
+    const entries = buildTimelineEntries(base(SUNDAY_DEADLINE), 96, 15, { extendToDeadline: true });
+    const lastFine = NOW + 95 * 15 * MIN; // Saturday 08:52 UTC
+    const coarse = times(entries.slice(96));
+    // k = 39 … 0: Saturday 09:00:00 through Monday 00:00:00 UTC.
+    const expected = Array.from({ length: 40 }, (_, i) => SUNDAY_DEADLINE - (39 - i) * HOUR + 1000);
+    expect(coarse).toEqual(expected);
+    expect(coarse[0]).toBeGreaterThan(lastFine);
+    expect(coarse[0]).toBe(Date.UTC(2026, 9, 24, 9, 0, 0));
+
+    const last = entries[entries.length - 1];
+    expect(last.date.getTime()).toBe(SUNDAY_DEADLINE + 1000);
+    expect(last.props.urgency).toBe('expired');
+    expect(last.props.hoursRemaining).toBe('0h left');
+    // The entry before it is still inside the week.
+    expect(entries[entries.length - 2].props.urgency).not.toBe('expired');
+    expect(entries[entries.length - 2].props.hoursRemaining).toBe('7.5h left');
+  });
+
+  it('entry dates strictly increase', () => {
+    const t = times(buildTimelineEntries(base(SUNDAY_DEADLINE), 96, 15, { extendToDeadline: true }));
+    for (let i = 1; i < t.length; i++) expect(t[i]).toBeGreaterThan(t[i - 1]);
+  });
+
+  it('scenario: a Saturday 20:00 open is expired (not "Due in 4h") from Monday on', () => {
+    nowSpy.mockReturnValue(Date.UTC(2026, 9, 24, 20, 0, 0));
+    const entries = buildTimelineEntries(base(SUNDAY_DEADLINE), 96, 15, { extendToDeadline: true });
+    // WidgetKit shows the latest entry whose date has passed.
+    const shownAt = (t: number) => [...entries].reverse().find((e) => e.date.getTime() <= t)!;
+    const monday = shownAt(Date.UTC(2026, 9, 26, 10, 0, 0));
+    expect(monday.date.getTime()).toBeGreaterThan(SUNDAY_DEADLINE);
+    expect(monday.props.urgency).toBe('expired');
+    const sundayEvening = shownAt(Date.UTC(2026, 9, 25, 21, 30, 0));
+    expect(SUNDAY_DEADLINE - sundayEvening.date.getTime()).toBeLessThanOrEqual(3 * HOUR);
+    expect(sundayEvening.props.urgency).not.toBe('expired');
+  });
+
+  it('a deadline already crossed inside the fine window adds nothing', () => {
+    const entries = buildTimelineEntries(base(NOW + 6 * HOUR), 96, 15, { extendToDeadline: true });
+    expect(entries).toHaveLength(96);
+    expect(entries[95].props.urgency).toBe('expired');
+  });
+
+  it('a deadline just past the last fine entry gets only the expiry entry', () => {
+    const deadline = NOW + 95 * 15 * MIN + 10 * MIN;
+    const entries = buildTimelineEntries(base(deadline), 96, 15, { extendToDeadline: true });
+    expect(times(entries.slice(96))).toEqual([deadline + 1000]);
+    expect(entries[96].props.urgency).toBe('expired');
+  });
+
+  it.each([
+    ['in the past', NOW - HOUR],
+    ['missing (0)', 0],
+  ])('a deadline %s adds nothing', (_label, deadline) => {
+    expect(buildTimelineEntries(base(deadline), 96, 15, { extendToDeadline: true })).toHaveLength(96);
+  });
+
+  it('is capped at 8 days of hourly entries, and the expiry entry is always last', () => {
+    const far = NOW + 30 * 24 * HOUR;
+    const entries = buildTimelineEntries(base(far), 96, 15, { extendToDeadline: true });
+    expect(entries.length).toBe(96 + 8 * 24 + 1);
+    expect(entries[entries.length - 1].date.getTime()).toBe(far + 1000);
+  });
+});
+
 // ─── FR3: readWidgetData ──────────────────────────────────────────────────────
 
 describe('readWidgetData (FR3)', () => {

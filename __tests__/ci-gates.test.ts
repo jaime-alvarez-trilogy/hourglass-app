@@ -306,3 +306,38 @@ describe('10-sdk-58-ios-27 — FR8: CI typecheck needs no generated file', () =>
     expect(read('app/_layout.tsx')).toMatch(/^import '\.\.\/global\.css';$/m);
   });
 });
+
+// ─── Final review 2026-10-21: CI runs on the 1.1.x hotfix lane too ───────────
+
+describe('final review 2026-10-21 — CI runs on pushes to main and to release branches', () => {
+  // `release/1.1` (RELEASING.md section B2) publishes OTAs to build-18 users, so a push there
+  // must get the same app-tests and server-tests as main. A future `release/1.2` inherits this file.
+  // Reads the inline `push: branches: [...]` list under the top-level `on:` key.
+  function pushBranches(text: string): string[] | null {
+    const on = /^on:[ \t]*\n((?:[ \t]+[^\n]*\n|[ \t]*\n)*)/m.exec(text);
+    if (!on) return null;
+    const m = /^ {2}push:[ \t]*\n {4}branches:[ \t]*\[([^\]]*)\]/m.exec(on[1]);
+    if (!m) return null;
+    return m[1]
+      .split(',')
+      .map((s) => s.trim().replace(/^['"]|['"]$/g, ''))
+      .filter(Boolean);
+  }
+
+  it('push.branches lists main and release/**', () => {
+    expect(pushBranches(WORKFLOW)).toEqual(expect.arrayContaining(['main', 'release/**']));
+  });
+
+  it('pull_request still has no branch filter (every PR runs CI)', () => {
+    expect(WORKFLOW).toMatch(/^on:[ \t]*\n {2}pull_request:[ \t]*\n {2}push:/m);
+  });
+
+  it('pushBranches parses inline lists, quoted or not, and returns null without one (fixture)', () => {
+    expect(pushBranches("on:\n  pull_request:\n  push:\n    branches: [main, 'release/**']\n\njobs:\n")).toEqual([
+      'main',
+      'release/**',
+    ]);
+    expect(pushBranches('on:\n  push:\n    branches: ["main"]\njobs:\n')).toEqual(['main']);
+    expect(pushBranches('on:\n  pull_request:\njobs:\n')).toBeNull();
+  });
+});
