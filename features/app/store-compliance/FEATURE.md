@@ -17,7 +17,7 @@
 ### Web (GitHub Pages)
 - `site/index.html` (new)
 - `site/privacy-policy.html` (new — moved from repo root, text corrected)
-- `site/support.html` (new)
+- `site/support.html` (new; spec 10: "Requires iOS 16.4 or later")
 - `.github/workflows/pages.yml` (new)
 - `privacy-policy.html` (delete — superseded by `site/`)
 
@@ -33,7 +33,12 @@
 - `package.json` / `package-lock.json` (modify — dead deps, pins, scripts, SDK bumps)
 - `tsconfig.json` (modify — `types`)
 - `eas.json` (modify — spec 10: `cli.version` ≥ 25.2.0, pinned production image `macos-tahoe-26.6-xcode-27.1`)
-- `TECH_STACK.md` (modify)
+- `TECH_STACK.md` (modify; spec 10: SDK 58 line)
+
+### Docs
+- `docs/RELEASING.md` (modify — spec 04 OTA runbook, spec 05 native release; spec 10: SDK 58 build steps, `runtime.version`, B2 hotfix lane, SDK upgrade)
+- `docs/ARCHITECTURE.md` (modify — spec 10: §5.7 UIKit scenes, §7.2 expo-widgets 58)
+- `README.md`, `CLAUDE.md` (modify — spec 10: SDK 58 / RN 0.88)
 
 ### CI
 - `.github/workflows/test.yml` (modify — typecheck + lint gates; spec 10: Node 22)
@@ -116,7 +121,9 @@ eas update (production) → runtime = fingerprint(native deps) → matches build
 |---------|----------|------|
 | **Build 18 (v1.1.0)** — target submit ≤ 2026-10-31 | Specs 01, 02, 03, 04, 05 (+ 07's Buffer fix if merged) | Native build → TestFlight → App Review |
 | Baseline OTA | Proves the lane (spec 04 FR4) | `eas update` after build 18 is live |
-| **v1.2.0, build 19** | Spec 10: direct SDK 55 → 58 on the iOS 27 SDK. Includes spec 06 FR1–FR4; spec 06 FR5 is superseded | Native build (EAS, `macos-tahoe-26.6-xcode-27.1`) → TestFlight → App Review on the user's go-ahead; before April 2027 |
+| 1.1.x hotfixes (while 1.2.0 rolls out) | Fixes for build 18 users | `release/1.1` (from `aade79b`, tag `build-18`): OTA with `scripts/ota-publish.sh`, or a native rebuild on the `sdk-55` image; each fix cherry-picked forward (`docs/RELEASING.md` B2) |
+| **v1.2.0, build 19** | Spec 10: direct SDK 55 → 58 on the iOS 27 SDK, minimum iOS 16.4. Includes spec 06 FR1–FR4; spec 06 FR5 is superseded | Native build (EAS, `macos-tahoe-26.6-xcode-27.1`) → TestFlight → App Review on the user's go-ahead; before April 2027 |
+| After 1.2.0 is live | Baseline OTA for build 19 (spec 04 runbook A); merge `feat/sdk-58` into `main` (allowed once build 18's review is resolved and build 19 has passed the TestFlight smoke); retire `release/1.1` once 1.1.x adoption is negligible | `docs/RELEASING.md` A, Post-release, B2 |
 | ~~Build 19~~ | ~~Spec 06 (SDK 55 patch refresh)~~: FR1–FR4 ported into spec 10 FR1, FR5 superseded | — |
 | ~~SDK 57 (v1.2.0)~~ | ~~Spec 08~~: superseded by spec 10 | — |
 | ~~SDK 58 (v1.3.0)~~ | ~~Spec 09~~: superseded by spec 10 | — |
@@ -132,7 +139,7 @@ Non-code steps (App Store Connect, key handling, repo hygiene) are in [OPS.md](O
 | 2026-10-19 | [03-native-config-cleanup](specs/03-native-config-cleanup/spec.md) | app.json cleanup, drop background-fetch deps, privacy manifest |
 | 2026-10-19 | [04-ota-lane](specs/04-ota-lane/spec.md) | Fingerprint runtimeVersion + baseline-update verification |
 | 2026-10-19 | [05-release-build-18](specs/05-release-build-18/spec.md) | Build 18 bump, TestFlight smoke, submission runbook |
-| 2026-10-19 | [06-dependency-hygiene](specs/06-dependency-hygiene/spec.md) | Pin patched deps, harden patch-package, SDK 55 patch refresh |
+| 2026-10-19 | [06-dependency-hygiene](specs/06-dependency-hygiene/spec.md) | Pin patched deps, harden patch-package, SDK 55 patch refresh. FR1–FR4 ported into spec 10 FR1; **FR5 superseded by 10** |
 | 2026-10-19 | [07-ci-typecheck-lint](specs/07-ci-typecheck-lint/spec.md) | Fix Buffer bug, delete out-of-repo test, clear TS/lint, add CI gates |
 | 2026-10-19 | [08-expo-sdk-57-scenes](specs/08-expo-sdk-57-scenes/spec.md) | **Superseded by 10.** SDK 55→56→57 + UIKit scene lifecycle |
 | 2026-10-19 | [09-sdk-58-xcode-27](specs/09-sdk-58-xcode-27/spec.md) | **Superseded by 10.** SDK 58 on an Xcode 27 image (externally blocked) |

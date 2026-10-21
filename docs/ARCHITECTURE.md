@@ -1,6 +1,6 @@
 # Hourglass — Architecture Reference
 
-**Last mapped:** 2026-05-22
+**Last mapped:** 2026-05-22. **Updated:** 2026-10-20 for Expo SDK 58 / iOS 27 (store-compliance spec 10): §5.2, §5.3, §5.7, §6.1, §7.1–7.3, §8.6.
 **Scope:** `hourglassws/` (Expo iOS app). Excludes deprecated Scriptable widgets at the repo root.
 
 A single document for understanding how the app fits together before touching any cross-cutting subsystem. Every section is keyed to file:line so claims are verifiable.
@@ -233,7 +233,7 @@ app/
 
 `app/_layout.tsx:154-164`. Provider stack (outermost → innermost):
 
-`GestureHandlerRootView` → `PersistQueryClientProvider` (24h TTL) → `ThemeProvider` → router tree.
+`GestureHandlerRootView` → `PersistQueryClientProvider` (24h TTL) → `ThemeProvider` → router tree. `ThemeProvider`, `DarkTheme` and `DefaultTheme` come from `expo-router` (`app/_layout.tsx:11`); expo-router has shipped its own navigation fork since SDK 56.
 
 **Module-scope side effects**:
 - `Notifications.setNotificationHandler` (`:48-54`)
@@ -251,8 +251,8 @@ app/
 
 `app/(tabs)/_layout.tsx`. Platform-split rendering:
 
-- **iOS** (`NativeTabs` from `expo-router/unstable-native-tabs`): native `UITabBarController` with glass pill on iOS 26+.
-- **Android** (`Tabs` + custom `FloatingPillTabBar` at `:126-132`): default tab bar hidden, custom pill overlay. Content clearance comes from each tab screen's own scroll `paddingBottom: 100` (no navigator-level padding).
+- **iOS** (`NativeTabs` from `expo-router/native-tabs`, `:24`): native `UITabBarController` with glass pill on iOS 26+.
+- **Android** (`Tabs` from `expo-router/js-tabs`, `:25`, + custom `FloatingPillTabBar`): default tab bar hidden, custom pill overlay. Content clearance comes from each tab screen's own scroll `paddingBottom: 100` (no navigator-level padding).
 
 `TAB_SCREENS` constant (`:50-56`): Home, Overview, AI, Requests + hidden `explore`. Approvals badge shown when `items.length > 0` (`:79`).
 
@@ -293,6 +293,24 @@ Gated UI:
 - TEAM REQUESTS section, Approve All button, team queue badge on Requests.
 - Monday expiry notification (see §1.1).
 
+### 5.7 Native launch & lifecycle (UIKit scenes)
+
+From v1.2.0 (Expo SDK 58, store-compliance spec 10) the iOS app runs the UIKit scene lifecycle. An app built with the iOS 27 SDK asserts at launch without it (`node_modules/expo/ios/Expo/ExpoAppSceneDelegate.swift:12-13`). The project is CNG (`ios/` is gitignored), so the scene files come from the SDK 58 template at prebuild. Nothing in the repo configures scenes: there's no `enableSceneSupport` and no hand-written `UIApplicationSceneManifest`, and `__tests__/config/app-config.test.ts` keeps it that way.
+
+- **Generated files** (each checked in spec 10 FR9):
+  - `ios/Hourglassxo/SceneDelegate.swift`: `class SceneDelegate: ExpoAppSceneDelegate`.
+  - `ios/Hourglassxo/AppDelegate.swift`: `class AppDelegate: ExpoAppDelegate, ExpoReactNativeFactoryProvider`. It creates the React Native factory, but no window.
+  - `Info.plist` `UIApplicationSceneManifest`: `UIApplicationSupportsMultipleScenes = false` and one configuration whose delegate is `$(PRODUCT_MODULE_NAME).SceneDelegate`.
+- **Launch.** `ExpoAppSceneDelegate.scene(_:willConnectTo:options:)` creates the `UIWindow` from the connecting `UIWindowScene`, mirrors it onto the app delegate, and starts React Native in it (`ExpoAppSceneDelegate.swift:33-89`). Every scene event (active, resign, foreground, background, URLs, user activities) is forwarded to the app delegate and its subscribers.
+- **AppState.** React Native's `AppState` observes `UIApplication` notifications (`node_modules/react-native/React/CoreModules/RCTAppState.mm:85-89`), which UIKit still posts for a single-scene app. So the four listeners work unchanged: the TanStack focus manager (`app/_layout.tsx:63`), `useAIData.ts:376`, `useScheduledNotifications.ts:276` and `useRoleRefresh.ts:103`. The device check is the FR11 foreground-refresh smoke.
+- **Cold-start URL (`hourglassws://`, `app.json` `scheme`).** Under scenes, UIKit passes a cold-start URL in `connectionOptions`, not in the app delegate's launch options. `ExpoAppSceneDelegate` handles it twice:
+  - It rebuilds the launch options from `connectionOptions.urlContexts`, so React Native's `Linking.getInitialURL()` sees the URL (`ExpoAppSceneDelegate.swift:59-74`).
+  - It forwards each URL context to the app-delegate subscribers (`:76-79`). expo-linking's `LinkingAppDelegateSubscriber` stores it as the initial URL, and on iOS Expo Router reads its initial route from there through `getLinkingURL()` (`node_modules/expo-router/build/link/linking.js:103-108`).
+  - A warm link arrives through `scene(_:openURLContexts:)`, which forwards each context the same way (`ExpoAppSceneDelegate.swift:111-123`). The FR11 smoke checks both, cold and warm.
+- **Notifications.** expo-notifications hooks in through its app-delegate subscriber (`NotificationsAppDelegateSubscriber`, registered in its `expo-module.config.json`). Push-token registration and `didReceiveRemoteNotification` are app-level callbacks, so scenes don't change them. Foreground presentation still follows the app's `setNotificationHandler` (`app/_layout.tsx:48-55`, §1). The silent-push gap in §2 has nothing to do with scenes and is still open.
+- **No notification-tap routing.** The app registers no `addNotificationResponseReceivedListener`, `useLastNotificationResponse` or `getLastNotificationResponseAsync`. A tap from a killed app cold-launches to the default route, which the auth gate (§5.5) resolves. A tap while the app is running only brings it to the foreground.
+- **Window size.** On iOS 27, iPhone and iPad windows both resize. The app keeps `ios.supportsTablet: true` and sets no `requireFullScreen` (spec 10 Decision 10 (a)). So the four iPad orientations are written as on build 18, and layouts have to survive any width (FR11 resizability matrix).
+
 ---
 
 ## 6. Module Boundaries
@@ -306,8 +324,9 @@ Gated UI:
 | `components/`, `hooks/` (root) | **Legacy Expo Starter scaffolding** — themed-text, themed-view, use-color-scheme. Not used by the production app. Candidates for deletion. |
 | `constants/theme.ts` | **Legacy** — superseded by `src/lib/colors.ts` |
 | `server/` | Railway ping server (push dispatcher + cron) |
-| `ios/`, `android/` | Native build artifacts |
-| `assets/`, `dist/`, `patches/`, `scripts/` | Build / static assets |
+| `ios/`, `android/` | Native build artifacts, generated by prebuild (CNG, gitignored) |
+| `plugins/` | Local Expo config plugins for the iOS widget extension: its privacy manifest and native background (§7.2) |
+| `assets/`, `dist/`, `scripts/` | Build / static assets. `patches/` (patch-package) holds nothing today |
 | `__mocks__/`, `__tests__/` | Jest infrastructure + integration tests |
 
 ### 6.2 `src/` map
@@ -442,17 +461,29 @@ WidgetData {
 
 ### 7.1 Write path
 
-`updateWidgetData(snapshot)` in `src/widgets/bridge.ts:18` writes the same JSON to:
-- **AsyncStorage** `widget_data` (Android reads this directly via `readWidgetData()` at `:427-435`).
-- **iOS App Group UserDefaults** via `expo-widgets` (`:868-896`): `createWidget('HourglassWidget', layoutJS).updateTimeline(entries)`.
+`updateWidgetData(snapshot)` in `src/widgets/bridge.ts:912` writes the same JSON to:
+- **AsyncStorage** `widget_data` (Android reads this directly via `readWidgetData()` at `:429-437`).
+- **iOS App Group UserDefaults** via `expo-widgets` (`:933-946`): `createWidget('HourglassWidget', WIDGET_LAYOUT_JS, buildSignedOutWidgetData(Date.now())).updateTimeline(entries)`. The third argument is stored as the widget's initial props (expo-widgets 58), which the placeholder and the gallery use (§7.2). `clearWidgetData()` (`:991-1006`) makes the same call on sign-out, with one signed-out entry.
 
 ### 7.2 iOS timeline
 
-`buildTimelineEntries()` (`src/widgets/bridge.ts:389-418`) emits **96 entries** — 15-minute intervals across a 24-hour window. Each entry is `{ date, props: WidgetData }` with `urgency` recomputed for that timestamp vs `deadline`. This lets the widget visually transition through `low → high → critical → expired` without the extension having to wake.
+`buildTimelineEntries()` (`src/widgets/bridge.ts:391-420`, called with `(data, 96, 15)` at `:940`) emits **96 entries** — 15-minute intervals across a 24-hour window. Each entry is `{ date, props: WidgetData }` with `urgency` recomputed for that timestamp vs `deadline`. This lets the widget visually transition through `low → high → critical → expired` without the extension having to wake.
+
+**expo-widgets 58 runtime (v1.2.0, store-compliance spec 10 FR6).**
+
+- **Reload policy `.atEnd`.** expo-widgets' timeline provider hands WidgetKit the stored entries with `policy: .atEnd` (`node_modules/expo-widgets/ios/Widgets/TimelineProvider.swift:34`). So WidgetKit asks for a new timeline only after the last entry, about 24 h after the app's last write. Build 18's patch forced a reload every 15 minutes; it's gone. A reload would only re-read the same App Group data anyway, and 96 reloads a day would likely exceed WidgetKit's daily reload budget.
+- **`env.date`.** The layout is called with `(props, env)`, where `env.date` is the entry's date. The countdown and the end-of-week urgency read `var nowMs = (env && env.date) ? env.date.getTime() : Date.now();` (`bridge.ts:518`), because WidgetKit can render an entry before its time. That's what keeps the countdown right between app opens.
+- **Stored layout wins.** `WidgetsLayoutRegistry.layout(for:)` returns the App Group key `__expo_widgets_HourglassWidget_layout` first, and a build-time embedded layout only after that (`node_modules/expo-widgets/ios/Widgets/WidgetsLayoutRegistry.swift:9-19`). The app embeds none (no `ios.initialLayout`). So after an App Store update, home-screen widgets keep evaluating the **previous build's** layout string until the new build runs `createWidget` once, which happens on its first data refresh in the app.
+- **Two `containerBackground`s, same color.** expo-widgets dropped its native background in SDK 56, and iOS 17+ shows an "adopt containerBackground" placeholder for a widget without one.
+  - JS: the small, medium and large roots carry `containerBackground('#0D0D1A', 'widget')` (`bridge.ts:679,724,821`). Lock-screen accessories don't; the system draws theirs.
+  - Native: `plugins/withHourglassWidgetBackground.js` rewrites the generated `ios/ExpoWidgetsTarget/HourglassWidget.swift` to `WidgetsEntryView(entry: entry).modifier(HourglassContainerBackground())`, an iOS 17+ `containerBackground(Color(red: 0.051, green: 0.051, blue: 0.102), for: .widget)`. It covers the update window above, when the stored build-18 layout has no background of its own.
+- **Transient placeholder red box before the first open after an update.** The placeholder (and the gallery when no timeline is stored) uses the stored initial props (`WidgetsLayoutRegistry.swift:21-26`, `TimelineProvider.swift:4-5,14,19`). Build 18 never stored any. So until 1.2.0 is opened once, an upgrader's placeholder evaluates build 18's layout with `undefined` props, which throws, and expo-widgets renders its red error box. A fresh install that was never opened shows the same box in the gallery. It clears on first open: the 58 layout starts with `props = props || {};` and `createWidget` stores signed-out initial props. This was accepted as transient (spec 10 Decision 5 (i)); adopting `ios.initialLayout` is the deferred follow-up. Widgets that have a stored timeline still show their real data.
+- **The extension has its own `PrivacyInfo.xcprivacy`.** React Native's privacy aggregation only writes a manifest for the app target. `plugins/withHourglassWidgetPrivacyManifest.js` writes `ios/ExpoWidgetsTarget/PrivacyInfo.xcprivacy` (UserDefaults `CA92.1` + `1C8F.1`, FileTimestamp `C617.1`, SystemBootTime `35F9.1`; no tracking, no collected data) and adds it to the `ExpoWidgetsTarget` Resources build phase. The data-collection declarations stay on the app's manifest (`app.json` `ios.privacyManifests`).
+- **Plugin order.** Both local plugins are listed in `app.json` `plugins` immediately before `expo-widgets`, the privacy one first. A later plugin's mod runs first, so both run after expo-widgets has generated the target. Each throws if its anchor is missing. Editing either one forks the runtime (`docs/RELEASING.md`, section E).
 
 ### 7.3 iOS layout function
 
-`src/widgets/bridge.ts:459-833` defines a ~900-line ES5 JS string compiled into the widget extension. Evaluated by the extension's JSContext to produce a SwiftUI tree. Implements three widget sizes (small/medium/large), deadline countdown, pace badge, glass cards, bar chart, approval rows, EOW urgency overlay.
+`src/widgets/bridge.ts:472-848` defines a ~380-line ES5 JS string compiled into the widget extension. Evaluated by the extension's JSContext to produce a SwiftUI tree. Implements three widget sizes (small/medium/large), deadline countdown, pace badge, glass cards, bar chart, approval rows, EOW urgency overlay.
 
 ---
 
@@ -487,6 +518,8 @@ Resolved 2026-05-28 by `04-auth-resilience` (resilience-fixes). `getAuthToken` (
 ### 8.6 Two `components/` and two `hooks/` directories
 
 Root-level `components/` and `hooks/` are Expo Starter scaffold leftovers. Production code lives in `src/components/` and `src/hooks/`. Imports from the root-level versions are legacy; check before adding new files in either spot.
+
+`components/haptic-tab.tsx` and its test were deleted in store-compliance spec 10 FR2. Nothing used it, and it imported the navigation packages that SDK 58 drops.
 
 ### 8.7 Manager role can change mid-session
 

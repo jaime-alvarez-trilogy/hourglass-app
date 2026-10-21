@@ -224,6 +224,9 @@ const SUPPORT_H3 = [
 const SUPPORT_PARAGRAPHS = [
   'Help with Hourglass',
   'Hourglass shows your tracked hours, earnings, AI usage and team approval requests from your Crossover account, in the app and in home screen widgets. It is a companion tool for people who work through Crossover and requires an active Crossover account.',
+  // 10-sdk-58-ios-27 FR10: SDK 58's template raised the minimum from 15.1 (build 18's IPA
+  // MinimumOSVersion) to 16.4 (spec 10 FR9 prebuild and Release compile).
+  'Requires iOS 16.4 or later, from version 1.2.0. Version 1.1.0 requires iOS 15.1 or later.',
   'Use the same email and password you use for Crossover. Your credentials are stored only on your device, in the iOS Keychain, and are sent only to Crossover.',
   'Widgets show data after you sign in and open the app at least once. After that, the widget updates each time you open the app. Between opens it shows the last data the app fetched, so open Hourglass to bring it up to date.',
   "Tap the gear icon on the Home screen to open Settings, then tap Sign Out. This deletes your saved credentials, the app's cached work data and the debug log from your device. In version 1.1.0 and later, it also clears your home screen widgets. Profile photos may stay in the iOS image cache until iOS clears it or you delete the app. Sign out before deleting the app to make sure your saved credentials are removed.",
@@ -464,6 +467,17 @@ describe('FR2: support page at site/support.html', () => {
     expect(html).not.toMatch(/<form/i);
     expect(html).not.toMatch(/<input/i);
     expect(html).not.toMatch(/<script/i);
+  });
+
+  // 10-sdk-58-ios-27 FR10. The app sets no ios.deploymentTarget (app-config.test.ts), so the
+  // SDK template's default applies. The expo pod's own iOS floor is the in-repo source for it:
+  // the app target can't deploy below a pod it links. An SDK that raises the floor turns this red.
+  it('10-sdk-58-ios-27 FR10: About states the minimum iOS, which is the expo pod iOS floor', () => {
+    const podspec = fs.readFileSync(path.join(ROOT, 'node_modules/expo/Expo.podspec'), 'utf8');
+    const floor = podspec.match(/:ios\s*=>\s*'(\d+(?:\.\d+)*)'/)?.[1];
+    expect(floor).toBe('16.4');
+    const about = innerAll(section(readSite('support.html'), 'About Hourglass'), 'p').map(textOf);
+    expect(about.filter((p) => p.startsWith(`Requires iOS ${floor} or later`))).toHaveLength(1);
   });
 });
 
