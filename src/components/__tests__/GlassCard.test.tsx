@@ -382,34 +382,39 @@ describe('GlassCard — FR5: layerBudget fallback', () => {
 // ─── FR5.7: Noise texture (brand §1.5) ───────────────────────────────────────
 
 describe('GlassCard — FR5.7: per-card noise texture', () => {
-  it('FR5.7a — source imports ImageBackground from react-native', () => {
-    const source = fs.readFileSync(GLASS_CARD_FILE, 'utf8');
-    expect(source).toContain('ImageBackground');
-    expect(source).toContain('react-native');
+  // The noise is drawn in the card's own Skia Canvas through NoiseShader (one noise pixel per
+  // device pixel). It used to be an ImageBackground, which release builds drew at 1pt grain.
+  const source = fs.readFileSync(GLASS_CARD_FILE, 'utf8');
+
+  it('FR5.7a — draws the noise with the shared NoiseShader', () => {
+    expect(source).toContain("from './NoiseShader'");
+    expect(source).toContain('<NoiseShader image={noise} />');
   });
 
-  it('FR5.7b — source contains noise.png asset reference', () => {
-    const source = fs.readFileSync(GLASS_CARD_FILE, 'utf8');
-    expect(source).toContain('noise.png');
+  it('FR5.7b — no longer tiles an ImageBackground', () => {
+    expect(source).not.toContain('ImageBackground');
   });
 
-  it('FR5.7c — source specifies 0.03 opacity for noise overlay', () => {
-    const source = fs.readFileSync(GLASS_CARD_FILE, 'utf8');
-    expect(source).toMatch(/opacity.*0\.03|0\.03.*opacity/);
+  it('FR5.7c — noise is a 0.03-opacity paint on a RoundedRect', () => {
+    expect(source).toMatch(/NOISE_OPACITY\s*=\s*0\.03/);
+    expect(source).toContain('opacity={NOISE_OPACITY}');
   });
 
-  it('FR5.7d — noise overlay absent when layerBudget=false', () => {
-    // layerBudget=false returns early with flat View, no noise
-    const tree = renderCard({ layerBudget: false });
-    // Flat fallback renders just a plain View with children — no ImageBackground
-    const json = treeJSON(tree);
-    // The flat path does not include the noise overlay ImageBackground
-    // (this is guaranteed by early return before noise is added)
+  it('FR5.7d — useNoiseImage runs before the layerBudget early return (stable hook order)', () => {
+    const hook = source.indexOf('useNoiseImage()');
+    expect(hook).toBeGreaterThan(-1);
+    expect(hook).toBeLessThan(source.indexOf('if (!layerBudget)'));
+  });
+
+  it('FR5.7e — noise is drawn after the inner shadow and inside the Canvas', () => {
+    const shader = source.indexOf('<NoiseShader');
+    expect(shader).toBeGreaterThan(source.lastIndexOf('<SkiaLinearGradient'));
+    expect(shader).toBeLessThan(source.indexOf('</Canvas>'));
+  });
+
+  it('FR5.7f — renders without crash with layerBudget true and false', () => {
+    expect(() => renderCardWithLayout()).not.toThrow();
     expect(() => renderCard({ layerBudget: false })).not.toThrow();
-  });
-
-  it('FR5.7e — renders without crash with noise overlay present (layerBudget=true)', () => {
-    expect(() => renderCard({ layerBudget: true })).not.toThrow();
   });
 });
 

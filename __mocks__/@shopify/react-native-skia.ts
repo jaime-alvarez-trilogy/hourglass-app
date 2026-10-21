@@ -1,6 +1,7 @@
 // Mock for @shopify/react-native-skia — Jest/node environment
 // Canvas passes through children so React tree is renderable in tests.
 // All drawing primitives (Rect, Path, Circle, Line) return null — no canvas output in Jest.
+// Fill and ImageShader are the exceptions (host elements), for the NoiseOverlay tests.
 // useDerivedValue is mocked to synchronously return { value: fn() } for test predictability.
 
 const React = require('react');
@@ -41,8 +42,17 @@ module.exports = {
   Text: (_props: any) => null,
   Group: ({ children }: any) => children ?? null,
   Paint: (_props: any) => null,
-  Fill: (_props: any) => null,
+  // Fill renders as a host element so NoiseOverlay tests can see its opacity and shader child.
+  Fill: ({ children, ...props }: any) => React.createElement('Fill', props, children),
   RoundedRect: (_props: any) => null,
+
+  // Image shader + loader — used by NoiseShader. useImage resolves synchronously to a 256x256
+  // stub so the "image loaded" branch renders; override with mockReturnValueOnce(null) to test
+  // the loading frame.
+  ImageShader: (props: any) => React.createElement('ImageShader', props),
+  useImage: jest.fn((_source: any) => ({ width: () => 256, height: () => 256 })),
+  FilterMode: { Nearest: 0, Linear: 1 },
+  MipmapMode: { None: 0, Nearest: 1, Linear: 2 },
 
   // Paint effects — null in test environment
   SweepGradient: (_props: any) => null,
