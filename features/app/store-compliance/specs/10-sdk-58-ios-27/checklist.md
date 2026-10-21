@@ -818,33 +818,160 @@ Only FR4's tests are written here. FR5–FR8 write their red tests at the start 
 ## Phase C: Inspection and Docs
 
 ### FR9: local prebuild inspection (checkpoint C)
-- [ ] (C) Record `git status --porcelain` in the worktree (it must be identical at the end of FR9).
-- [ ] (C) Make the scratch copy:
+> **Done 2026-10-20 (22:58–23:12), FR9 run on the FR8 tree at `cc41373`** (`origin/feat/sdk-58` == `cc41373`). Node v22.17.0, npm 10.9.2.
+> - **Toolchain:** local Xcode **27.0 (27A266a)**, iphoneos SDK 27.0 (24A430), CocoaPods **1.16.2**. The EAS production image is **Xcode 27.1 (27A9275)** with CocoaPods 1.17.0 and Node 22.23.3 (FR5 row). That one-minor gap is accepted (Decision 8): this local pass front-runs the EAS build and doesn't replace it.
+> - **Isolation:** no simulator and no Metro were used; FR9 only compiles. J's iPhone 17 Pro simulator (`142D825B-…`) stayed booted and untouched. Nothing listened on 8081 or 8082. `WS/hourglassws` was clean at `aade79b` before and after (`git status --porcelain` empty).
+> - **CI for FR8's last commit:** the docs-only `cc41373` triggered PR run **https://github.com/jaime-alvarez-trilogy/hourglass-app/actions/runs/39546570755**. It was green on both jobs (`app-tests` success, `server-tests` success).
+
+- [x] (C) Record `git status --porcelain` in the worktree (it must be identical at the end of FR9).
+  - 2026-10-20 22:58, at `cc41373` → **empty (0 bytes)**, saved as the baseline. There's no `ios/` or `android/` in the worktree.
+- [x] (C) Make the scratch copy:
   - `T=$(mktemp -d) && cp -cR "/Users/Trilogy/Documents/Claude Code/hg-worktrees/sdk58" "$T/app" && rm "$T/app/.git"`. The `.git` file is a gitdir pointer into the off-limits checkout.
   - `git -C "$T/app" init -q && git -C "$T/app" add -A && git -C "$T/app" commit -qm scratch`.
   - Confirm `$T` has no spaces.
-- [ ] (C) `cd "$T/app" && npx expo-updates runtimeversion:resolve --platform ios`, **before** prebuild. Record: ______
-- [ ] (C) `cd "$T/app" && npx expo prebuild --platform ios --clean --no-install 2>&1 | tee "$T/prebuild.log"`. Record every warning. None may mention `enableSceneSupport` or `requireFullScreen`.
-- [ ] (C) I4 checks (paste each output):
-  - [ ] `plutil -extract UIApplicationSceneManifest.UIApplicationSupportsMultipleScenes raw ios/Hourglassxo/Info.plist` → `false`
-  - [ ] `plutil -extract UIApplicationSceneManifest.UISceneConfigurations.UIWindowSceneSessionRoleApplication.0.UISceneDelegateClassName raw ios/Hourglassxo/Info.plist` → `$(PRODUCT_MODULE_NAME).SceneDelegate`
-  - [ ] `UILaunchStoryboardName` → `SplashScreen`; `UIBackgroundModes` → only `remote-notification`; no `NSFaceIDUsageDescription`; `UIRequiresFullScreen` → `false` and `UISupportedInterfaceOrientations~ipad` has 4 entries (Decision 10 (b): `true`, portrait entries only or the key absent)
-  - [ ] `grep -n "class SceneDelegate: ExpoAppSceneDelegate" ios/Hourglassxo/SceneDelegate.swift`
-  - [ ] `grep -n "class AppDelegate: ExpoAppDelegate, ExpoReactNativeFactoryProvider" ios/Hourglassxo/AppDelegate.swift`
-  - [ ] `grep -o "IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*" ios/*.xcodeproj/project.pbxproj | sort -u` shows only values ≥ 16.4; `cat ios/Podfile.properties.json` has no lower target
-  - [ ] Both `.entitlements` files list `group.com.jalvarez0907.hourglass.widgets`
-  - [ ] `grep -c "1C8F.1" ios/Hourglassxo/PrivacyInfo.xcprivacy` ≥ 1, and the manifest diff against build 18's config is empty
-  - [ ] `ios/ExpoWidgetsTarget/PrivacyInfo.xcprivacy` exists. `grep -c` finds each of `CA92.1`, `1C8F.1`, `C617.1` and `35F9.1`. `grep -n "PrivacyInfo.xcprivacy in Resources" ios/*.xcodeproj/project.pbxproj` includes an entry in the `ExpoWidgetsTarget` Resources phase
-  - [ ] `plutil -extract UIApplicationSceneManifest raw ios/ExpoWidgetsTarget/Info.plist` fails (the key is absent)
-  - [ ] `grep -c "WidgetsEntryView(entry: entry).modifier(HourglassContainerBackground())" ios/ExpoWidgetsTarget/HourglassWidget.swift` → `1`; the struct is present
-- [ ] (C) **Mandatory** `cd "$T/app/ios" && pod install 2>&1 | tee "$T/pod.log"`. Exit 0. Paste `grep "Expo-precompiled" "$T/pod.log"`. Re-check that `ios/ExpoWidgetsTarget/PrivacyInfo.xcprivacy` still has the four reasons.
-- [ ] (C) **Mandatory** `xcodebuild -workspace Hourglassxo.xcworkspace -scheme Hourglassxo -configuration Release -destination 'generic/platform=iOS' -derivedDataPath "$T/dd" CODE_SIGNING_ALLOWED=NO build`.
+  - Done. `T=/var/folders/y3/xrdhpc757jd_vl79_dbp6d9h0000gp/T/tmp.ukPGh6pAHV`, which has **no spaces**. The `cp -cR` APFS clone, `node_modules` included, took 16 s.
+  - `$T/app/.git` was the 81-byte `gitdir: …/WS/hourglassws/.git/worktrees/sdk58` text file. It was removed **before** any git command ran in the copy. Then `git init` and `add -A` produced the one scratch commit `fe55ca9`.
+  - The copy's **657** tracked blobs equal this worktree's: the `git ls-files -s` lists diff empty. `package-lock.json` and `node_modules/.package-lock.json` are byte-identical (`cmp`). The worktree's porcelain was still empty afterwards.
+- [x] (C) `cd "$T/app" && npx expo-updates runtimeversion:resolve --platform ios`, **before** prebuild. Record: **`56d054fc723984e56892a367dca1efa79a9f8fad`**
+  - Exit 0, 55 `fingerprintSources`. This is the FR8 baseline.
+- [x] (C) `cd "$T/app" && npx expo prebuild --platform ios --clean --no-install 2>&1 | tee "$T/prebuild.log"`. Record every warning. None may mention `enableSceneSupport` or `requireFullScreen`.
+  - Ran as `CI=1 npx expo prebuild --platform ios --clean --no-install` with `set -o pipefail` → **exit 0** (`✔ Finished prebuild`). `CI=1` only suppresses prompts.
+  - **Every warning (2), the same two as FR6 and FR7:**
+    - ``» ios: userInterfaceStyle: The existing `userInterfaceStyle` property is preventing splash screen from working properly. Remove it or disable dark mode splash screens.``
+    - `» ios: bundleIdentifier: Expo Widgets: No bundle identifier provided, using fallback: com.jalvarez0907.hourglass.ExpoWidgetsTarget.`
+  - `grep -ciE "enableSceneSupport|requireFullScreen" "$T/prebuild.log"` → **`0`**.
+- [x] (C) I4 checks (paste each output). **All rows PASS.**
+  - [x] `plutil -extract UIApplicationSceneManifest.UIApplicationSupportsMultipleScenes raw ios/Hourglassxo/Info.plist` → `false`
+    - Output: `false` (exit 0).
+  - [x] `plutil -extract UIApplicationSceneManifest.UISceneConfigurations.UIWindowSceneSessionRoleApplication.0.UISceneDelegateClassName raw ios/Hourglassxo/Info.plist` → `$(PRODUCT_MODULE_NAME).SceneDelegate`
+    - Output: `$(PRODUCT_MODULE_NAME).SceneDelegate` (exit 0).
+    - The whole key, as JSON: `{"UIApplicationSupportsMultipleScenes":false,"UISceneConfigurations":{"UIWindowSceneSessionRoleApplication":[{"UISceneDelegateClassName":"$(PRODUCT_MODULE_NAME).SceneDelegate","UISceneConfigurationName":"Default Configuration"}]}}` (one configuration).
+  - [x] `UILaunchStoryboardName` → `SplashScreen`; `UIBackgroundModes` → only `remote-notification`; no `NSFaceIDUsageDescription`; `UIRequiresFullScreen` → `false` and `UISupportedInterfaceOrientations~ipad` has 4 entries (Decision 10 (b): `true`, portrait entries only or the key absent)
+    - `UILaunchStoryboardName` → `SplashScreen`.
+    - `UIBackgroundModes` → `["remote-notification"]` (count `1`).
+    - `NSFaceIDUsageDescription` → `Could not extract value, error: No value at that key path or invalid key path: NSFaceIDUsageDescription` (exit 1, so the key is absent).
+    - `UIRequiresFullScreen` → `false`. This is Decision 10 (a).
+    - `UISupportedInterfaceOrientations~ipad` → `4`: `Portrait, PortraitUpsideDown, LandscapeLeft, LandscapeRight`. The iPhone list is `Portrait, PortraitUpsideDown`.
+    - `CFBundleShortVersionString` → `1.2.0` and `CFBundleVersion` → `19`. Both are literal values in the plist.
+      - The app target's template build settings `MARKETING_VERSION = 1.0` / `CURRENT_PROJECT_VERSION = 1` aren't referenced by either plist.
+      - The widget target's configs carry `"1.2.0"` / `"19"`, and `ios/ExpoWidgetsTarget/Info.plist` says `1.2.0` / `19`, so the app and appex versions match.
+  - [x] `grep -n "class SceneDelegate: ExpoAppSceneDelegate" ios/Hourglassxo/SceneDelegate.swift`
+    - Output: `4:class SceneDelegate: ExpoAppSceneDelegate {`
+  - [x] `grep -n "class AppDelegate: ExpoAppDelegate, ExpoReactNativeFactoryProvider" ios/Hourglassxo/AppDelegate.swift`
+    - Output: `6:class AppDelegate: ExpoAppDelegate, ExpoReactNativeFactoryProvider {`
+  - [x] `grep -o "IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*" ios/*.xcodeproj/project.pbxproj | sort -u` shows only values ≥ 16.4; `cat ios/Podfile.properties.json` has no lower target
+    - The command as written prints `IPHONEOS_DEPLOYMENT_TARGET = ` twice, because its regex can't match a quoted value.
+    - `grep -n` shows all six: `392`, `422`, `491` and `543` are `= 16.4;`, and `564` and `584` are `= "16.4";` (the widget target's Debug and Release). **Every value is 16.4.**
+    - `Podfile.properties.json` keys: `expo.jsEngine` (`hermes`), `EX_DEV_CLIENT_NETWORK_INSPECTOR`, `expo.inlineModules.watchedDirectories`, `expo.inlineModules.xcodeProjectTargets` and `expo-image.disable-libdav1d`. There's no `ios.deploymentTarget`.
+    - The Podfile has `platform :ios, podfile_properties['ios.deploymentTarget'] || '16.4'` and `ENV['EXPO_USE_PRECOMPILED_MODULES'] ||= '1'`.
+  - [x] Both `.entitlements` files list `group.com.jalvarez0907.hourglass.widgets`
+    - `plutil -extract` can't address this key, because it splits key paths on the dots in `com.apple.security.application-groups`. So PlistBuddy was used: `/usr/libexec/PlistBuddy -c "Print :com.apple.security.application-groups" <file>`.
+    - `ios/Hourglassxo/Hourglassxo.entitlements` → `Array { group.com.jalvarez0907.hourglass.widgets }`. It also has `aps-environment` = `development`, which the template writes; EAS signing sets the distribution value.
+    - `ios/ExpoWidgetsTarget/ExpoWidgetsTarget.entitlements` → `Array { group.com.jalvarez0907.hourglass.widgets }`.
+  - [x] `grep -c "1C8F.1" ios/Hourglassxo/PrivacyInfo.xcprivacy` ≥ 1, and the manifest diff against build 18's config is empty
+    - Output: `1`. `plutil -lint` → OK.
+    - The generated manifest, converted to JSON, **deep-equals `git show build-18:app.json` `expo.ios.privacyManifests`** after key-sorting (`true`), and build 18's config equals the current `app.json`'s (`true`).
+    - Content: UserDefaults `CA92.1, 1C8F.1`; FileTimestamp `C617.1, 0A2A.1, 3B52.1`; DiskSpace `E174.1, 85F4.1`; SystemBootTime `35F9.1`; `NSPrivacyTracking` false; 0 tracking domains; 2 collected data types.
+  - [x] `ios/ExpoWidgetsTarget/PrivacyInfo.xcprivacy` exists. `grep -c` finds each of `CA92.1`, `1C8F.1`, `C617.1` and `35F9.1`. `grep -n "PrivacyInfo.xcprivacy in Resources" ios/*.xcodeproj/project.pbxproj` includes an entry in the `ExpoWidgetsTarget` Resources phase
+    - The file exists (1061 bytes) and `plutil -lint` → OK. Counts: `CA92.1: 1`, `1C8F.1: 1`, `C617.1: 1`, `35F9.1: 1`. sha256 `22244ed3…067f`, the same as FR6.
+    - `grep -n` → 4 lines: the build files `8C7850B7… /* PrivacyInfo.xcprivacy in Resources */` (fileRef `99193C1E…`) and `00F309EE… /* PrivacyInfo.xcprivacy in Resources */` (fileRef `330BAD9A…`), and one phase entry for each at lines 225 and 233.
+    - Parsing the project (`plutil -convert json`) maps them to targets:
+      - `ExpoWidgetsTarget` phases are `Sources | Frameworks | Resources`. Its Resources phase `10C0A62F…` = **`PrivacyInfo.xcprivacy`** (build file `00F309EE…`).
+      - `Hourglassxo`'s Resources phase `13B07F8E…` = `Expo.plist, Hourglassxo/Images.xcassets, Hourglassxo/SplashScreen.storyboard, Hourglassxo/PrivacyInfo.xcprivacy` (build file `8C7850B7…`), so the app target is unchanged.
+  - [x] `plutil -extract UIApplicationSceneManifest raw ios/ExpoWidgetsTarget/Info.plist` fails (the key is absent)
+    - Output: `Could not extract value, error: No value at that key path or invalid key path: UIApplicationSceneManifest` (exit 1).
+    - The plist holds only `CFBundleShortVersionString` `1.2.0`, `CFBundleVersion` `19`, `ExpoWidgetsAppGroupIdentifier` and `NSExtension.NSExtensionPointIdentifier` `com.apple.widgetkit-extension`.
+  - [x] `grep -c "WidgetsEntryView(entry: entry).modifier(HourglassContainerBackground())" ios/ExpoWidgetsTarget/HourglassWidget.swift` → `1`; the struct is present
+    - Output: `1`. It's also the only `WidgetsEntryView(entry: entry)` in the file (count `1`).
+    - `21:struct HourglassContainerBackground: ViewModifier {`, with `content.containerBackground(Color(red: 0.051, green: 0.051, blue: 0.102), for: .widget)` under `#available(iOS 17.0, *)`.
+- [x] (C) **Mandatory** `cd "$T/app/ios" && pod install 2>&1 | tee "$T/pod.log"`. Exit 0. Paste `grep "Expo-precompiled" "$T/pod.log"`. Re-check that `ios/ExpoWidgetsTarget/PrivacyInfo.xcprivacy` still has the four reasons.
+  - Ran with `set -o pipefail` → **exit 0**: `Pod installation complete! There are 135 dependencies from the Podfile and 135 total pods installed.`
+    - `Pod install took 30 [s]` (34 s wall). The RN 0.88.0 core and dependencies tarballs (debug and release) and Hermes `260318099.0.4` came from the warm `~/Library/Caches/ReactNative`.
+    - ``Found 10 modules for target `Hourglassxo` `` and ``… `ExpoWidgetsTarget` ``.
+  - **`grep "Expo-precompiled"` → 49 lines.** Deduplicated (`<copy>` = `$T/app`), the set is **identical to checkpoint B, FR6 and FR7**:
+    - `Precompiled modules:` `📦 ExpoFileSystem (58.0.10)`, `📦 ExpoFont (58.0.9)`, `📦 ExpoImage (58.0.16)` (`∟ SDWebImage.xcframework (5.21.6)`, `∟ SDWebImageAVIFCoder.xcframework (0.12.0)`, `∟ SDWebImageSVGCoder.xcframework (1.8.0)`, `∟ SDWebImageWebPCoder.xcframework (0.15.0)`, `∟ libavif.xcframework (1.0.0)`), `📦 ExpoModulesCore (58.0.23)`, `📦 ExpoModulesWorklets (58.0.23)`.
+    - `Looking for ExpoModulesCore.xcframework at: <copy>/ios/Pods/ExpoModulesCore/ExpoModulesCore.xcframework`; `Bundled SPM frameworks: SDWebImage, SDWebImageAVIFCoder, SDWebImageSVGCoder, SDWebImageWebPCoder, libavif`.
+    - `Stripping bundled dependency 'SDWebImage' | 'SDWebImageAVIFCoder' | 'SDWebImageSVGCoder' | 'SDWebImageWebPCoder' | 'libavif/libdav1d' from ExpoImage`.
+    - `Adding ExpoModulesJSI header search paths to all targets`; `Adding ExpoModulesWorklets header search paths to ExpoModulesWorkletsAdapter`; `Adding ExpoModulesWorklets header search paths to ExpoUI`.
+    - `<pod>: building from source (prebuilt tarball not found)`, twice each, for **RNReanimated**, **RNWorklets**, **RNScreens**, **RNSVG**, **react-native-safe-area-context**, **RNCAsyncStorage** and **react-native-skia**. Each comes with `Expected tarball: <copy>/packages/precompile/.build/<pkg>/output/<ver>/0.88.0/260318099.0.2/debug/xcframeworks/<Pod>.tar.gz`.
+      - `pod install` always looks for the `debug` flavor. At build time, the `[CP-User] [Expo] Switch ExpoModulesCore XCFramework for build configuration` and `[CP-User] [RNCore] Replace React Native Core for the right configuration` phases swap in Release.
+    - **ExpoWidgets and ExpoUI build from source.** The Decision 9 fallback was not needed.
+  - **Other `pod install` output**, recorded because this is the first time it was read in full (`expo run:ios` doesn't echo it):
+    - 8 × ``[!] Unable to determine whether to build `<pod>` as a module due to a conflict between the following target definitions: `Pods-Hourglassxo` requires `<pod>` as a module / `Pods-ExpoWidgetsTarget` does not … Defaulting to skip building `<pod>` as a module.``
+      - The pods: `DoubleConversion`, `RCT-Folly`, `React-jsinspector`, `SocketRocket`, `boost`, `fast_float`, `fmt` and `glog`.
+      - It's a two-target CocoaPods warning. Both targets compile and link (below), so no action.
+    - `warning: The @ExpoModule class 'CoreModule' (…/expo-modules-core/ios/Core/Modules/CoreModule.swift) is internal, so the generated modules provider cannot reference it.` This is upstream; the same tree launched in checkpoint B, FR6 and FR7.
+    - The usual `[!] <pod> has added N script phase(s)` notices for ExpoFileSystem, ExpoFont, ExpoImage, ExpoModulesCore, ExpoModulesWorklets, React-Core-prebuilt, ReactNativeDependencies and hermes-engine.
+  - **Re-check after `pod install`:**
+    - `ios/ExpoWidgetsTarget/PrivacyInfo.xcprivacy` is unchanged: sha256 `22244ed3…067f`, and `CA92.1`, `1C8F.1`, `C617.1` and `35F9.1` each count `1`.
+    - The widget target's phases are `[CP] Check Pods Manifest.lock | [Expo] Configure project | Sources | Frameworks | Resources | [CP] Copy Pods Resources`, and its Resources phase still holds only `PrivacyInfo.xcprivacy`.
+    - The app manifest was rewritten by RN's aggregation, but only reordered (SystemBootTime now comes before DiskSpace). An order-insensitive compare with the prebuild output → `true`, so **no reason was added**.
+- [x] (C) **Mandatory** `xcodebuild -workspace Hourglassxo.xcworkspace -scheme Hourglassxo -configuration Release -destination 'generic/platform=iOS' -derivedDataPath "$T/dd" CODE_SIGNING_ALLOWED=NO build`.
   - Exit 0. Never archive or export.
   - `ls "$T/dd/Build/Products/Release-iphoneos/Hourglassxo.app/PlugIns/ExpoWidgetsTarget.appex/"`: no `Frameworks/`, and `PrivacyInfo.xcprivacy` is present.
   - On failure, record the first error, follow spec-research edge case 4, fix, and re-run FR9.
-- [ ] (C) In the worktree: `npx expo-doctor` exits 0. Record the check count.
-- [ ] (C) The worktree's `runtimeversion:resolve --platform ios` (the FR8 value, after a fresh `npm ci`) equals the `$T/app` pre-prebuild value. Record both.
-- [ ] (C) `rm -rf "$T"`. The worktree's `git status --porcelain` is unchanged from the first FR9 step.
+  - **Exit 0, `** BUILD SUCCEEDED **`**, 23:02:17 → 23:05:18. No archive or export ran.
+    - The log has 59,918 lines and **0 `error:` lines**.
+    - **No** `not safe for use in application extensions`, `unavailable in application extension`, duplicate-symbol, `is implemented in both` or undefined-symbol line.
+    - The only `ld: warning` is `ExpoModulesJSI-product: ld: warning: -undefined dynamic_lookup is deprecated on iOS`.
+    - The 55 `APPLICATION_EXTENSION_API_ONLY` / `-application-extension` hits are build-setting strings in command lines (pods such as ExpoUI and ExpoModulesCore), not diagnostics.
+    - Our targets raise one warning: `[Expo Dev Launcher] Strip Local Network Keys for Release` runs on every build (no outputs).
+    - The other 1489 warnings are third-party compile noise: nullability, `-Wdocumentation`, deprecations and umbrella headers.
+    - **So Q2 is answered for Release:** dropped hunk G (`APPLICATION_EXTENSION_API_ONLY` for ExpoWidgets) and the Decision 9 fallback are **not needed**, on local Xcode 27.0.
+  - **The appex** (`ls …/ExpoWidgetsTarget.appex/`) contains `ExpoWidgets.bundle  ExpoWidgetsTarget  ExpoWidgetsTarget.debug.dylib  Info.plist  Metadata.appintents  PrivacyInfo.xcprivacy  React-cxxreact_privacy.bundle  React-timing_privacy.bundle  __preview.dylib`.
+    - **No `Frameworks/` directory: PASS.**
+    - **`PrivacyInfo.xcprivacy` is present: PASS.** `plutil -lint` OK. It's byte-identical (`cmp`) to the generated `ios/ExpoWidgetsTarget/PrivacyInfo.xcprivacy`, with the four reasons.
+    - Its `Info.plist` has **no `UIApplicationSceneManifest`**; it holds `1.2.0` / `19`, `com.jalvarez0907.hourglass.ExpoWidgetsTarget`, `MinimumOSVersion` 16.4, `DTSDKName` iphoneos27.0, `DTSDKBuild` 24A430, `DTXcode` 2700 and `DTXcodeBuild` 27A266a.
+  - **The app** (I5 dry run on the local toolchain): `1.2.0` / `19`, `MinimumOSVersion` **16.4**, `DTSDKName` **iphoneos27.0**, `DTSDKBuild` **24A430**, `DTXcode` **2700**, `DTXcodeBuild` 27A266a, scene delegate **`Hourglassxo.SceneDelegate`**, `UIRequiresFullScreen` false, and 4 iPad orientations.
+    - `main.jsbundle` is Hermes bytecode: 6,643,459 bytes, magic `c6 1f bc 03`.
+    - `Frameworks/` holds `ExpoFileSystem ExpoFont ExpoImage ExpoModulesCore ExpoModulesJSI ExpoModulesWorklets React ReactNativeDependencies SDWebImage SDWebImageAVIFCoder SDWebImageSVGCoder SDWebImageWebPCoder hermesvm libavif` (`.framework`).
+    - The app's `PrivacyInfo.xcprivacy` has the build-18 reasons.
+  - **Required-reason APIs in the Release appex.**
+    - The widget code lives in `ExpoWidgetsTarget.debug.dylib` (7,451,800 bytes). `otool -L` of the 72 KB stub `ExpoWidgetsTarget` shows only `@rpath/ExpoWidgetsTarget.debug.dylib` and `libSystem`, so the scan covers the dylib.
+    - In the dylib, `nm -u` plus selector strings find only `_OBJC_CLASS_$_NSUserDefaults` / `initWithSuiteName:` (1C8F.1, declared).
+    - `NSFileManager` is used only for `containerURLForSecurityApplicationGroupIdentifier:` and `createDirectoryAtURL:withIntermediateDirectories:attributes:error:`, neither of which is a required-reason API.
+    - There's no `stat*`, `getattrlist*`, `statfs`, `mach_absolute_time`, `systemUptime` or disk-space key.
+    - RN and Expo are linked dynamically from the app's `Frameworks/` (`@rpath/React.framework`, `ExpoModulesCore`, `ExpoModulesJSI`, `ExpoModulesWorklets`, `ReactNativeDependencies`, `hermesvm`).
+    - **I10's four reasons cover the appex in Release too**, the same conclusion as FR6 in Debug.
+  - **Finding (no change made): the Release appex holds Xcode's previews "debug dylib" split.**
+    - `ExpoWidgetsTarget.debug.dylib` and `__preview.dylib` are present. The app target has no such split.
+    - Cause: expo-widgets' plugin writes `SWIFT_OPTIMIZATION_LEVEL = "-Onone"` into **both** of the widget target's configurations (`plugin/build/ios/xcode/addXCConfigurationList.js:25` in 58.0.21). Combined with Xcode's default `ENABLE_DEBUG_DYLIB = YES` (`-showBuildSettings`: widget Release `SWIFT_OPTIMIZATION_LEVEL = -Onone`, `ENABLE_DEBUG_DYLIB = YES`), that produces the split. The app's Release has no `SWIFT_OPTIMIZATION_LEVEL` override.
+    - **This is not new in SDK 58.** expo-widgets 55.0.5 has the same line (`plugin/build/xcode/addXCConfigurationList.js:17`, the `commonBuildSettings` spread into `Debug` and `Release`), so build 18's widget Swift was also compiled `-Onone`.
+    - **Build 18's archived IPA** (EAS build `05e37eef-9a8a-47ef-bcee-f37be3aebad9`: production, 1.1.0 (18), `aade79b`).
+      - The IPA is 36,662,407 bytes, sha256 `5f779657…8a0a`. It was downloaded read-only into its own `mktemp -d`, inspected only with `unzip -l`, `plutil` and `otool`, and deleted.
+      - Its appex holds a **single** `ExpoWidgetsTarget` binary (3,482,352 bytes), with **no** `.debug.dylib`, `__preview.dylib` or `Frameworks/`.
+      - So an `archive` (EAS) doesn't emit the split that this compile-only `build` action does. That's **inferred** from build 18; FR11's IPA check confirms it for build 19.
+    - The same IPA shows that **build 18's appex had no root `PrivacyInfo.xcprivacy`**, only `React-Core_privacy.bundle` and `React-cxxreact_privacy.bundle` (spec-research F2.10). That's useful for J's pending ITMS-91053 baseline.
+    - Build 18's app keys: `DTSDKName` iphoneos26.2, `DTSDKBuild` 23C53, `DTXcode` 2620 (17C52), `MinimumOSVersion` 15.1, appex `1.1.0` / `18`.
+  - **Second scheme (the task notes ask for both):** `xcodebuild … -scheme ExpoWidgetsTarget -configuration Release -destination 'generic/platform=iOS' -derivedDataPath "$T/dd-widget" CODE_SIGNING_ALLOWED=NO build` → **exit 0, `** BUILD SUCCEEDED **`**, 23:07:31 → 23:10:05.
+    - It used fresh derived data, so it's an independent build. Xcode's autogenerated extension scheme also builds the host app: `Ld` for `ExpoWidgetsTarget`, `.debug.dylib`, `__preview.dylib` and `Hourglassxo`.
+    - 0 errors, no extension-safety, duplicate or undefined-symbol line, and the same single own-target warning.
+    - The standalone `ExpoWidgetsTarget.appex` has the same contents: no `Frameworks/`, `PrivacyInfo.xcprivacy` byte-identical to the generated file, and no `UIApplicationSceneManifest`.
+- [x] (C) In the worktree: `npx expo-doctor` exits 0. Record the check count.
+  - `npx expo-doctor` (expo-doctor **1.21.5**, from the npx cache; `npm view expo-doctor version` → 1.21.5) → **exit 0**: `Running 20 checks on your project...` / **`20/20 checks passed. No issues detected!`**
+  - The worktree's porcelain was still empty afterwards.
+- [x] (C) The worktree's `runtimeversion:resolve --platform ios` (the FR8 value, after a fresh `npm ci`) equals the `$T/app` pre-prebuild value. Record both.
+  - Re-verified at FR9 time, not just taken from FR8.
+    - The worktree as it stood → `56d054fc723984e56892a367dca1efa79a9f8fad`.
+    - Then `rm -rf node_modules && npm ci` → exit 0 (`added 1519 packages, and audited 1520 packages`, postinstall `No patch files found`). `git diff --quiet package-lock.json` → unchanged.
+    - Resolving again → **`56d054fc723984e56892a367dca1efa79a9f8fad`**.
+  - `$T/app` before prebuild → **`56d054fc723984e56892a367dca1efa79a9f8fad`**.
+  - **Equal.** The full JSON outputs (55 `fingerprintSources`) of the post-`npm ci` worktree run and the copy run are **byte-identical** (`cmp`). This is also the FR8 baseline. iOS only; `npx expo-fingerprint` wasn't used.
+- [x] (C) `rm -rf "$T"`. The worktree's `git status --porcelain` is unchanged from the first FR9 step.
+  - `rm -rf "$T"` removed 10 GB (the copy, `dd`, `dd-widget`), and the build-18 IPA directory was removed too. `ls` → `No such file or directory` for both.
+  - `git status --porcelain` → **empty, identical to the first step** (`cmp` of the two captures), at `cc41373`. The copy had its own repo from the start, so the worktree's index was never touched. There's still no `ios/` or `android/` in the worktree.
+  - Logs from this run stay in `/tmp/fr9/` (ephemeral).
+- [x] (C) Gates on the post-`npm ci` tree (no source change in FR9):
+  - `npm test` → **exit 0**: `Test Suites: 184 passed, 184 total`, `Tests: 5315 passed, 5315 total` (as in FR8).
+  - `npm run typecheck` → **exit 0**.
+  - `npm run lint` → **exit 0**: `✖ 486 problems (0 errors, 486 warnings)` (as in FR8).
+- **Deviations:**
+  - `CI=1` was added to prebuild.
+  - The I4 deployment-target and entitlement rows were read with `grep -n` and PlistBuddy, because the checklist's `grep -o … [0-9.]*` misses quoted values and `plutil` can't address dotted keys.
+  - Extra checks beyond FR9's list: the second-scheme build, the build-18 IPA inspection (a read-only EAS artifact download), the appex required-reason scan, and a fresh `npm ci` in the worktree before the fingerprint compare.
+- **Follow-ups (J's call, not done here):**
+  - (1) **FR11's IPA check should also assert that the appex has no `*.debug.dylib` or `__preview.dylib`.** If an EAS archive ever ships them, a small local plugin can set `ENABLE_DEBUG_DYLIB = NO` (or `-O`) on the widget's Release config. Either change would fork the runtime, so it has to ride a native build.
+  - (2) The widget's Release Swift is unoptimized (`-Onone`) upstream in both expo-widgets 55 and 58. Build 18 shipped that way, so it's a performance and size question, not a regression.
 
 ### FR10: docs
 - [ ] (C) Update `TECH_STACK.md`, `CLAUDE.md:69`, `README.md:27,66`, `docs/ARCHITECTURE.md` (§5.7, §7.2, §8.6), `docs/RELEASING.md` ((a)–(e)), `FEATURE.md` and `site/support.html`, per FR10.
@@ -1054,3 +1181,20 @@ Each cell passes when there's no clipping or overlap, every chart re-measures wi
 - Still open:
   - The ITMS-91053 baseline (J; FR11).
   - The Phase A/B validator boxes, and the Phase A.2 and B.2 reviews (B.2 Step 1 runs on PR #4).
+
+**2026-10-20 (FR9 implemented, checkpoint C)**: FR9 is done on SDK 58, at `cc41373`, with no source change. The only commit is this checklist evidence.
+- **Throwaway copy:** `mktemp -d` → `/var/folders/…/T/tmp.ukPGh6pAHV`, with its own `git init` (the `.git` pointer was removed first), and deleted afterwards. The worktree's `git status --porcelain` was empty before and after.
+- **Prebuild:** exit 0. Its only two warnings are the known splash and widget bundle-id notes, with none about scenes or full screen. **Every I4 row passes**, including the widget's own `PrivacyInfo.xcprivacy` in the `ExpoWidgetsTarget` Resources phase and the `HourglassContainerBackground` modifier.
+- **`pod install`:** exit 0, 135 pods. The `[Expo-precompiled]` set is identical to checkpoint B, FR6 and FR7. The widget manifest survived `pod install`.
+- **Release compile-only `xcodebuild`** (local Xcode 27.0 27A266a; EAS uses 27.1 27A9275, an accepted gap): the `Hourglassxo` scheme and the `ExpoWidgetsTarget` scheme both report `BUILD SUCCEEDED` with 0 errors and no extension-safety errors.
+  - The appex has no `Frameworks/`, and its `PrivacyInfo.xcprivacy` is byte-identical to the generated file. **Q2 is answered for Release: neither hunk G nor the Decision 9 fallback is needed.**
+  - The I5 keys on the local toolchain are iphoneos27.0 / 24A430 / 2700 / 16.4 / `.SceneDelegate`.
+- **`expo-doctor` 1.21.5:** 20/20 checks passed, exit 0.
+- **Fingerprint:** `56d054fc723984e56892a367dca1efa79a9f8fad`, the same in the copy before prebuild and in the worktree after a fresh `npm ci`. The JSON outputs are byte-identical.
+- **Gates:** test exit 0 (184 suites / 5315 tests), typecheck exit 0, lint exit 0 (486 warnings).
+- **Finding:** the compile-only Release appex carries Xcode's `ExpoWidgetsTarget.debug.dylib` and `__preview.dylib`. That's because expo-widgets (55 and 58 alike) sets `SWIFT_OPTIMIZATION_LEVEL = -Onone` on the widget's Release config.
+  - Build 18's archived IPA (EAS `05e37eef…`) has a single appex binary, so an archive shouldn't ship the split. FR11's IPA check should assert that.
+  - The same IPA confirms build 18's appex had no root privacy manifest, which is useful for J's ITMS-91053 baseline.
+- **Still open:**
+  - The ITMS-91053 baseline (J; FR11).
+  - The Phase A/B validator boxes, and the Phase A.2, B.2 and C reviews.
