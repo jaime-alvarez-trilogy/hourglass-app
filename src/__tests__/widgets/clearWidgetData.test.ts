@@ -21,14 +21,16 @@ import type { ApprovalItem, ManualApprovalItem } from '../../lib/approvals';
 import type { ManualRequestEntry } from '../../types/requests';
 
 const mockUpdateTimeline = jest.fn();
-const mockCreateWidget = jest.fn((_name: string, _layout: unknown) => ({
+const mockCreateWidget = jest.fn((_name: string, _layout: unknown, _initialProps?: unknown) => ({
   updateTimeline: mockUpdateTimeline,
 }));
 const mockRequireOptionalNativeModule = jest.fn((_name: string): unknown => ({}));
 
 jest.mock('expo-widgets', () => ({ createWidget: mockCreateWidget }), { virtual: true });
 
-jest.mock('expo-modules-core', () => ({
+// 10-sdk-58-ios-27 FR6: bridge.ts takes requireOptionalNativeModule from 'expo', which re-exports
+// it (expo/build/Expo.d.ts). expo-modules-core is only a transitive dependency of this app.
+jest.mock('expo', () => ({
   requireOptionalNativeModule: (name: string) => mockRequireOptionalNativeModule(name),
 }));
 
@@ -160,7 +162,7 @@ describe('clearWidgetData (iOS)', () => {
 
     await clearWidgetData();
 
-    expect(mockCreateWidget).toHaveBeenLastCalledWith('HourglassWidget', expect.any(String));
+    expect(mockCreateWidget).toHaveBeenLastCalledWith('HourglassWidget', expect.any(String), expect.any(Object));
     const entries = lastTimeline();
     expect(entries).toHaveLength(1);
     expect(entries[0].date).toBeInstanceOf(Date);
@@ -223,5 +225,39 @@ describe('clearWidgetData (iOS)', () => {
     await expect(clearWidgetData()).resolves.toBeUndefined();
     expect(mockCreateWidget).not.toHaveBeenCalled();
     expect(mockUpdateTimeline).not.toHaveBeenCalled();
+  });
+});
+
+// 10-sdk-58-ios-27 FR6 (e): expo-widgets 58 stores createWidget's third argument as the widget's
+// initial props, which placeholder() and a timeline-less gallery snapshot render. Without it they
+// get `undefined` props. Both call sites pass the signed-out snapshot: no user data, every key.
+describe('createWidget initialProps (expo-widgets 58)', () => {
+  function lastCreateWidgetCall(): unknown[] {
+    const calls = mockCreateWidget.mock.calls as unknown[][];
+    expect(calls.length).toBeGreaterThan(0);
+    return calls[calls.length - 1];
+  }
+
+  it.each([
+    ['updateWidgetData', () => updateWidgetData(makeHoursData(), null, 1, makeConfig(), [makeApproval() as ApprovalItem])],
+    ['clearWidgetData', () => clearWidgetData()],
+  ])('%s passes 3 arguments, the third being the signed-out snapshot', async (_name, run) => {
+    const before = Date.now();
+    await run();
+    const args = lastCreateWidgetCall();
+    expect(args).toHaveLength(3);
+    const [name, layout, initialProps] = args as [string, string, ReturnType<typeof buildSignedOutWidgetData>];
+    expect(name).toBe('HourglassWidget');
+    expect(typeof layout).toBe('string');
+    expect(initialProps.cachedAt).toBeGreaterThanOrEqual(before);
+    expect(initialProps).toEqual(buildSignedOutWidgetData(initialProps.cachedAt));
+  });
+
+  it('the initial props carry none of the signed-in user\'s data', async () => {
+    await updateWidgetData(makeHoursData(), null, 1, makeConfig(), [makeApproval() as ApprovalItem]);
+    const initialProps = JSON.stringify(lastCreateWidgetCall()[2]);
+    expect(JSON.stringify(lastTimeline())).toContain('Direct Report Name');
+    expect(initialProps).not.toContain('Direct Report Name');
+    expect(initialProps).not.toContain('32.5');
   });
 });

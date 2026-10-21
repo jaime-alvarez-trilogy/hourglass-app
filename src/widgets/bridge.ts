@@ -6,7 +6,7 @@
 // Extended in 08-widget-enhancements: buildDailyEntries, formatApprovalItems, formatMyRequests
 
 import { Platform } from 'react-native';
-import { requireOptionalNativeModule } from 'expo-modules-core';
+import { requireOptionalNativeModule } from 'expo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getUrgencyLevel, getSundayMidnightGMT, computePacingSignal } from '../lib/hours';
 import type { HoursData, DailyEntry } from '../lib/hours';
@@ -453,12 +453,24 @@ export async function readWidgetData(): Promise<WidgetData | null> {
 //
 // The native WidgetObject stores this string in UserDefaults (App Group shared
 // storage). The widget extension reads it, evaluates it, and calls the function
-// with (props: WidgetData, env: { widgetFamily: string }) each render cycle.
+// with (props: WidgetData, env: { widgetFamily: string, date: Date }) each render cycle.
+//
+// 10-sdk-58-ios-27 FR6 (expo-widgets 58 / @expo/ui 58):
+//   - props may be undefined: placeholder() and a timeline-less gallery snapshot pass the
+//     initial props, and there are none until createWidget has stored them (#46492).
+//   - No native background since expo-widgets 56: each system root sets
+//     containerBackground('#0D0D1A', 'widget'), the build-18 native color. Lock-screen
+//     accessories don't (the system draws their background).
+//   - Stacks without `spacing` now get the system default, so every HStack/VStack sets it.
+//   - env.date is the timeline entry's date. The countdown reads it, not Date.now(): an
+//     entry can be evaluated at a different time than its date (WidgetKit renders timeline
+//     entries ahead of time), and the 96 entries span 24 h of one app open.
 //
 // 02-ios-visual: Full brand redesign — mesh bg simulation, glass panels,
 // pace badge, week delta text, brainliftTarget-driven progress bars.
 //
 const WIDGET_LAYOUT_JS = `(function(props, env) {
+  props = props || {};
   var fillFrame = frame({ maxWidth: 9999, maxHeight: 9999 });
 
   // ── Palette ──────────────────────────────────────────────────────────────────
@@ -503,8 +515,9 @@ const WIDGET_LAYOUT_JS = `(function(props, env) {
   var deadlineLabel = '';
   var msLeft = 0;
   var isEOWUrgent = false;
+  var nowMs = (env && env.date) ? env.date.getTime() : Date.now();
   if (deadline) {
-    msLeft = deadline - Date.now();
+    msLeft = deadline - nowMs;
     if (msLeft > 0) {
       var totalH = Math.floor(msLeft / 3600000);
       deadlineLabel = totalH >= 24
@@ -597,7 +610,7 @@ const WIDGET_LAYOUT_JS = `(function(props, env) {
       items.push(Text({ modifiers: [foregroundStyle(violet), font({ size: 11, weight: 'bold' })], children: brainlift + ' BL' }));
     }
     items.push(Spacer({}));
-    return HStack({ children: items });
+    return HStack({ spacing: 0, children: items });
   }
 
   // ── Approval row (manager large) ──────────────────────────────────────────────
@@ -614,7 +627,7 @@ const WIDGET_LAYOUT_JS = `(function(props, env) {
           startPoint: { x: 0, y: 0 }, endPoint: { x: 0, y: 0.5 } }),
         opacity(0.07), fillFrame
       ]}),
-      HStack({ modifiers: [padding({ top: 10, bottom: 10, leading: 12, trailing: 12 })], children: [
+      HStack({ spacing: 0, modifiers: [padding({ top: 10, bottom: 10, leading: 12, trailing: 12 })], children: [
         Text({ modifiers: [foregroundStyle(text1), font({ size: 13, weight: 'medium' })],
           children: item.name || '' }),
         Spacer({}),
@@ -663,7 +676,7 @@ const WIDGET_LAYOUT_JS = `(function(props, env) {
     smallBottom
   ]}));
 
-  var small = ZStack({ alignment: 'leading', children: smallBgChildren });
+  var small = ZStack({ alignment: 'leading', modifiers: [containerBackground('#0D0D1A', 'widget')], children: smallBgChildren });
 
   // ══════════════════════════════════════════════════════════════════════════════
   // MEDIUM — two cards + status row (pill + pending OR hours left) + footer w/ BrainLift
@@ -699,7 +712,7 @@ const WIDGET_LAYOUT_JS = `(function(props, env) {
         Text({ modifiers: [foregroundStyle(gold), font({ size: 22, weight: 'bold' })], children: earnings }),
       ])
     ]}),
-    HStack({ alignment: 'center', children: [
+    HStack({ alignment: 'center', spacing: 0, children: [
       buildPill(),
       Spacer({}),
       mediumStatusRight
@@ -708,7 +721,7 @@ const WIDGET_LAYOUT_JS = `(function(props, env) {
     buildFooter(true)
   ]}));
 
-  var medium = ZStack({ alignment: 'leading', children: medBgChildren });
+  var medium = ZStack({ alignment: 'leading', modifiers: [containerBackground('#0D0D1A', 'widget')], children: medBgChildren });
 
   // ══════════════════════════════════════════════════════════════════════════════
   // LARGE — two modes:
@@ -732,7 +745,7 @@ const WIDGET_LAYOUT_JS = `(function(props, env) {
           Text({ modifiers: [foregroundStyle(gold), font({ size: 22, weight: 'bold' })], children: earnings }),
         ])
       ]}),
-      HStack({ children: [
+      HStack({ spacing: 0, children: [
         Text({ modifiers: [foregroundStyle('#F43F5E'), font({ size: 12, weight: 'bold' })],
           children: '\u26A0  PENDING APPROVALS' }),
         Spacer({}),
@@ -776,7 +789,7 @@ const WIDGET_LAYOUT_JS = `(function(props, env) {
           Text({ modifiers: [foregroundStyle(gold), font({ size: 22, weight: 'bold' })], children: earnings }),
         ])
       ]}),
-      HStack({ alignment: 'center', children: largeStatusChildren }),
+      HStack({ alignment: 'center', spacing: 0, children: largeStatusChildren }),
       // Second metrics row: AI% + BrainLift
       HStack({ spacing: 12, modifiers: [frame({ height: 58 })], children: [
         buildGlassCard([
@@ -805,7 +818,7 @@ const WIDGET_LAYOUT_JS = `(function(props, env) {
     modifiers: [padding({ top: 16, leading: 16, trailing: 16, bottom: 20 })],
     children: largeRows }));
 
-  var large = ZStack({ alignment: 'leading', children: largeBgChildren });
+  var large = ZStack({ alignment: 'leading', modifiers: [containerBackground('#0D0D1A', 'widget')], children: largeBgChildren });
 
   // ── Lock screen accessories ──────────────────────────────────────────────────
   var family = (env && env.widgetFamily) || 'systemMedium';
@@ -836,7 +849,14 @@ const WIDGET_LAYOUT_JS = `(function(props, env) {
 
 // ─── iOS widget handle ────────────────────────────────────────────────────────
 
-type CreateWidget = (...args: unknown[]) => { updateTimeline: (entries: unknown[]) => void };
+// expo-widgets' shipped types want a 'widget'-directive component; this app hands the native
+// module the layout source itself (WIDGET_LAYOUT_JS), which WidgetObject stores as a string.
+// The third argument is stored as the widget's initial props (expo-widgets 58).
+type CreateWidget = (
+  name: string,
+  layout: string,
+  initialProps?: WidgetData,
+) => { updateTimeline: (entries: { date: Date; props: WidgetData }[]) => void };
 
 /**
  * expo-widgets' createWidget, or null when the native module isn't compiled in
@@ -916,8 +936,7 @@ export async function updateWidgetData(
     const createWidget = loadCreateWidget();
     if (!createWidget) return;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const widget = createWidget('HourglassWidget', WIDGET_LAYOUT_JS as any);
+      const widget = createWidget('HourglassWidget', WIDGET_LAYOUT_JS, buildSignedOutWidgetData(Date.now()));
       const entries = buildTimelineEntries(data, 96, 15);
       widget.updateTimeline(entries);
       console.log('[bridge] widget timeline updated,', entries.length, 'entries, urgency:', data.urgency);
@@ -977,7 +996,7 @@ export async function clearWidgetData(): Promise<void> {
   const createWidget = loadCreateWidget();
   if (!createWidget) return;
   try {
-    const widget = createWidget('HourglassWidget', WIDGET_LAYOUT_JS);
+    const widget = createWidget('HourglassWidget', WIDGET_LAYOUT_JS, buildSignedOutWidgetData(Date.now()));
     const now = Date.now();
     widget.updateTimeline([{ date: new Date(now), props: buildSignedOutWidgetData(now) }]);
     console.log('[bridge] widget timeline cleared');

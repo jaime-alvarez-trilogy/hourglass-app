@@ -37,7 +37,7 @@ type PackageJson = {
   scripts?: Record<string, string>;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
-  expo?: { install?: { exclude?: string[] } };
+  expo?: { install?: { exclude?: string[] }; autolinking?: { android?: { exclude?: string[] } } };
 };
 
 type PackageLock = {
@@ -596,6 +596,20 @@ describe('SDK 58 line (spec 10 FR4)', () => {
 
   it('patches/ contains no .patch files (both SDK 55 patches are retired)', () => {
     expect(patchFiles).toEqual([]);
+  });
+});
+
+describe('expo-widgets stays off Android (spec 10 FR6, Decision 15)', () => {
+  // expo-widgets 58 is apple + android (Glance, WorkManager, a Hermes runtime). Android widgets render
+  // through react-native-android-widget, and bridge.ts only requires expo-widgets on iOS.
+  it('package.json expo.autolinking.android.exclude contains expo-widgets', () => {
+    expect(pkg.expo?.autolinking?.android?.exclude ?? []).toContain('expo-widgets');
+  });
+
+  it('expo-widgets is not excluded from apple autolinking', () => {
+    const appleExclude = (pkg.expo?.autolinking as { apple?: { exclude?: string[] }; ios?: { exclude?: string[] } } | undefined) ?? {};
+    expect(appleExclude.apple?.exclude ?? []).not.toContain('expo-widgets');
+    expect(appleExclude.ios?.exclude ?? []).not.toContain('expo-widgets');
   });
 });
 

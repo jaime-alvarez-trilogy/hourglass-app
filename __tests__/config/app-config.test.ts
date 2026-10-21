@@ -10,6 +10,9 @@ const expo = appJson.expo as unknown as ExpoConfig;
 const pluginEntries = (name: string) =>
   (expo.plugins ?? []).filter((p) => (Array.isArray(p) ? (p as unknown[])[0] : p) === name);
 
+/** Plugin names in app.json order (a tuple contributes its first element). */
+const pluginNames = () => (expo.plugins ?? []).map((p) => (Array.isArray(p) ? (p as unknown[])[0] : p));
+
 const EXPECTED_PRIVACY_MANIFEST: PrivacyManifest = {
   NSPrivacyTracking: false,
   NSPrivacyTrackingDomains: [],
@@ -319,5 +322,25 @@ describe('10-sdk-58-ios-27', () => {
 
   it('web.output stays static', () => {
     expect(expo.web?.output).toBe('static');
+  });
+
+  // FR6 (Decision 5): a later plugin's mod runs first (@expo/config-plugins withMod: action, then
+  // nextMod), so a plugin listed *before* expo-widgets runs *after* it and sees the files and the
+  // ExpoWidgetsTarget target that expo-widgets just generated.
+  it('withHourglassWidgetBackground is listed immediately before expo-widgets', () => {
+    const names = pluginNames();
+    const widgets = names.indexOf('expo-widgets');
+    expect(widgets).toBeGreaterThan(0);
+    expect(Array.isArray((expo.plugins ?? [])[widgets])).toBe(true); // the expo-widgets tuple
+    expect(names[widgets - 1]).toBe('./plugins/withHourglassWidgetBackground');
+    expect(names.filter((n) => n === './plugins/withHourglassWidgetBackground')).toHaveLength(1);
+  });
+
+  it('withHourglassWidgetPrivacyManifest is listed immediately before withHourglassWidgetBackground', () => {
+    const names = pluginNames();
+    const background = names.indexOf('./plugins/withHourglassWidgetBackground');
+    expect(background).toBeGreaterThan(0);
+    expect(names[background - 1]).toBe('./plugins/withHourglassWidgetPrivacyManifest');
+    expect(names.filter((n) => n === './plugins/withHourglassWidgetPrivacyManifest')).toHaveLength(1);
   });
 });

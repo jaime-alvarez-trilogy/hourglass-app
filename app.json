@@ -95,6 +95,8 @@
     },
     "plugins": [
       "expo-router",
+      "./plugins/withHourglassWidgetPrivacyManifest",
+      "./plugins/withHourglassWidgetBackground",
       [
         "expo-widgets",
         {
