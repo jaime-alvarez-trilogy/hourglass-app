@@ -26,8 +26,8 @@ Feature: `store-compliance`
 
 **Decisions needing J before the step that uses them** (spec-research Q1/Q1b):
 - Decision 3 (icons), Decision 4 (test renderer, incl. the auth-screens rewrite) and Decision 5 (widget fallbacks, the privacy-manifest plugin, the transient placeholder red box): before FR4.
-- Decision 10 (iPad (a) vs (b)): before FR5.
-- Decision 16 (ASC key access): before FR5.
+- Decision 10 (iPad (a) vs (b)): before FR5. **Chosen: (a)** (J, 2026-10-20).
+- Decision 16 (ASC key access): before FR5. **Chosen: (c)** (J, 2026-10-20): read-only `asc.js` from the main checkout; no `.appstore/` copy.
 
 ---
 
@@ -564,15 +564,37 @@ Only FR4's tests are written here. FR5–FR8 write their red tests at the start 
   - Done 2026-10-20 at `51299db`: exit 0, 3 suites / 38 tests.
 
 ### FR5
-- [ ] (J) Decision 16 (ASC key access) chosen: ______. Under (a): `cp -R "<main checkout>/.appstore" .appstore`, then `git check-ignore -q .appstore/AuthKey_W4UV4XTKPC.p8` succeeds and `git status --porcelain` shows nothing new.
-- [ ] (J) Decision 10 (iPad (a) / (b)) chosen: ______
-- [ ] (C) **Red first:** in `app-config.test.ts`'s `describe('10-sdk-58-ios-27')`, add every Interface Contracts case except `cli.version` (FR1) and the two plugin-order cases (FR6). The `expo-build-properties` case allows only the exact Decision 9 fallback entry. Add `sdkVersion` starts with `58.` and `UIRequiresFullScreen === false` (or `true` under Decision 10 (b)) to `app-config-introspect.test.ts`. Run them and record the red list.
-- [ ] (C) `app.json`: `version` `1.2.0`, `ios.buildNumber` `"19"`.
+- [x] (J) Decision 16 (ASC key access) chosen: **(c)** (J, 2026-10-20). `.appstore/` is **not** copied into this worktree. Read-only `node .appstore/asc.js …` calls (`builds`, `list-testers`, `check-submission`, any `--dry-run`) run from the main checkout `WS/hourglassws`; `eas submit` happens later, in FR11. No `asc.js` write, `eas submit` or App Review action runs before FR11.
+  - `ls .appstore` in this worktree → absent, as before; `git status --porcelain` shows nothing new. `eas.json` `submit.production.ios` is unchanged (I3 under (a)/(c)).
+- [x] (J) Decision 10 (iPad (a) / (b)) chosen: **(a)** (J, 2026-10-20): keep `supportsTablet: true` and `orientation: "portrait"`, no `ios.requireFullScreen`. The resizability matrix runs in FR11.
+- [x] (C) **Red first:** in `app-config.test.ts`'s `describe('10-sdk-58-ios-27')`, add every Interface Contracts case except `cli.version` (FR1) and the two plugin-order cases (FR6). The `expo-build-properties` case allows only the exact Decision 9 fallback entry. Add `sdkVersion` starts with `58.` and `UIRequiresFullScreen === false` (or `true` under Decision 10 (b)) to `app-config-introspect.test.ts`. Run them and record the red list.
+  - Done 2026-10-20. Nine cases added to `app-config.test.ts` (typed JSON imports only; optional `eas.json` keys asserted with `toHaveProperty` and read through a local `EasBuildProfile` cast, because the inferred JSON type lacks them) and a new `describe('resolved config … — 10-sdk-58-ios-27')` with two cases in `app-config-introspect.test.ts`.
+    - The `expo-build-properties` case runs a predicate over `expo.plugins` (must return `[]`) and also over fixtures: the exact fallback passes; a bare string, an `enableSceneSupport` entry, a fallback plus `deploymentTarget`, and `usePrecompiledModules: true` are all flagged. A plugin name only *containing* `expo-build-properties` (e.g. a subpath) is caught too.
+    - The semver case compares numerically (`1.10.0` ≥ `1.2.0`; `1.1.9` and a non-semver string are not).
+  - **Red list on the FR4 tree** (`npx jest __tests__/config/app-config.test.ts __tests__/config/app-config-introspect.test.ts` → **3 failed / 42**), each for the intended reason:
+    - `expo.version is semver >= 1.2.0`: `atLeast1_2_0` false (`1.1.0`).
+    - `ios.buildNumber is an integer string >= 19`: `Expected: >= 19, Received: 18`.
+    - `eas production ios.image is a full xcode-27 image name, not an alias`: `Expected path: ["ios", "image"], Received path: []` (`{"channel": "production"}`).
+  - **Green on the FR4 tree (guards whose value FR5 doesn't change):** `plugins never mention …`, `any expo-build-properties entry …`, `ios.infoPlist has no UIApplicationSceneManifest …`, `supportsTablet stays true …`, `eas development and preview have no ios.image`, `web.output stays static`, and both introspect cases (`sdkVersion` became 58 in FR4; introspect already resolves `UIRequiresFullScreen: false`, since config-plugins writes `!!ios.requireFullScreen`).
+    - **Deviation from FR5's first success criterion:** it lists "`development`/`preview` image absence" among the cases that are red on the FR4 tree, but neither profile has ever had an `image` key and FR5 adds none, so that case can only be a guard. It's recorded as green before and after.
+    - **Mutation check instead** (each guard must be able to fail): with `app.json` temporarily given `requireFullScreen: true`, `deploymentTarget`, a `UIApplicationSceneManifest`, an `["expo-build-properties", { ios: { deploymentTarget } }]` plugin and `web.output: "single"`, and `eas.json` given `development`/`preview`/`production` `ios.image` = `auto`/`latest`/`sdk-58`, **every** FR5 case failed (only FR1's `cli.version` passed). A second mutation with only `requireFullScreen: true` failed exactly `ios.infoPlist.UIRequiresFullScreen is false` (`Expected: false, Received: true`); the first run's introspect failures were just `expo config` refusing the uninstalled `expo-build-properties`. Both files were restored with `git checkout` (clean `git status` afterwards).
+  - Test-design validation: no `red-phase-test-validator` agent in this run (as in Phases A/B); the manual check is the mutation run above. The Phase B validator box stays open.
+- [x] (C) `app.json`: `version` `1.2.0`, `ios.buildNumber` `"19"`.
   - Confirm the next unused number with `node .appstore/asc.js builds` from this worktree; otherwise record "blocked: ASC key access" and take 19.
   - No scene or deployment-target keys. `requireFullScreen` only under Decision 10 (b).
-- [ ] (C) `package.json` `version` `1.2.0`. `npm install --package-lock-only` updates the lockfile root.
-- [ ] (C) `eas.json` `build.production.ios.image = "macos-tahoe-26.6-xcode-27.1"`. Re-check docs.expo.dev/build-reference/infrastructure first and record the row. The Xcode build should be 27A9275 = Xcode 27.1 GA.
-- [ ] (C) FR5 tests green. Record the `npx expo config --type introspect --json` values. Three gates green. Commit.
+  - Done 2026-10-20. **Build-number check, under Decision 16 (c):** `node .appstore/asc.js builds`, run read-only from the main checkout `WS/hourglassws` (it only issues paginated `GET /builds`), → **exit 0**. It lists 17 builds, all `VALID` / `APP_STORE_ELIGIBLE`: **18** (2026-10-20 11:35, id `78244927-…`), 17 (2026-08-06), 15, 14, … 1. There's no build 16 and nothing above 18, so **19 is the next unused number**. `git status --porcelain` in the main checkout was empty before and after.
+  - `app.json`: only `expo.version` `1.1.0` → `1.2.0` and `expo.ios.buildNumber` `"18"` → `"19"` changed. No `UIApplicationSceneManifest`, `deploymentTarget` or `requireFullScreen`. `ios.privacyManifests` is byte-identical to `build-18:app.json` (`JSON.stringify` equality → `true`).
+- [x] (C) `package.json` `version` `1.2.0`. `npm install --package-lock-only` updates the lockfile root.
+  - Done 2026-10-20. `npm install --package-lock-only` → exit 0. `git diff --stat package-lock.json` → `2 insertions(+), 2 deletions(-)`: only the top-level `version` and `packages[""].version`, `1.1.0` → `1.2.0`. `fingerprint-config.test.ts` 8/8.
+- [x] (C) `eas.json` `build.production.ios.image = "macos-tahoe-26.6-xcode-27.1"`. Re-check docs.expo.dev/build-reference/infrastructure first and record the row. The Xcode build should be 27A9275 = Xcode 27.1 GA.
+  - Re-checked 2026-10-20 (`curl` of https://docs.expo.dev/build-reference/infrastructure/ → 200). The row: **`macos-tahoe-26.6-xcode-27.1 (latest, sdk-58)`**: macOS Tahoe 26.6.2, **Xcode 27.1 RC (27A9275)**, Node.js 22.23.3, Bun 1.4.2, Yarn 1.22.22, pnpm 11.28.2, npm 10.9.9, fastlane 2.240.1, CocoaPods 1.17.0, Ruby 3.4.11. The fallback `macos-tahoe-26.6-xcode-27.0` (Xcode 27.0, 27A266a) is still listed. No `xcode-27.2` image yet.
+  - Apple's releases page (https://developer.apple.com/news/releases/, `curl` → 200): "Xcode 27.1 (27A9275) October 15, 2026", after "Xcode 27.1 beta (27A9269) September 18, 2026"; also "Xcode 27.2 RC (27B48) October 19, 2026". So 27A9275 is the GA Xcode 27.1 and Expo's "RC" label is stale, as in spec-research. The pin stands.
+  - `eas.json`: `build.production` = `{ "channel": "production", "ios": { "image": "macos-tahoe-26.6-xcode-27.1" } }`. `development` and `preview` are unchanged (no `ios` key → `auto`). Re-run this check before the FR11 build.
+- [x] (C) FR5 tests green. Record the `npx expo config --type introspect --json` values. Three gates green. Commit.
+  - Done 2026-10-20. FR5 files: `app-config.test.ts` **33/33**, `app-config-introspect.test.ts` **9/9**, `fingerprint-config.test.ts` 8/8. The test-file diff removes 0 lines, so the spec 03 privacy-manifest cases pass unedited.
+  - `node node_modules/expo/bin/cli config --type introspect --json` (exit 0), before → after: `sdkVersion` `58.0.0` → `58.0.0`; `version` `1.1.0` → **`1.2.0`**; `ios.buildNumber` `18` → **`19`**; `infoPlist.CFBundleShortVersionString` / `CFBundleVersion` → **`1.2.0` / `19`**; `UIRequiresFullScreen` **`false`**; `UIBackgroundModes` **`["remote-notification"]`**; `UISupportedInterfaceOrientations~ipad` 4 entries (the Decision 10 (a) force-write); `ExpoWidgetsAppGroupIdentifier` `group.com.jalvarez0907.hourglass.widgets`; no `UIApplicationSceneManifest`, `ios.deploymentTarget` or `ios.requireFullScreen`.
+  - Gates (Node v22.17.0): `npm test` → **exit 0**, **182 suites / 5244 tests** (FR4's 5233 + 9 + 2). `npm run typecheck` → **exit 0**. `npm run lint` → **exit 0**, `✖ 490 problems (0 errors, 490 warnings)` (same as FR4; both edited test files 0e/0w before and after). Also `(cd server && npm test)` → exit 0, 3 suites / 38 tests.
+  - Commit `cbb0081` `chore(10-sdk-58-ios-27): FR5 native config: v1.2.0 (build 19), production image pin`: tests and implementation together; the red phase was never committed.
 
 ### FR6
 - [ ] (C) **Red first:**
@@ -832,3 +854,10 @@ Each cell passes when there's no clipping or overlap, every chart re-measures wi
 - Checkpoint B ran as substitution (2): a local Debug simulator build (Xcode 27.0, iOS 27.0 24A434) in a throwaway copy. `pod install` and both targets (incl. `ExpoWidgetsTarget`) built with precompiled modules on, so the Decision 9 fallback wasn't needed. The app cold-launched on iOS 27 with no SIGTRAP and rendered welcome and Sign In.
   - Sign-in, the four tabs and widgets are deferred to the FR11 device smoke (no agent device access).
 - Still open: the ITMS-91053 baseline (J; FR4 went ahead because only FR11 consumes it), the Phase A/B test-design validation boxes and the Phase A.2 review.
+
+**2026-10-20 (FR5 implemented)**: FR5 is done on SDK 58, with all three gates and the server suite green.
+- Commits on `feat/sdk-58`: `cbb0081` (tests and implementation) and this checklist commit.
+- J's decisions: Decision 10 **(a)** (no `requireFullScreen`) and Decision 16 **(c)** (no `.appstore/` copy; read-only `asc.js` from the main checkout; `eas submit` in FR11).
+- `app.json` 1.2.0 / build `"19"`: `asc.js builds` (read-only, main checkout) shows 18 as the highest uploaded build. `package.json` and the lockfile root are 1.2.0. `eas.json` production pins `macos-tahoe-26.6-xcode-27.1` (Expo row: Xcode "27.1 RC (27A9275)"; Apple: 27A9275 = Xcode 27.1, released 2026-10-15).
+- Red list: 3 cases (version, build number, image pin). The `development`/`preview` image-absence case is a guard, green before and after (deviation from the FR5 success-criterion wording, recorded in FR5), and a mutation run shows every guard can fail.
+- Still open: the ITMS-91053 baseline (J; FR11), the Phase A/B test-design validation boxes and the Phase A.2 review. The infrastructure-page check is re-run before the FR11 build.
