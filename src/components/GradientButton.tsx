@@ -7,15 +7,21 @@ interface Props {
   onPress: () => void;
   loading?: boolean;
   disabled?: boolean;
+  /**
+   * Test hook (10-sdk-58-ios-27 FR4). While loading the label is replaced by a spinner, so
+   * no text query can find the button; the spinner gets `${testID}-spinner`.
+   */
+  testID?: string;
 }
 
-export function GradientButton({ label, onPress, loading = false, disabled = false }: Props) {
+export function GradientButton({ label, onPress, loading = false, disabled = false, testID }: Props) {
   return (
     <TouchableOpacity
       style={[styles.outer, (loading || disabled) && styles.dimmed]}
       onPress={onPress}
       disabled={loading || disabled}
       activeOpacity={0.88}
+      testID={testID}
     >
       <View style={styles.glass} />
       <LinearGradient
@@ -26,7 +32,7 @@ export function GradientButton({ label, onPress, loading = false, disabled = fal
       />
       <View style={styles.edge} />
       {loading ? (
-        <ActivityIndicator color="#FFFFFF" />
+        <ActivityIndicator color="#FFFFFF" testID={testID ? `${testID}-spinner` : undefined} />
       ) : (
         <Text style={styles.label}>{label}</Text>
       )}
@@ -47,11 +53,11 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   glass: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#1F1E29',
   },
   edge: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',

@@ -79,12 +79,16 @@ describe('06-native-tabs — FR2: platform split logic in _layout.tsx', () => {
     expect(code).not.toMatch(/USE_NATIVE_TABS\s*\?/);
   });
 
-  it('SC2.1 — source imports NativeTabs from expo-router/unstable-native-tabs', () => {
-    expect(source).toContain('expo-router/unstable-native-tabs');
+  // 10-sdk-58-ios-27 FR4: expo-router 58 deprecates expo-router/unstable-native-tabs (use
+  // expo-router/native-tabs) and the root Tabs export (use expo-router/js-tabs).
+  it('SC2.1 — source imports NativeTabs from expo-router/native-tabs (not unstable-native-tabs)', () => {
+    expect(source).toMatch(/import\s*\{[^}]*\bNativeTabs\b[^}]*\}\s*from\s*['"]expo-router\/native-tabs['"]/);
+    expect(source).not.toContain('unstable-native-tabs');
   });
 
-  it('SC2.2 — source imports Tabs from expo-router (Android fallback path present)', () => {
-    expect(source).toMatch(/import\s*\{[^}]*\bTabs\b[^}]*\}\s*from\s*['"]expo-router['"]/);
+  it('SC2.2 — source imports Tabs from expo-router/js-tabs (Android fallback path present), not the root', () => {
+    expect(source).toMatch(/import\s*\{[^}]*\bTabs\b[^}]*\}\s*from\s*['"]expo-router\/js-tabs['"]/);
+    expect(source).not.toMatch(/import\s*\{[^}]*\bTabs\b[^}]*\}\s*from\s*['"]expo-router['"]/);
   });
 });
 
@@ -163,8 +167,9 @@ describe('06-native-tabs — FR4: NativeTabs render path', () => {
       .replace(/\/\*[\s\S]*?\*\//g, '');
   });
 
-  it('SC4.1 — NativeTabs imported from expo-router/unstable-native-tabs', () => {
-    expect(source).toContain('expo-router/unstable-native-tabs');
+  it('SC4.1 — NativeTabs imported from expo-router/native-tabs (10 FR4; not unstable-native-tabs)', () => {
+    expect(source).toContain("from 'expo-router/native-tabs'");
+    expect(source).not.toContain('expo-router/unstable-native-tabs');
     expect(source).toMatch(/NativeTabs/);
   });
 
@@ -210,8 +215,8 @@ describe('06-native-tabs — FR5: legacy Tabs fallback / HapticTab removal', () 
     expect(code).not.toMatch(/tabBarButton\s*:\s*HapticTab/);
   });
 
-  it('SC5.1 — legacy Tabs import is present (Android path)', () => {
-    expect(source).toMatch(/import\s*\{[^}]*\bTabs\b[^}]*\}\s*from\s*['"]expo-router['"]/);
+  it('SC5.1 — legacy Tabs import is present (Android path), from expo-router/js-tabs (10 FR4)', () => {
+    expect(source).toMatch(/import\s*\{[^}]*\bTabs\b[^}]*\}\s*from\s*['"]expo-router\/js-tabs['"]/);
   });
 
   it('SC5.4 — tabBarStyle is present (Android path)', () => {

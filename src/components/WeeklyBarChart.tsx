@@ -100,20 +100,24 @@ export default function WeeklyBarChart({
   const resolvedMax = Math.max(maxHours ?? 8, ...data.map((d) => d.hours));
 
   // ── Compute per-bar colors (overtime logic requires running cumulative total) ──
+  // A plain loop, not a map callback that reassigns runningTotal (react-hooks 7
+  // `immutability`: a callback may run after render; 10-sdk-58-ios-27 FR4).
+  const derivedColors: string[] = [];
   let runningTotal = 0;
-  const derivedColors: string[] = data.map((entry) => {
+  for (const entry of data) {
     if (entry.isFuture) {
-      return colors.textMuted;
+      derivedColors.push(colors.textMuted);
+      continue;
     }
     runningTotal += entry.hours;
     if (weeklyLimit !== undefined && runningTotal > weeklyLimit) {
-      return OVERTIME_WHITE_GOLD;
+      derivedColors.push(OVERTIME_WHITE_GOLD);
+    } else if (entry.isToday) {
+      derivedColors.push(todayColor);
+    } else {
+      derivedColors.push(colors.success);
     }
-    if (entry.isToday) {
-      return todayColor;
-    }
-    return colors.success;
-  });
+  }
 
   const todayIndex = data.findIndex((d) => d.isToday);
   const rawValues = data.map((d) => d.hours);

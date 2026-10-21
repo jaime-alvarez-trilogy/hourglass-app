@@ -15,6 +15,17 @@
 // FR3 (SDK 55, forward-compatible with SDK 58):
 //   - No code reads whatwg-fetch internals (_bodyInit/_bodyText/_bodyBlob). From SDK 56,
 //     globalThis.fetch is expo/fetch, whose Response has none of them (spec-research F2.7).
+//
+// FR4 (SDK 58):
+//   - No module reference to @react-navigation/* at all: expo-router 58 has no
+//     @react-navigation dependency or peer, and re-exports the themes and tab types.
+//   - NativeTabs from expo-router/native-tabs (unstable-native-tabs is deprecated), Tabs from
+//     expo-router/js-tabs (the root Tabs export is deprecated).
+//   - No initialRouteName= JSX prop (Omit-ted from the Stack props); the (auth) layout uses
+//     `export const unstable_settings = { anchor: 'welcome' }` instead.
+//   - A second walk over test files (__tests__/, __mocks__/, *.test.*) finds no jest.mock /
+//     requireActual / import of @react-navigation/*: a non-virtual mock of a module that no
+//     longer resolves throws and takes the whole suite down.
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -254,11 +265,143 @@ function fetchCalls(sf: ts.SourceFile): number[] {
   return lines;
 }
 
+const isReactNavigation = (module: string): boolean => module.startsWith('@react-navigation/');
+
+/** Lines with any import/export/require/import() of an @react-navigation/* module (FR4). */
+function reactNavigationRefs(sf: ts.SourceFile): number[] {
+  return moduleRefs(sf)
+    .filter((r) => isReactNavigation(r.module))
+    .map((r) => r.line);
+}
+
+/** Lines referencing the deprecated expo-router/unstable-native-tabs entry point. */
+function unstableNativeTabsRefs(sf: ts.SourceFile): number[] {
+  return moduleRefs(sf)
+    .filter((r) => r.module === 'expo-router/unstable-native-tabs')
+    .map((r) => r.line);
+}
+
+/**
+ * Lines that take `Tabs` from the root 'expo-router' entry (deprecated in 58; use
+ * 'expo-router/js-tabs'). A namespace import counts when the file reads `.Tabs`.
+ */
+function rootTabsImports(sf: ts.SourceFile): number[] {
+  const readsDotTabs = /\.Tabs\b/.test(sf.text);
+  return moduleRefs(sf)
+    .filter((r) => r.module === 'expo-router')
+    .filter((r) => r.names.includes('Tabs') || (r.names.includes('*') && readsDotTabs))
+    .map((r) => r.line);
+}
+
+/** Lines with an `initialRouteName=` JSX attribute (Omit-ted from expo-router 58's Stack props). */
+function initialRouteNameAttrs(sf: ts.SourceFile): number[] {
+  const lines: number[] = [];
+  visit(sf, (n) => {
+    if (ts.isJsxAttribute(n) && ts.isIdentifier(n.name) && n.name.text === 'initialRouteName') {
+      lines.push(lineOf(sf, n));
+    }
+  });
+  return lines;
+}
+
+/**
+ * The string-valued properties of `export const unstable_settings = { … }` (also through
+ * `as const`), or undefined when the file doesn't export it.
+ */
+function exportedUnstableSettings(sf: ts.SourceFile): Record<string, string> | undefined {
+  let found: Record<string, string> | undefined;
+  for (const stmt of sf.statements) {
+    if (!ts.isVariableStatement(stmt)) continue;
+    const exported = stmt.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+    if (!exported) continue;
+    for (const decl of stmt.declarationList.declarations) {
+      if (!ts.isIdentifier(decl.name) || decl.name.text !== 'unstable_settings') continue;
+      const init = decl.initializer && unwrap(decl.initializer);
+      if (!init || !ts.isObjectLiteralExpression(init)) continue;
+      found = {};
+      for (const prop of init.properties) {
+        if (
+          ts.isPropertyAssignment(prop) &&
+          (ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name)) &&
+          ts.isStringLiteralLike(unwrap(prop.initializer))
+        ) {
+          found[prop.name.text] = (unwrap(prop.initializer) as ts.StringLiteralLike).text;
+        }
+      }
+    }
+  }
+  return found;
+}
+
+const JEST_MODULE_CALLS = new Set([
+  'jest.mock',
+  'jest.doMock',
+  'jest.unmock',
+  'jest.setMock',
+  'jest.requireActual',
+  'jest.requireMock',
+  'requireActual',
+]);
+
+/** `jest.mock('x')`, `jest.requireActual('x')` etc. with a literal module name. */
+function jestModuleCalls(sf: ts.SourceFile): { module: string; line: number }[] {
+  const calls: { module: string; line: number }[] = [];
+  visit(sf, (n) => {
+    if (!ts.isCallExpression(n) || n.arguments.length < 1) return;
+    const callee = dottedName(n.expression);
+    const arg = n.arguments[0];
+    if (callee && JEST_MODULE_CALLS.has(callee) && ts.isStringLiteralLike(arg)) {
+      calls.push({ module: arg.text, line: lineOf(sf, n) });
+    }
+  });
+  return calls;
+}
+
+/** Test-file hits: a jest module call or a plain module reference naming @react-navigation/*. */
+function reactNavigationInTests(sf: ts.SourceFile): number[] {
+  const lines = [
+    ...jestModuleCalls(sf)
+      .filter((c) => isReactNavigation(c.module))
+      .map((c) => c.line),
+    ...reactNavigationRefs(sf),
+  ];
+  return [...new Set(lines)].sort((a, b) => a - b);
+}
+
 // ─── The real tree ────────────────────────────────────────────────────────────
 
 type Parsed = { rel: string; sf: ts.SourceFile };
 
 const SOURCES: Parsed[] = SOURCE_DIRS.flatMap((d) => walk(path.join(ROOT, d), [])).map((abs) => ({
+  rel: path.relative(ROOT, abs).split(path.sep).join('/'),
+  sf: parse(abs, fs.readFileSync(abs, 'utf8')),
+}));
+
+// The second walk (FR4): test files only. Anything under __tests__/ or __mocks__/, plus any
+// *.test.* file, across the root test dirs and the source dirs. node_modules is skipped.
+const TEST_WALK_DIRS = ['__tests__', '__mocks__', ...SOURCE_DIRS];
+
+function walkTests(dir: string, inTestDir: boolean, out: string[]): string[] {
+  if (!fs.existsSync(dir)) return out;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const abs = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === 'node_modules') continue;
+      walkTests(abs, inTestDir || entry.name === '__tests__' || entry.name === '__mocks__', out);
+    } else if (
+      entry.isFile() &&
+      SOURCE_FILE.test(entry.name) &&
+      (inTestDir || TEST_FILE.test(entry.name))
+    ) {
+      out.push(abs);
+    }
+  }
+  return out;
+}
+
+const TEST_SOURCES: Parsed[] = TEST_WALK_DIRS.flatMap((d) =>
+  walkTests(path.join(ROOT, d), d === '__tests__' || d === '__mocks__', []),
+).map((abs) => ({
   rel: path.relative(ROOT, abs).split(path.sep).join('/'),
   sf: parse(abs, fs.readFileSync(abs, 'utf8')),
 }));
@@ -469,6 +612,185 @@ describe('10 FR2/FR3/FR4 — source migrations', () => {
         perFile[rel] = (perFile[rel] ?? 0) + 1;
       }
       expect(perFile).toEqual({ 'src/api/client.ts': 3, 'src/lib/pushToken.ts': 2 });
+    });
+  });
+
+  describe('FR4 detectors (fixtures)', () => {
+    it('react-navigation detector flags every module form, any subpath, and ignores strings/comments', () => {
+      expect(
+        reactNavigationRefs(
+          parseFixture(
+            [
+              "import { DarkTheme } from '@react-navigation/native';",
+              "import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';",
+              "export { PlatformPressable } from '@react-navigation/elements';",
+              "const n = require('@react-navigation/native');",
+              "// import { X } from '@react-navigation/native';",
+              "const s = 'from @react-navigation/native';",
+              "import { DarkTheme as D } from 'expo-router';",
+            ].join('\n'),
+          ),
+        ),
+      ).toEqual([1, 2, 3, 4]);
+    });
+
+    it('unstable-native-tabs detector flags only the deprecated entry point', () => {
+      expect(
+        unstableNativeTabsRefs(
+          parseFixture(
+            "import { NativeTabs } from 'expo-router/unstable-native-tabs';\nimport { NativeTabs as N } from 'expo-router/native-tabs';",
+          ),
+        ),
+      ).toEqual([1]);
+    });
+
+    it('root-Tabs detector flags Tabs from the root (named, aliased, namespace), not from js-tabs', () => {
+      expect(
+        rootTabsImports(
+          parseFixture(
+            [
+              "import { Stack, Tabs } from 'expo-router';",
+              "import { Tabs as T } from 'expo-router';",
+              "import { Tabs as J } from 'expo-router/js-tabs';",
+              "import { Stack as S } from 'expo-router';",
+            ].join('\n'),
+          ),
+        ),
+      ).toEqual([1, 2]);
+      expect(
+        rootTabsImports(parseFixture("import * as Router from 'expo-router';\nconst X = Router.Tabs;")),
+      ).toEqual([1]);
+      expect(
+        rootTabsImports(parseFixture("import * as Router from 'expo-router';\nconst X = Router.Stack;")),
+      ).toEqual([]);
+    });
+
+    it('initialRouteName detector flags the JSX prop, not comments or strings', () => {
+      expect(
+        initialRouteNameAttrs(
+          parseFixture(
+            [
+              'const a = <Stack screenOptions={{}} initialRouteName="welcome" />;',
+              '// <Stack initialRouteName="x" />',
+              "const s = 'initialRouteName=';",
+              'const b = <Stack\n  initialRouteName={name}\n/>;',
+            ].join('\n'),
+          ),
+        ),
+      ).toEqual([1, 5]);
+    });
+
+    it('unstable_settings reader reads the exported literal (also `as const`), not a local one', () => {
+      expect(
+        exportedUnstableSettings(parseFixture("export const unstable_settings = { anchor: 'welcome' };")),
+      ).toEqual({ anchor: 'welcome' });
+      expect(
+        exportedUnstableSettings(
+          parseFixture("export const unstable_settings = { anchor: 'index' } as const;"),
+        ),
+      ).toEqual({ anchor: 'index' });
+      expect(
+        exportedUnstableSettings(parseFixture("const unstable_settings = { anchor: 'welcome' };")),
+      ).toBeUndefined();
+      expect(exportedUnstableSettings(parseFixture('export const other = 1;'))).toBeUndefined();
+    });
+
+    it('test-file detector flags jest.mock / requireActual / require / import of @react-navigation/*', () => {
+      expect(
+        reactNavigationInTests(
+          parseFixture(
+            [
+              "jest.mock('@react-navigation/native', () => ({}));",
+              "const a = jest.requireActual('@react-navigation/native');",
+              "jest.doMock('@react-navigation/bottom-tabs');",
+              "jest.mock('expo-router', () => ({ ...jest.requireActual('@react-navigation/elements') }));",
+              "import { NavigationContainer } from '@react-navigation/native';",
+              "jest.mock('expo-router', () => ({ useIsFocused: () => true }));",
+              "expect(source).not.toContain('@react-navigation');",
+            ].join('\n'),
+            'f.test.tsx',
+          ),
+        ),
+      ).toEqual([1, 2, 3, 4, 5]);
+    });
+  });
+
+  describe('FR4', () => {
+    it('no @react-navigation/* module reference anywhere in app source', () => {
+      expect(hitsAcrossTree(reactNavigationRefs)).toEqual([]);
+    });
+
+    it('positive control: the themes and the tab-bar props type come from expo-router', () => {
+      const fromOf = (rel: string, name: string): string[] =>
+        moduleRefs(source(rel))
+          .filter((r) => r.names.includes(name))
+          .map((r) => r.module);
+      expect({
+        DarkTheme: fromOf('app/_layout.tsx', 'DarkTheme'),
+        DefaultTheme: fromOf('app/_layout.tsx', 'DefaultTheme'),
+        ThemeProvider: fromOf('app/_layout.tsx', 'ThemeProvider'),
+        BottomTabBarProps: fromOf('src/components/FloatingPillTabBar.tsx', 'BottomTabBarProps'),
+      }).toEqual({
+        DarkTheme: ['expo-router'],
+        DefaultTheme: ['expo-router'],
+        ThemeProvider: ['expo-router'],
+        BottomTabBarProps: ['expo-router/js-tabs'],
+      });
+    });
+
+    it('no expo-router/unstable-native-tabs, and no Tabs from the root expo-router entry', () => {
+      expect(hitsAcrossTree(unstableNativeTabsRefs)).toEqual([]);
+      expect(hitsAcrossTree(rootTabsImports)).toEqual([]);
+      // Positive control: the tab layout still has both navigators, from the new entry points.
+      const refs = moduleRefs(source('app/(tabs)/_layout.tsx'));
+      const fromOf = (name: string) => refs.filter((r) => r.names.includes(name)).map((r) => r.module);
+      expect({ NativeTabs: fromOf('NativeTabs'), Tabs: fromOf('Tabs') }).toEqual({
+        NativeTabs: ['expo-router/native-tabs'],
+        Tabs: ['expo-router/js-tabs'],
+      });
+    });
+
+    it('no initialRouteName= JSX prop anywhere in app source', () => {
+      expect(hitsAcrossTree(initialRouteNameAttrs)).toEqual([]);
+    });
+
+    it('(auth) layout exports unstable_settings.anchor === "welcome"', () => {
+      expect(exportedUnstableSettings(source('app/(auth)/_layout.tsx'))).toEqual(
+        expect.objectContaining({ anchor: 'welcome' }),
+      );
+    });
+
+    describe('the test-file walk', () => {
+      it('visits a non-trivial set of test files (>= 100) including the known ones, all parseable', () => {
+        expect(TEST_SOURCES.length).toBeGreaterThanOrEqual(100);
+        expect(TEST_SOURCES.map((s) => s.rel)).toEqual(
+          expect.arrayContaining([
+            'app/__tests__/layout-notifications.test.tsx',
+            'src/components/__tests__/FloatingPillTabBar.test.ts',
+            '__tests__/auth-screens.test.tsx',
+            '__mocks__/@shopify/react-native-skia.ts',
+          ]),
+        );
+        const broken = TEST_SOURCES.filter(({ sf }) => parseErrors(sf).length > 0).map((s) => s.rel);
+        expect(broken).toEqual([]);
+        // Every walked file is a test file or a mock; app source stays in the first walk.
+        const stray = TEST_SOURCES.map((s) => s.rel).filter(
+          (r) => !/(^|\/)(__tests__|__mocks__)\//.test(r) && !TEST_FILE.test(r),
+        );
+        expect(stray).toEqual([]);
+      });
+
+      it('positive control: the jest-call reader sees the expo-router mock in layout-notifications', () => {
+        const hit = TEST_SOURCES.find((s) => s.rel === 'app/__tests__/layout-notifications.test.tsx')!;
+        expect(jestModuleCalls(hit.sf).map((c) => c.module)).toContain('expo-router');
+      });
+
+      it('test files never jest.mock, requireActual or import @react-navigation/*', () => {
+        const hits = TEST_SOURCES.flatMap(({ rel, sf }) =>
+          reactNavigationInTests(sf).map((line) => `${rel}:${line}`),
+        );
+        expect(hits).toEqual([]);
+      });
     });
   });
 });

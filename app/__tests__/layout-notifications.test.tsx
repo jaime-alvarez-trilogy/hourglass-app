@@ -93,20 +93,18 @@ jest.mock('expo-router', () => {
     Stack: StackMock,
     useRouter: () => ({ replace: jest.fn() }),
     useSegments: () => ['(tabs)'],
+    // 10-sdk-58-ios-27 FR4: app/_layout.tsx takes the themes from expo-router 58.
+    DarkTheme: {},
+    DefaultTheme: {},
+    ThemeProvider: ({ children }: any) => {
+      const mockReact = require('react');
+      return mockReact.createElement('ThemeProvider', null, children);
+    },
   };
 });
 
 jest.mock('expo-status-bar', () => ({
   StatusBar: () => null,
-}));
-
-jest.mock('@react-navigation/native', () => ({
-  DarkTheme: {},
-  DefaultTheme: {},
-  ThemeProvider: ({ children }: any) => {
-    const mockReact = require('react');
-    return mockReact.createElement('ThemeProvider', null, children);
-  },
 }));
 
 jest.mock('@tanstack/react-query', () => ({

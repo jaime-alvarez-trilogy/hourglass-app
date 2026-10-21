@@ -18,7 +18,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { View, Text, ScrollView, Image } from 'react-native';
+import { View, Text, ScrollView, Image, type ScrollViewInstance } from 'react-native';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
@@ -246,7 +246,7 @@ export default function OverviewScreen() {
 
   // ── Synchronized scrub state ───────────────────────────────────────────────
   const [scrubWeekIndex, setScrubWeekIndex] = useState<number | null>(null);
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
   const lastHapticIndex = useRef<number | null>(null);
   const scrolledPastHeroRef = useRef<boolean>(false);
   const scrubbingRef = useRef<boolean>(false);

@@ -20,8 +20,9 @@
 //   - Pill clearance comes from each tab screen's scroll paddingBottom (100).
 //   - USE_NATIVE_TABS feature flag removed — Platform.OS drives the split always.
 
-import { NativeTabs } from 'expo-router/unstable-native-tabs';
-import { Tabs } from 'expo-router';
+// 10-sdk-58-ios-27 FR4: the expo-router 58 entry points (the unstable and root ones are deprecated).
+import { NativeTabs } from 'expo-router/native-tabs';
+import { Tabs } from 'expo-router/js-tabs';
 import React, { useMemo } from 'react';
 import { View, Platform } from 'react-native';
 

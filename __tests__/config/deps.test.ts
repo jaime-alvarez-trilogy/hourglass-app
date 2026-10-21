@@ -1,6 +1,7 @@
 // 06-dependency-hygiene — static dependency guards (FR1–FR4), ported and adapted by
 // 10-sdk-58-ios-27 FR1: spec 06's FR5 (SDK 55 patch-line floors) is dropped, FR4 is the
 // "install.exclude iff patched" rule, and react-native-inner-shadow stays removed.
+// 10-sdk-58-ios-27 FR4 adds the "SDK 58 line" floors and retires both patches.
 // Reads package.json, package-lock.json and patches/ from disk on purpose (no mocks), so the
 // guard sees exactly what `npm ci` + `postinstall` will see. Runs offline inside `npm test`.
 
@@ -46,6 +47,7 @@ type PackageLock = {
       version?: string;
       dependencies?: Record<string, string>;
       devDependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
     }
   >;
 };
@@ -220,14 +222,11 @@ function alignedLock(
 
 describe('FR1: patched packages are pinned to their patch version', () => {
   describe('real tree', () => {
-    it('patches/ has at least one patch file and every filename parses', () => {
-      expect(patchFiles.length).toBeGreaterThanOrEqual(1);
+    // spec 10 FR4 retires both patches, so an empty patches/ is valid here. Any future patch
+    // must still parse and be exact-pinned (collectPatchProblems below).
+    it('every filename in patches/ parses (an empty patches/ is valid)', () => {
       const unparsed = patchFiles.filter((f) => getPackageDetailsFromPatchFilename(f) === null);
       expect(unparsed).toEqual([]);
-    });
-
-    it('dependencies["expo-widgets"] is exactly "55.0.5"', () => {
-      expect(pkg.dependencies?.['expo-widgets']).toBe('55.0.5');
     });
 
     it('collectPatchProblems(package.json, package-lock.json, patches/) is []', () => {
@@ -433,6 +432,170 @@ describe('FR4 (spec 10 FR1): expo.install.exclude lists exactly the patched pack
         'b: in expo.install.exclude but not a direct dependency',
       ]);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// spec 10 FR4: the SDK 58 dependency line. Floors, not windows: every case must still pass
+// on SDK 59+, so majors are compared against expo's own major and versions with >=.
+// Single-copy checks read lockfile keys (node_modules/<a>/node_modules/<pkg>), not npm ls.
+// ---------------------------------------------------------------------------
+
+// semver ships no .d.ts here; hoisted at the root by many packages (only satisfies() is used).
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const semver = require('semver') as { satisfies(version: string, range: string): boolean };
+
+const majorOf = (v: string): number => {
+  const m = /^(\d+)\.\d+\.\d+/.exec(v);
+  if (!m) throw new Error(`majorOf: not an x.y.z version: "${v}"`);
+  return Number(m[1]);
+};
+
+/** `0.N` minor of a 0.x version (react-native's real "major"). */
+const rnMinorOf = (v: string): number => {
+  const m = /^0\.(\d+)\.\d+/.exec(v);
+  if (!m) throw new Error(`rnMinorOf: not a 0.N.x version: "${v}"`);
+  return Number(m[1]);
+};
+
+/** Lockfile keys that install a second, nested copy of `name`. */
+function nestedCopies(l: PackageLock, name: string): string[] {
+  const suffix = `/node_modules/${name}`;
+  return Object.keys(l.packages).filter((k) => k.endsWith(suffix) && k !== `node_modules/${name}`);
+}
+
+/** Every `@react-navigation/*` name declared in dependencies or devDependencies. */
+function declaredReactNavigation(p: PackageJson): string[] {
+  return [...Object.keys(p.dependencies ?? {}), ...Object.keys(p.devDependencies ?? {})]
+    .filter((n) => n.startsWith('@react-navigation/'))
+    .sort();
+}
+
+const lockVersionOrThrow = (name: string): string => {
+  const v = lockVersion(name);
+  if (v === undefined) throw new Error(`package-lock.json has no node_modules/${name}`);
+  return v;
+};
+
+const SINGLE_COPY = [
+  'react',
+  'react-native',
+  'expo-widgets',
+  '@expo/ui',
+  'test-renderer',
+  'react-native-css-interop',
+] as const;
+
+describe('SDK 58 line (spec 10 FR4)', () => {
+  describe('helpers (fixtures)', () => {
+    it('majorOf / rnMinorOf parse x.y.z and reject ranges', () => {
+      expect(majorOf('58.0.16')).toBe(58);
+      expect(rnMinorOf('0.88.0')).toBe(88);
+      expect(() => majorOf('~58.0.16')).toThrow('not an x.y.z version');
+      expect(() => rnMinorOf('1.0.0')).toThrow('not a 0.N.x version');
+    });
+
+    it('nestedCopies finds node_modules/<a>/node_modules/<pkg> keys only', () => {
+      const l = alignedLock({
+        'node_modules/x/node_modules/react': { version: '19.0.0' },
+        'node_modules/x/node_modules/react-dom': { version: '19.0.0' },
+        'node_modules/@expo/ui': { version: '58.0.21' },
+        'node_modules/expo-widgets/node_modules/@expo/ui': { version: '58.0.20' },
+      });
+      expect(nestedCopies(l, 'react')).toEqual(['node_modules/x/node_modules/react']);
+      expect(nestedCopies(l, '@expo/ui')).toEqual(['node_modules/expo-widgets/node_modules/@expo/ui']);
+      expect(nestedCopies(l, 'expo-widgets')).toEqual([]);
+    });
+
+    it('declaredReactNavigation reads both sections', () => {
+      expect(
+        declaredReactNavigation({
+          dependencies: { '@react-navigation/native': '^7', expo: '~58.0.16' },
+          devDependencies: { '@react-navigation/elements': '^2' },
+        }),
+      ).toEqual(['@react-navigation/elements', '@react-navigation/native']);
+      expect(declaredReactNavigation(alignedPkg())).toEqual([]);
+    });
+  });
+
+  it('lockfile expo is an exact release (no prerelease) with major >= 58', () => {
+    const v = lockVersionOrThrow('expo');
+    expect(v).toMatch(EXACT_VERSION);
+    expect(majorOf(v)).toBeGreaterThanOrEqual(58);
+  });
+
+  it('lockfile react-native is 0.N.x with N >= 88', () => {
+    const v = lockVersionOrThrow('react-native');
+    expect(v).toMatch(EXACT_VERSION);
+    expect(rnMinorOf(v)).toBeGreaterThanOrEqual(88);
+  });
+
+  it('expo-widgets and @expo/ui lockfile majors equal the expo major', () => {
+    const expoMajor = majorOf(lockVersionOrThrow('expo'));
+    expect({
+      'expo-widgets': majorOf(lockVersionOrThrow('expo-widgets')),
+      '@expo/ui': majorOf(lockVersionOrThrow('@expo/ui')),
+    }).toEqual({ 'expo-widgets': expoMajor, '@expo/ui': expoMajor });
+  });
+
+  it('@expo/ui is a direct dependencies entry (app code requires @expo/ui/swift-ui)', () => {
+    expect(pkg.dependencies ?? {}).toHaveProperty(['@expo/ui']);
+  });
+
+  it('react-native-reanimated >= 4.7.1, and react-native-worklets satisfies its peer range', () => {
+    const reanimated = lockVersionOrThrow('react-native-reanimated');
+    expect(versionAtLeast(reanimated, '4.7.1')).toBe(true);
+    const peer =
+      lock.packages['node_modules/react-native-reanimated']?.peerDependencies?.[
+        'react-native-worklets'
+      ];
+    expect(peer).toBeDefined();
+    const worklets = lockVersionOrThrow('react-native-worklets');
+    expect({ worklets, peer, ok: semver.satisfies(worklets, peer!) }).toEqual({
+      worklets,
+      peer,
+      ok: true,
+    });
+  });
+
+  it('@shopify/react-native-skia >= 2.14.0 and victory-native major >= 42', () => {
+    expect(versionAtLeast(lockVersionOrThrow('@shopify/react-native-skia'), '2.14.0')).toBe(true);
+    expect(majorOf(lockVersionOrThrow('victory-native'))).toBeGreaterThanOrEqual(42);
+  });
+
+  it('@react-native-async-storage/async-storage is exactly 2.2.0 (declared and locked)', () => {
+    expect(pkg.dependencies?.['@react-native-async-storage/async-storage']).toBe('2.2.0');
+    expect(lockVersion('@react-native-async-storage/async-storage')).toBe('2.2.0');
+  });
+
+  it('react-test-renderer is declared and its lockfile version equals react', () => {
+    expect(pkg.devDependencies ?? {}).toHaveProperty(['react-test-renderer']);
+    expect(lockVersionOrThrow('react-test-renderer')).toBe(lockVersionOrThrow('react'));
+  });
+
+  it('@react-native/jest-preset 0.N equals react-native 0.N', () => {
+    expect(rnMinorOf(lockVersionOrThrow('@react-native/jest-preset'))).toBe(
+      rnMinorOf(lockVersionOrThrow('react-native')),
+    );
+  });
+
+  it.each(SINGLE_COPY)('single copy of %s (root entry, no nested lockfile key)', (name) => {
+    expect(lockVersion(name)).toBeDefined();
+    expect(nestedCopies(lock, name)).toEqual([]);
+  });
+
+  it('root react-native-css-interop equals the version nativewind depends on', () => {
+    const spec = lock.packages['node_modules/nativewind']?.dependencies?.['react-native-css-interop'];
+    expect(spec).toBeDefined();
+    expect(lockVersionOrThrow('react-native-css-interop')).toBe(spec);
+  });
+
+  it('no @react-navigation/* in dependencies or devDependencies (expo-router 58 has none)', () => {
+    expect(declaredReactNavigation(pkg)).toEqual([]);
+  });
+
+  it('patches/ contains no .patch files (both SDK 55 patches are retired)', () => {
+    expect(patchFiles).toEqual([]);
   });
 });
 

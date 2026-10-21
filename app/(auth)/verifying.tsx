@@ -28,7 +28,7 @@ export default function VerifyingScreen() {
   return (
     <SafeAreaView className="flex-1 bg-background">
       <View className="flex-1 px-4 items-center justify-center gap-5">
-        <ActivityIndicator size="large" color="#8B949E" />
+        <ActivityIndicator size="large" color="#8B949E" testID="verifying-spinner" />
         <Text className="font-sans text-base text-textSecondary">
           Verifying your account…
         </Text>

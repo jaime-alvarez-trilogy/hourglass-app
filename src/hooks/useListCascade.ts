@@ -34,9 +34,10 @@ import {
   withDelay,
   withSpring,
   useReducedMotion,
+  type AnimatedStyle,
 } from 'react-native-reanimated';
 import { springBouncy } from '@/src/lib/reanimated-presets';
-import type { StyleProp, ViewStyle } from 'react-native';
+import type { ViewStyle } from 'react-native';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -57,7 +58,7 @@ export interface UseListCascadeOptions {
 }
 
 export interface UseListCascadeReturn {
-  getItemStyle: (index: number) => StyleProp<ViewStyle>;
+  getItemStyle: (index: number) => AnimatedStyle<ViewStyle>;
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -124,7 +125,7 @@ export function useListCascade(
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [count, ...deps]);
 
-  function getItemStyle(index: number): StyleProp<ViewStyle> {
+  function getItemStyle(index: number): AnimatedStyle<ViewStyle> {
     if (index < 0 || index >= count || index >= MAX_ITEMS) {
       // Out-of-range: return resting plain style (no animation overhead)
       return { opacity: 1, transform: [{ translateY: 0 }, { scale: 1 }] };
