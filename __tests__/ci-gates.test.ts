@@ -265,3 +265,44 @@ describe('10-sdk-58-ios-27 — FR1: CI runs an even Node major >= 22', () => {
     expect(() => major('lts/*')).toThrow('not a numeric major');
   });
 });
+
+// ─── 10-sdk-58-ios-27 FR8: typecheck sees the same ambient types in CI ───────
+
+describe('10-sdk-58-ios-27 — FR8: CI typecheck needs no generated file', () => {
+  // TypeScript 6 turns noUncheckedSideEffectImports on by default, so `import '../global.css'`
+  // (app/_layout.tsx) needs an ambient `*.css` declaration. Expo's comes from expo/types, and the
+  // usual reference to it is expo-env.d.ts, which is gitignored and only written by `expo start`.
+  // A fresh CI checkout doesn't have it, so local typecheck passed while PR #4's first CI run
+  // failed with TS2882. A tracked .d.ts must carry the reference.
+  const EXPO_TYPES_REF = /^\/\/\/\s*<reference\s+types="expo\/types"\s*\/>/m;
+  const TSCONFIG_EXCLUDES = ['server/', 'src/widgets/android/', 'node_modules/'];
+
+  const tracked = (pattern: string): string[] => {
+    const result = spawnSync('git', ['ls-files', '-z', '--', pattern], { cwd: ROOT, encoding: 'utf8' });
+    if (result.status !== 0) throw new Error(`git ls-files failed: ${result.stderr}`);
+    return result.stdout.split('\0').filter(Boolean);
+  };
+
+  it('a tracked .d.ts inside the tsconfig scope references expo/types', () => {
+    const carriers = tracked('*.d.ts').filter(
+      (file) =>
+        !TSCONFIG_EXCLUDES.some((dir) => file.startsWith(dir)) && EXPO_TYPES_REF.test(read(file)),
+    );
+    expect(carriers.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('expo/types still declares the *.css module the side-effect import needs', () => {
+    // expo's exports map only exposes ./types (→ types/index.d.ts, which imports ./global).
+    const typesDir = path.join(path.dirname(require.resolve('expo/package.json')), 'types');
+    expect(read(path.relative(ROOT, path.join(typesDir, 'index.d.ts')))).toMatch(
+      /^import '\.\/global';$/m,
+    );
+    expect(read(path.relative(ROOT, path.join(typesDir, 'global.d.ts')))).toMatch(
+      /^declare module '\*\.css';$/m,
+    );
+  });
+
+  it('app/_layout.tsx still side-effect imports global.css (what this guard is for)', () => {
+    expect(read('app/_layout.tsx')).toMatch(/^import '\.\.\/global\.css';$/m);
+  });
+});
