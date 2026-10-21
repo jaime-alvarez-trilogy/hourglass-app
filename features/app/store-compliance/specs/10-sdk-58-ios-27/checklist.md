@@ -974,9 +974,79 @@ Only FR4's tests are written here. FR5–FR8 write their red tests at the start 
   - (2) The widget's Release Swift is unoptimized (`-Onone`) upstream in both expo-widgets 55 and 58. Build 18 shipped that way, so it's a performance and size question, not a regression.
 
 ### FR10: docs
-- [ ] (C) Update `TECH_STACK.md`, `CLAUDE.md:69`, `README.md:27,66`, `docs/ARCHITECTURE.md` (§5.7, §7.2, §8.6), `docs/RELEASING.md` ((a)–(e)), `FEATURE.md` and `site/support.html`, per FR10.
-- [ ] (C) Run the FR10 success-criteria greps and paste the outputs. The forbidden-words grep uses `@expo/ngrok`, not `ngrok`.
-- [ ] (C) `runtimeversion:resolve --platform ios` is unchanged from the FR8 value (docs don't fork the runtime).
+> **Done 2026-10-20 on the FR9 tree** (`c672a0b`, `origin/feat/sdk-58` == `c672a0b`, clean porcelain). Node v22.17.0. Implementation commit **`553dec8`** `docs(10-sdk-58-ios-27): FR10 docs for SDK 58 / iOS 27 and the iOS 16.4 minimum`. No app source, config or native input changed; every fact the docs cite was re-read from the installed `node_modules` (SDK 58.0.16) or from this checklist's FR1–FR9 evidence.
+
+- [x] (C) Update `TECH_STACK.md`, `CLAUDE.md:69`, `README.md:27,66`, `docs/ARCHITECTURE.md` (§5.7, §7.2, §8.6), `docs/RELEASING.md` ((a)–(e)), `FEATURE.md` and `site/support.html`, per FR10.
+  - **Red test first (the only behavior-bearing change).** `site/support.html` is locked by `__tests__/site/legal-pages.test.ts` (FR2's verbatim paragraph contract), so the new line went into the contract before the page:
+    - `SUPPORT_PARAGRAPHS` gains `'Requires iOS 16.4 or later, from version 1.2.0. Version 1.1.0 requires iOS 15.1 or later.'` after the About paragraph. 15.1 is build 18's IPA `MinimumOSVersion` (FR9), and 16.4 is the FR9 prebuild and Release compile.
+    - New case `10-sdk-58-ios-27 FR10: About states the minimum iOS, which is the expo pod iOS floor`: it reads `:ios => '<x>'` from `node_modules/expo/Expo.podspec` (`:39`, `'16.4'`) and requires exactly one About paragraph starting `Requires iOS <x> or later`. The app sets no `ios.deploymentTarget`, so the template default applies, and an SDK that raises the floor turns the case red.
+    - `npx jest __tests__/site/legal-pages.test.ts` before the page edit → **2 failed, 52 passed (54)**: `FR2: body copy matches the support contract verbatim` (the expected paragraph is missing: `- Expected - 1`) and the new FR10 case (`Received length: 0`; the podspec floor parsed as `16.4`). Both fail for the intended reason.
+    - After adding `<p>Requires iOS 16.4 or later, from version 1.2.0. Version 1.1.0 requires iOS 15.1 or later.</p>` under About → **54 passed**.
+    - `site/` deploys only on a push to `main` (`pages.yml`), so the line goes live when `feat/sdk-58` merges; it's version-qualified for that window.
+  - **`TECH_STACK.md`.** Expo SDK `~58.0.16`, React Native `0.88.0`, React `19.3.0`, and every I1 dependency and devDependency at its `package.json` range (lockfile: expo 58.0.16, expo-router 58.0.24, expo-widgets / @expo/ui 58.0.21, Skia 2.14.0, victory-native 42.0.1, jest 30.5.2, RNTL 14.1.0, TS 6.0.3, eslint-plugin-react-hooks 7.1.1).
+    - The navigation rows are replaced by expo-router "Ships its own navigation fork since SDK 56". `node_modules/expo-router/package.json` 58.0.24 depends on `standard-navigation`, not on any navigation package.
+    - The tunnel and inner-shadow rows are gone. The tunnel note is verified: Expo CLI 58.1.13 `build/src/start/doctor/ngrok/NgrokResolver.js:29` prompts "… is required to use tunnels, would you like to install it globally?".
+    - New rows: Node ≥ 22.13 (CI and EAS run 22), iOS ≥ 16.4, the iOS 27 SDK / Xcode 27.1 image pin, UIKit scenes.
+    - Patched packages: none. Both local plugins are described (I7, I10), with their order and the throw-on-missing-anchor rule.
+    - Precompiled pods: the `[Expo-precompiled]` set from checkpoint B / FR6 / FR7 / FR9. **The Decision 9 fallback was not needed.**
+    - Metro fix: "Re-verified on SDK 58 / RN 0.88", with the FR7 experiment result.
+  - **`CLAUDE.md:69`** → `- **Framework:** Expo SDK 58, React Native 0.88, Expo Router, TanStack Query v5`.
+  - **`README.md`.** `:27` → `| Framework | Expo SDK 58 + React Native 0.88 |`. `:66` → `├── patches/  # patch-package fixes, if any (none today; see TECH_STACK.md)`, plus a `plugins/` line.
+  - **`docs/ARCHITECTURE.md`.**
+    - New `### 5.7 Native launch & lifecycle (UIKit scenes)`, sourced from `node_modules`:
+      - `SceneDelegate: ExpoAppSceneDelegate` (`expo/ios/Expo/ExpoAppSceneDelegate.swift:12-13,33-89`).
+      - AppState through `UIApplication` notifications (`RCTAppState.mm:85-89`; the four listeners).
+      - The cold-start URL through `connectionOptions`: rebuilt launch options for `Linking.getInitialURL()` (`:59-74`), and forwarding to expo-linking's `LinkingAppDelegateSubscriber`, which Expo Router reads on iOS through `getLinkingURL()` (`expo-router/build/link/linking.js:103-108`). Warm links through `scene(_:openURLContexts:)` (`:111-123`).
+      - Notifications through `NotificationsAppDelegateSubscriber`. No tap routing (grep: no `addNotificationResponseReceivedListener` / `useLastNotificationResponse` / `getLastNotificationResponseAsync`). Decision 10 (a) resizing.
+    - `§7.2`:
+      - `.atEnd` (`expo-widgets/ios/Widgets/TimelineProvider.swift:34`).
+      - `env.date` (`bridge.ts:518`).
+      - Stored-layout precedence (`WidgetsLayoutRegistry.swift:9-19`).
+      - Both `containerBackground`s (`bridge.ts:679,724,821` and the I7 plugin).
+      - The transient placeholder red box before the first open after an update (Decision 5 (i), `WidgetsLayoutRegistry.swift:21-26`, `TimelineProvider.swift:4-5,14,19`).
+      - The extension's own `PrivacyInfo.xcprivacy` (I10) and the plugin order.
+    - `§8.6`: `components/haptic-tab.tsx` was removed in FR2.
+    - Also corrected (stale since FR4/FR6): §5.2 themes from `expo-router`; §5.3 `expo-router/native-tabs` / `expo-router/js-tabs`; §6.1 `plugins/` and the empty `patches/`; the §7.1 / §7.3 `bridge.ts` line ranges and the three-argument `createWidget`.
+  - **`docs/RELEASING.md`.**
+    - (a) `### Build` steps 1 and 3: cloud only. The log must name `macos-tahoe-26.6-xcode-27.1` / Xcode 27.1 (27A9275). A local build misses the pinned Xcode. A `release/1.1` rebuild runs on `macos-sequoia-15.6-xcode-26.2` (that branch's `eas.json` has no pin: `git show release/1.1:eas.json`).
+    - (b) `eas build:list` fields are `runtime.version`, in A1, A4, D, Build 5 and "If something fails". The `runtimeversion:resolve` output keeps its own `runtimeVersion` field.
+    - (c) New `## SDK upgrade`, 12 steps:
+      - image bump; `bundledNativeModules.json` and `--fix` until `--check` is clean, with the install-order trap; no forcing;
+      - the patches policy; the FR9 prebuild inspection;
+      - the IPA `DT*` check, including the appex `PrivacyInfo.xcprivacy`, no `Frameworks/`, and the FR9 follow-up (no `*.debug.dylib` / `__preview.dylib`);
+      - precompiled modules and the Decision 9 fallback; the eas-cli JSON shape; the fingerprint preset;
+      - ITMS-91053 for every binary including `ExpoWidgetsTarget`; Decision 16 (c) for the ASC key and `asc.js`; lint.
+    - (d) New `### B2. Hotfixes for 1.1.x during the 1.2.0 rollout`: `release/1.1` from `aade79b` / `build-18`; the OTA steps with `ota-publish.sh`; the cherry-pick forward and `npm ci`; no production publish from the 1.2 tree before build 19 is live; retiring the branch; the iOS 15.1–16.3 devices that stay on build 18.
+    - (e) `### expo/fetch escape hatch` (`EXPO_PUBLIC_USE_RN_FETCH`, `expo/src/winter/runtime.native.ts:35-36`; `build.*.env` **and** the EAS `production` environment).
+    - Also fixed:
+      - The Upload step 4 widget branch: the deleted patch remedy is replaced by the I10 plugin, matching FR11's branches.
+      - Section E: local plugin files fork the runtime.
+      - Pre-flight 4 and 6 were stale (spec 07 merged; expo-doctor 20/20).
+      - Post-release 3: build 19, `build-19`, and the merge publishing `site/`.
+  - **`FEATURE.md`.**
+    - The release plan already showed v1.2.0 / build 19 = spec 10 and struck through specs 06/08/09. This adds the 1.1.x hotfix-lane row and the post-release row (baseline OTA, merge, retiring `release/1.1`), plus "minimum iOS 16.4".
+    - The changelog's spec 06 row now says "FR1–FR4 ported into spec 10 FR1; **FR5 superseded by 10**" (08 and 09 were already marked).
+    - Files Touched gains a Docs list.
+- [x] (C) Run the FR10 success-criteria greps and paste the outputs. The forbidden-words grep uses `@expo/ngrok`, not `ngrok`.
+  - `grep -n "SDK 58" CLAUDE.md README.md TECH_STACK.md` → exit 0, matches in all three: `CLAUDE.md:69`, `README.md:27`, and `TECH_STACK.md` 6 lines (`:14`, `:16`, `:42`, `:131`, `:164`, `:195`).
+  - `grep -rnE "SDK 55|0\.83|@react-navigation|@expo/ngrok|inner-shadow" CLAUDE.md README.md TECH_STACK.md` → **prints nothing** (exit 1). The plain word `ngrok` appears once, in the allowed `--tunnel` note (`TECH_STACK.md:200`).
+  - `grep -n "^### 5.7" docs/ARCHITECTURE.md` → `296:### 5.7 Native launch & lifecycle (UIKit scenes)`. `ExpoAppSceneDelegate` appears on 6 lines of the section.
+  - `grep -nE "^## SDK upgrade|^### B2\." docs/RELEASING.md` → **2 matches**: `71:### B2. Hotfixes for 1.1.x during the 1.2.0 rollout` and `262:## SDK upgrade`.
+  - `grep -n "xcode-27.1" docs/RELEASING.md` → 3 lines (`:195`, `:198`, `:270`).
+  - `grep -n "not Xcode 27" docs/RELEASING.md` → **prints nothing** (exit 1).
+  - `grep -n "16.4" site/support.html` → `144:    <p>Requires iOS 16.4 or later, from version 1.2.0. Version 1.1.0 requires iOS 15.1 or later.</p>`.
+  - The existing docs guard still passes: `docs/RELEASING.md`'s `2. (J) App Privacy label` line is unchanged (`legal-pages.test.ts` cross-check).
+- [x] (C) `runtimeversion:resolve --platform ios` is unchanged from the FR8 value (docs don't fork the runtime).
+  - Twice on the edited tree before the commit, and once on the clean committed tree at `553dec8` (porcelain empty) → **`56d054fc723984e56892a367dca1efa79a9f8fad`** each time, exit 0, 55 `fingerprintSources`. The three JSON outputs are byte-identical (`cmp`) and equal the FR8 baseline. `package-lock.json` is unchanged, and `node_modules` is FR9's fresh `npm ci`.
+- [x] (C) Gates at `553dec8` (not a separate checklist box; FR10's last success criterion):
+  - `npm test` → **exit 0**: `Test Suites: 184 passed, 184 total`, `Tests: 5316 passed, 5316 total` (FR9: 5315, plus the new FR10 case).
+  - `npm run typecheck` → **exit 0**.
+  - `npm run lint` → **exit 0**: `✖ 486 problems (0 errors, 486 warnings)` (as in FR8/FR9).
+- **Deviations:**
+  - The support line is version-qualified ("from version 1.2.0. Version 1.1.0 requires iOS 15.1 or later.") rather than the bare "Requires iOS 16.4 or later". It still starts with that phrase. Pages publishes on merge, which may come before 1.1.x users can update.
+  - Docs lines corrected beyond FR10's list because they went stale in FR4–FR9: ARCHITECTURE §5.2, §5.3, §6.1, §7.1 and §7.3; RELEASING Upload step 4, section E, Pre-flight 4 and 6, and Post-release 3; README's Node / Xcode prerequisites; TECH_STACK's expo-notifications role (the silent ping doesn't refresh on iOS, ARCHITECTURE §2).
+  - One new jest case (support-page minimum ↔ the expo pod floor). The spec's FR10 success criteria are greps only.
+- **Not done here:** the Phase C review below (`spec-implementation-alignment` for FR9–FR10 and `pr-review-toolkit:review-pr` on the docs diff) belongs to the review phase, like the Phase A.2/B.2 reviews. The What's New text ("Requires iOS 16.4 or later") is FR11's ASC prep.
 
 ## Phase C Review (MANDATORY)
 - [ ] `spec-implementation-alignment` for FR9–FR10. Run `pr-review-toolkit:review-pr` on the docs diff and address the findings. Three gates green.
@@ -1198,3 +1268,15 @@ Each cell passes when there's no clipping or overlap, every chart re-measures wi
 - **Still open:**
   - The ITMS-91053 baseline (J; FR11).
   - The Phase A/B validator boxes, and the Phase A.2, B.2 and C reviews.
+
+**2026-10-20 (FR10 implemented)**: FR10 is done on SDK 58, with all three gates green and the iOS runtime unchanged (`56d054fc723984e56892a367dca1efa79a9f8fad`).
+- Commits on `feat/sdk-58`: `553dec8` (docs, the support page and its contract test) and this checklist commit.
+- `TECH_STACK.md`, `CLAUDE.md`, `README.md` are on the SDK 58 line, and none of them names SDK 55, 0.83, the navigation packages, the tunnel package or inner-shadow.
+- `docs/ARCHITECTURE.md`: new §5.7 (UIKit scenes) and the expo-widgets 58 runtime in §7.2.
+- `docs/RELEASING.md`: Build steps for the pinned Xcode 27.1 image, `runtime.version`, the B2 hotfix lane, `## SDK upgrade` and the `expo/fetch` escape hatch.
+- `FEATURE.md`: the 1.1.x lane and post-release rows; spec 06 FR5 superseded.
+- `site/support.html`: "Requires iOS 16.4 or later, from version 1.2.0". It's locked by the legal-pages contract plus a new case tying it to the expo pod's iOS floor (red 2/54 before, 54/54 after). It goes live when `feat/sdk-58` merges (Pages deploys from `main`).
+- Still open:
+  - The ITMS-91053 baseline (J; FR11).
+  - The Phase A/B validator boxes, and the Phase A.2, B.2 and C reviews.
+  - FR11's What's New text.
