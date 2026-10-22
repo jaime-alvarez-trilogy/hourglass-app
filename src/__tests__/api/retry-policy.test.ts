@@ -12,6 +12,10 @@
  * TanStack QueryClient to pin its `failureCount` semantics (0 on the first failure).
  * Client-thrown errors under the same predicate are covered in auth-resilience.test.ts
  * (DD1.18-DD1.20).
+ *
+ * Extended by durable-data 03-keep-last-good FR1 (DD3.6): `shouldRetryOnce`, the shared
+ * one-retry form that replaces `retry: 1` in the hours, payments, earnings-trend and team
+ * hooks. The local `oneRetry` below stays as the reference it must match.
  */
 
 import { QueryClient } from '@tanstack/react-query';
@@ -26,6 +30,7 @@ import {
   MAX_QUERY_RETRIES,
   NetworkError,
   NO_CREDENTIALS,
+  shouldRetryOnce,
   shouldRetryQuery,
 } from '../../api/errors';
 
@@ -129,6 +134,27 @@ describe('FR3.c: shouldRetryQuery', () => {
 });
 
 // ---------------------------------------------------------------------------
+// DD3.6 — shouldRetryOnce (one retry, spec 03)
+// ---------------------------------------------------------------------------
+
+describe('DD3.6: shouldRetryOnce', () => {
+  it.each([
+    [0, 'NetworkError', true, networkError()],
+    [1, 'NetworkError', false, networkError()],
+    [0, 'ApiError(503)', true, new ApiError(503)],
+    [1, 'ApiError(503)', false, new ApiError(503)],
+    [0, 'AuthError(AUTH_HTML_500)', true, htmlTokenRejected()],
+    [1, 'AuthError(AUTH_HTML_500)', false, htmlTokenRejected()],
+    [0, 'AuthError(401)', false, new AuthError(401)],
+    [0, 'AuthError(403)', false, new AuthError(403)],
+    [0, 'AuthError(AUTH_LOGIN_LATCHED)', false, latched()],
+    [0, 'ApiError(404)', false, new ApiError(404)],
+  ])('DD3.6: shouldRetryOnce(%i, %s) → %s', (failureCount, _label, expected, err) => {
+    expect(shouldRetryOnce(failureCount, err)).toBe(expected);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // FR3.e — the rules under TanStack's real retryer
 // ---------------------------------------------------------------------------
 
@@ -196,5 +222,14 @@ describe('FR3.e: attempts under a real QueryClient', () => {
     }
     expect(await attemptsUntilGiveUp(oneRetry, new AuthError(401))).toBe(1);
     expect(await attemptsUntilGiveUp(oneRetry, latched())).toBe(1);
+  });
+
+  it('DD3.6: shouldRetryOnce runs an outage twice (today\'s retry: 1) and a credential failure once', async () => {
+    for (const outage of [networkError(), new ApiError(503), outageAfterRenewal(), htmlTokenRejected()]) {
+      expect(await attemptsUntilGiveUp(shouldRetryOnce, outage)).toBe(2);
+    }
+    expect(await attemptsUntilGiveUp(shouldRetryOnce, new AuthError(401))).toBe(1);
+    expect(await attemptsUntilGiveUp(shouldRetryOnce, new AuthError(403))).toBe(1);
+    expect(await attemptsUntilGiveUp(shouldRetryOnce, latched())).toBe(1);
   });
 });

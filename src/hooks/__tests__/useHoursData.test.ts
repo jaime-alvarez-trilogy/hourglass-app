@@ -12,6 +12,11 @@
 //
 // Fix: add `eitherError = timesheetQuery.isError || paymentsQuery.isError`
 //   and use it to trigger cache fallback AND detect no-cache error in final fallback.
+//
+// Extended by durable-data 03-keep-last-good FR1 (DD3.7): useTimesheet / usePayments
+// retry through the shared `shouldRetryOnce`, and the useHoursData guards that keep a
+// failed refresh out of 'hours_cache' stay as they are (FR1 makes no hook change). The
+// behaviour itself is proven in __tests__/hooks/useHoursData.keep-last-good.test.ts.
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -19,6 +24,12 @@ import * as path from 'path';
 // ─── File path for static analysis ───────────────────────────────────────────
 // __dirname = hourglassws/src/hooks/__tests__
 const USE_HOURS_DATA_PATH = path.resolve(__dirname, '..', 'useHoursData.ts');
+const USE_TIMESHEET_PATH = path.resolve(__dirname, '..', 'useTimesheet.ts');
+const USE_PAYMENTS_PATH = path.resolve(__dirname, '..', 'usePayments.ts');
+
+function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+}
 
 // ─── Static analysis helpers ──────────────────────────────────────────────────
 
@@ -121,5 +132,37 @@ describe('useHoursData — FR2: either-error no-cache error state (static analys
     const finalReturnIdx = source.lastIndexOf('isLoading: true');
     expect(eitherErrorIdx).toBeGreaterThan(-1);
     expect(finalReturnIdx).toBeGreaterThan(eitherErrorIdx);
+  });
+});
+
+describe('useHoursData — durable-data 03 FR1: keep last good (static analysis)', () => {
+  it.each([
+    ['useTimesheet.ts', USE_TIMESHEET_PATH],
+    ['usePayments.ts', USE_PAYMENTS_PATH],
+  ])('DD3.7 — %s retries through the shared shouldRetryOnce, not retry: 1', (_name, file) => {
+    const code = stripComments(fs.readFileSync(file, 'utf8'));
+    expect(code).toMatch(/retry:\s*shouldRetryOnce\b/);
+    expect(code).not.toMatch(/retry:\s*1\b/);
+    // The shared predicate from src/api/errors, not a local copy of it.
+    expect(code).toMatch(/import\s*\{[^}]*\bshouldRetryOnce\b[^}]*\}\s*from\s*'\.\.\/api\/errors'/);
+  });
+
+  it('DD3.7 — the hours_cache write is still guarded by both queries being error-free', () => {
+    const code = stripComments(fs.readFileSync(USE_HOURS_DATA_PATH, 'utf8'));
+    const writeIdx = code.indexOf('AsyncStorage.setItem(CACHE_KEY');
+    expect(writeIdx).toBeGreaterThan(-1);
+    // The condition of the `if` that encloses the write.
+    const guard = code.slice(code.lastIndexOf('if (', writeIdx), writeIdx);
+    expect(guard).toContain('!timesheetQuery.isError');
+    expect(guard).toContain('!paymentsQuery.isError');
+  });
+
+  it('DD3.7 — a failed query still serves hours_cache (eitherError && cache, stale-flagged)', () => {
+    const code = stripComments(fs.readFileSync(USE_HOURS_DATA_PATH, 'utf8'));
+    const branch = code.match(/if\s*\(\s*eitherError\s*&&\s*cache\s*\)\s*\{([\s\S]*?)\}/);
+    expect(branch).not.toBeNull();
+    expect(branch![1]).toMatch(/data:\s*cache\.data/);
+    expect(branch![1]).toMatch(/isStale:\s*true/);
+    expect(branch![1]).toMatch(/error:\s*null/);
   });
 });
