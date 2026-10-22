@@ -176,12 +176,70 @@ describe('FR7+FR8: useAIData', () => {
     expect(get().data?.totalSlots).toBeGreaterThan(0);
   });
 
-  it('sets error to "auth" when fetchWorkDiary throws AuthError', async () => {
-    mockFetchWorkDiary.mockRejectedValue(new AuthError(401));
-    const { get } = setupHook();
-    await flushAsync();
-    expect(get().error).toBe('auth');
-    expect(get().data).toBeNull();
+  // ── FR2 (03-keep-last-good): an auth failure keeps the AI tab's data ─────────
+  // ai_cache is untouched by an AuthError, so the cached week stays on screen and
+  // the auth state is reported through `error` alone, as the NetworkError branch does.
+
+  describe('FR2 (03-keep-last-good): AuthError keeps data', () => {
+    const SEEDED_TODAY: TagData = { total: 12, aiUsage: 4, secondBrain: 1, noTags: 2 };
+
+    /** Seeds ai_cache with today's (UTC) day and returns the raw stored string.
+     *  No _lastFetchedAt, and today is always refetched, so fetchWorkDiary runs. */
+    async function seedTodayCache(): Promise<{ today: string; raw: string }> {
+      const today = new Date().toISOString().slice(0, 10);
+      const raw = JSON.stringify({ [today]: SEEDED_TODAY });
+      await AsyncStorage.setItem('ai_cache', raw);
+      return { today, raw };
+    }
+
+    it.each([
+      { id: 'DD3.11', status: 401 as const },
+      { id: 'DD3.12', status: 403 as const },
+    ])('$id: AuthError($status) sets error "auth" and keeps the cached week', async ({ status }) => {
+      const { today } = await seedTodayCache();
+      mockFetchWorkDiary.mockRejectedValue(new AuthError(status));
+
+      const { get } = setupHook();
+      await flushAsync();
+
+      // Today was fetched, and that fetch is what failed
+      expect(mockFetchWorkDiary).toHaveBeenCalledWith(
+        VALID_CONFIG.assignmentId, today, VALID_CREDS, VALID_CONFIG.useQA,
+      );
+      expect(get().error).toBe('auth');
+      expect(get().isLoading).toBe(false);
+      expect(get().data).not.toBeNull();
+      expect(get().data?.totalSlots).toBe(SEEDED_TODAY.total);
+    });
+
+    it('DD3.13: ai_cache is unchanged after an AuthError', async () => {
+      const { raw } = await seedTodayCache();
+      mockFetchWorkDiary.mockRejectedValue(new AuthError(401));
+
+      const { get } = setupHook();
+      await flushAsync();
+
+      expect(get().error).toBe('auth');
+      expect(await AsyncStorage.getItem('ai_cache')).toBe(raw);
+    });
+
+    it('DD3.11 (in session): a refetch that fails with AuthError keeps the data already shown', async () => {
+      const { get } = setupHook();
+      await flushAsync();
+      const shownTotal = get().data?.totalSlots;
+      expect(shownTotal).toBeGreaterThan(0);
+      const rawBefore = await AsyncStorage.getItem('ai_cache');
+
+      // The token goes bad, then the app comes back to the foreground (refetch)
+      mockFetchWorkDiary.mockRejectedValue(new AuthError(401));
+      await act(async () => { get().refetch(); });
+      await flushAsync();
+
+      expect(get().error).toBe('auth');
+      expect(get().data).not.toBeNull();
+      expect(get().data?.totalSlots).toBe(shownTotal);
+      expect(await AsyncStorage.getItem('ai_cache')).toBe(rawBefore);
+    });
   });
 
   it('sets error to "network" when fetchWorkDiary throws NetworkError', async () => {
