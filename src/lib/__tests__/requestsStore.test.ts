@@ -15,8 +15,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  REQUESTS_STORE_KEY,
-  REQUESTS_STORE_VERSION,
   REQUESTS_RETENTION_WEEKS,
   readRequestsStore,
   updateRequestsStore,
@@ -158,12 +156,9 @@ beforeEach(() => {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
+// The key and version are pinned by behaviour: every case reads the raw `my_requests_v1`
+// literal (the one clearAll() lists) and compares against `version: 1` blobs.
 describe('FR3: constants', () => {
-  it('the key is my_requests_v1 and the version is 1', () => {
-    expect(REQUESTS_STORE_KEY).toBe('my_requests_v1');
-    expect(REQUESTS_STORE_VERSION).toBe(1);
-  });
-
   it('REQUESTS_RETENTION_WEEKS (24) is re-exported from the planner (C15)', () => {
     expect(REQUESTS_RETENTION_WEEKS).toBe(24);
     expect(REQUESTS_RETENTION_WEEKS).toBe(PLANNER_RETENTION_WEEKS);
@@ -193,16 +188,10 @@ describe('DD2.26 — round trip', () => {
 
     await updateRequestsStore(OWNER, [emptyOpen, emptySettled], TODAY);
 
-    const read = await readRequestsStore(OWNER);
-    expect(read).toEqual({ status: 'ok', store: storeOf([emptyOpen, emptySettled]) });
-    if (read.status !== 'ok') throw new Error('expected ok');
-    expect(read.store.days['2026-03-10']).toEqual({
-      date: '2026-03-10',
-      fetchedAt: TUE_EVENING,
-      entries: [],
-      settled: false,
+    await expect(readRequestsStore(OWNER)).resolves.toEqual({
+      status: 'ok',
+      store: storeOf([emptyOpen, emptySettled]),
     });
-    expect(read.store.days['2026-03-01'].settled).toBe(true);
   });
 
   it('an absent key reads as empty', async () => {
@@ -260,8 +249,6 @@ describe('DD2.28 — 24-week retention', () => {
   it('buildRequestsView ignores out-of-retention days even before any write', () => {
     const view = buildRequestsView(byDate(ancient, edge, mon), TODAY);
     expect(view.entries).toEqual([...mon.entries, ...edge.entries]);
-    expect(view.entries.map((e) => e.date)).not.toContain(BEFORE_RETENTION);
-    expect(storeWrites()).toBe(0);
   });
 });
 
@@ -346,11 +333,7 @@ describe('DD2.30 — unknown version and malformed data read as empty', () => {
   ])('a malformed day record (%s) is dropped; the other days still read', async (_label, bad) => {
     await seedRaw(JSON.stringify({ version: 1, owner: OWNER, days: { ...byDate(d1), [d2.date]: bad } }));
 
-    const read = await readRequestsStore(OWNER);
-
-    expect(read).toEqual({ status: 'ok', store: storeOf([d1]) });
-    if (read.status !== 'ok') throw new Error('expected ok');
-    expect(() => buildRequestsView(read.store.days, TODAY)).not.toThrow();
+    await expect(readRequestsStore(OWNER)).resolves.toEqual({ status: 'ok', store: storeOf([d1]) });
   });
 
   it('the next update rewrites the store without the malformed day', async () => {

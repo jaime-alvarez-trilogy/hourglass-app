@@ -115,13 +115,8 @@ function reasonsFor(dates: string[], today: string, rest: RefreshReason): Record
 
 // ─── Constants and date helpers ──────────────────────────────────────────────
 
+// The TTL values are pinned by behaviour: the 14/16-min, 59/61-min and 5/7-h cases below.
 describe('FR2: constants', () => {
-  it('TTLs are 15 min (PENDING), 60 min (yesterday) and 6 h (unsettled older days)', () => {
-    expect(PENDING_TTL_MS).toBe(15 * 60_000);
-    expect(RECENT_TTL_MS).toBe(60 * 60_000);
-    expect(OLD_UNSETTLED_TTL_MS).toBe(6 * 60 * 60_000);
-  });
-
   it('retention is 24 weeks and mirrors WEEKLY_HISTORY_MAX', () => {
     expect(REQUESTS_RETENTION_WEEKS).toBe(24);
     expect(REQUESTS_RETENTION_WEEKS).toBe(WEEKLY_HISTORY_MAX);

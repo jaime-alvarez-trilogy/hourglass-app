@@ -350,13 +350,7 @@ describe('useMyRequests — buildMyRequestsQueryFn (query logic)', () => {
       mockFetchWorkDiary.mockRejectedValue(err);
 
       // Monday on an empty store: 15 planned days, all failing
-      const thrown = await buildMyRequestsQueryFn('2026-03-09')().then(
-        () => 'resolved',
-        (e: unknown) => e,
-      );
-
-      expect(thrown).toBeInstanceOf(AuthError);
-      expect(thrown).toBe(err);
+      await expect(buildMyRequestsQueryFn('2026-03-09')()).rejects.toBe(err);
       expect(refreshFailedLogs()).toEqual([{ plannedDays: 15, failedDays: 15, kind: 'auth' }]);
     });
 
@@ -900,6 +894,8 @@ describe('useMyRequests — DD2 store-backed queryFn (durable-data 02 FR4)', () 
       expect(result.error).toBeNull();
       expect(result.updatedAt).toBe(NOON);
       expect(result.ownerKey).toBe(PROD_KEY);
+      // A partial failure is a success: requests.refresh_failed is for total failures only
+      expect(refreshFailedLogs()).toEqual([]);
 
       const stored = (await readStore())!;
       expect(JSON.stringify(stored.days[MON])).toBe(recordBefore(MON));
@@ -981,7 +977,6 @@ describe('useMyRequests — DD2 store-backed queryFn (durable-data 02 FR4)', () 
 
       expect(thrown).toBeInstanceOf(AuthError);
       expect((thrown as AuthError).statusCode).toBe(401);
-      expect((thrown as AuthError).errorCode).toBe(NO_CREDENTIALS);
       expect((thrown as AuthError).errorCode).toBe('NO_CREDENTIALS');
       expect(mockFetchWorkDiary).not.toHaveBeenCalled();
     });
@@ -1239,7 +1234,9 @@ describe('useMyRequests — DD2 store-backed queryFn (durable-data 02 FR4)', () 
   describe('DD2.52 — unreadable store (getItem throws)', () => {
     it('resolves with the fetched days plus the prior carry-forward, and never writes', async () => {
       signedIn();
-      mockAsyncStorage.getItem.mockRejectedValue(new Error('disk I/O'));
+      // One failed read is enough: the run must not write, even though the store's own
+      // re-read inside updateRequestsStore would now succeed.
+      mockAsyncStorage.getItem.mockRejectedValueOnce(new Error('disk I/O'));
       const carried = entry(MON, 'Monday request', 'PENDING'); // Monday fails below
       const older = entry(OLDER, 'Older request', 'APPROVED'); // never planned, no record
       const client = newClient(view([carried, older], PROD_KEY));
@@ -1256,6 +1253,23 @@ describe('useMyRequests — DD2 store-backed queryFn (durable-data 02 FR4)', () 
       expect(result.error).toBeNull();
       expect(result.updatedAt).toBe(NOON);
       expect(mockAsyncStorage.setItem).not.toHaveBeenCalled();
+    });
+  });
+
+  // The queryFn's write must go through updateRequestsStore's owner check (FR3, Edge Cases).
+  describe('sign-out mid-refresh', () => {
+    it('signed out while the fetches are in flight → resolves the fetched view, and no my_requests_v1 is left behind', async () => {
+      signedIn();
+      // The run starts signed in; by the time the store checks the owner, clearAll() has run
+      mockLoadConfig.mockResolvedValueOnce(DD_CONFIG).mockResolvedValue(null);
+      serveDiary({ [TUE]: [manual('Tuesday request', 'APPROVED')] });
+
+      const result = await buildMyRequestsQueryFn(WED)();
+
+      expect(calledDates()).toEqual(desc(CATCH_UP, WED));
+      expect(result.entries).toEqual([entry(TUE, 'Tuesday request', 'APPROVED')]);
+      expect(storeWrites()).toHaveLength(0);
+      expect(await AsyncStorage.getItem(KEY)).toBeNull();
     });
   });
 
@@ -1401,7 +1415,6 @@ describe('DD2 — cache semantics', () => {
     await expect(refetch(client)).rejects.toBe(err);
 
     const data = client.getQueryData<MyRequestsData>(QUERY_KEY);
-    expect(data?.entries.length).toBe(3);
     expect(data?.entries).toEqual([WED_REQ, TUE_REQ, MON_REQ]);
     expect(data?.ownerKey).toBe(PROD_KEY);
     expect(client.getQueryState(QUERY_KEY)?.status).toBe('error');
