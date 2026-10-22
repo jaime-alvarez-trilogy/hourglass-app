@@ -1,7 +1,9 @@
 // Tests: useMyRequests hook — FR4 (01-my-requests-data)
 // Spec: features/app/approvals-transparency/specs/01-my-requests-data
 // Extended by features/app/durable-data/specs/02-requests-store FR4 (DD2.40-DD2.54):
-// the store-backed queryFn (merge on success, throw on total failure, seed-then-throw).
+// the store-backed queryFn (merge on success, throw on total failure, seed-then-throw),
+// and FR5 (DD2.55-DD2.58): the hook's retry predicate, selectMyRequests (owner and
+// dev-mock display rule), toRequestsError, and the env switch's removal of the view.
 //
 // Strategy: Static analysis of the hook source file + AsyncStorage/mock
 // integration tests. renderHook via @testing-library/react-hooks is not
@@ -14,11 +16,15 @@
 // `fetchWorkDiary`, `loadConfig` / `loadCredentials` and ../../lib/log mocked. `loadConfig`
 // uses mockResolvedValue (not ...Once): the store re-checks the owner twice per write.
 // Fixture times are local wall-clock times, so the cases hold in any host time zone.
+//
+// DD2.55 calls the hook as a plain function: `useQuery` and `useConfig` are mocked to
+// capture the options and feed a query result (as in hooksCredsForwarding.test.ts). The
+// rest of @tanstack/react-query is the real one, so the QueryClient cases are unaffected.
 
 import * as fs from 'fs';
 import * as path from 'path';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { QueryClient } from '@tanstack/react-query';
+import { QueryClient, useQuery } from '@tanstack/react-query';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -35,11 +41,21 @@ jest.mock('../../lib/log', () => ({
   log: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
 
+jest.mock('@tanstack/react-query', () => ({
+  ...jest.requireActual('@tanstack/react-query'),
+  useQuery: jest.fn(),
+}));
+
+jest.mock('../../hooks/useConfig', () => ({
+  useConfig: jest.fn(),
+}));
+
 // ─── Imports ──────────────────────────────────────────────────────────────────
 
 import { loadConfig, loadCredentials } from '../../store/config';
 import { fetchWorkDiary } from '../../api/workDiary';
-import { AuthError, NetworkError, AUTH_HTML_500, NO_CREDENTIALS } from '../../api/errors';
+import { useConfig } from '../../hooks/useConfig';
+import { ApiError, AuthError, NetworkError, AUTH_HTML_500, NO_CREDENTIALS } from '../../api/errors';
 import { log } from '../../lib/log';
 import { MOCK_MY_REQUESTS } from '../../lib/devMock';
 import type { MyRequestsStore, RequestsStoreOwner, StoredRequestDay } from '../../lib/requestsStore';
@@ -51,10 +67,14 @@ const mockLoadCredentials = loadCredentials as jest.MockedFunction<typeof loadCr
 const mockFetchWorkDiary = fetchWorkDiary as jest.MockedFunction<typeof fetchWorkDiary>;
 const mockAsyncStorage = AsyncStorage as jest.Mocked<typeof AsyncStorage> & { _reset: () => void };
 const mockWarn = log.warn as jest.Mock;
+const mockUseQuery = useQuery as jest.Mock;
+const mockUseConfig = useConfig as jest.Mock;
 
 // ─── Static analysis ──────────────────────────────────────────────────────────
 
 const HOOK_PATH = path.resolve(__dirname, '../../..', 'src', 'hooks', 'useMyRequests.ts');
+const PLANNER_PATH = path.resolve(__dirname, '../../..', 'src', 'lib', 'requestsPlanner.ts');
+const STORE_PATH = path.resolve(__dirname, '../../..', 'src', 'lib', 'requestsStore.ts');
 
 describe('useMyRequests — static analysis of source contract', () => {
   let source: string;
@@ -95,8 +115,11 @@ describe('useMyRequests — static analysis of source contract', () => {
     expect(source).toMatch(/fetchWorkDiary/);
   });
 
-  it('FR4.SC9 — calls getWeekStartDate', () => {
-    expect(source).toMatch(/getWeekStartDate/);
+  // Re-pointed by durable-data 02 FR5: the date math moved to src/lib/requestsPlanner.ts,
+  // so the hook plans through it and the planner owns getWeekStartDate (also DD2.25).
+  it('FR4.SC9 — plans the refresh with planRequestRefresh (the planner calls getWeekStartDate)', () => {
+    expect(source).toMatch(/planRequestRefresh/);
+    expect(fs.readFileSync(PLANNER_PATH, 'utf8')).toMatch(/getWeekStartDate/);
   });
 
   it('FR4.SC10 — calls groupSlotsIntoEntries', () => {
@@ -107,9 +130,10 @@ describe('useMyRequests — static analysis of source contract', () => {
     expect(source).toMatch(/Promise\.allSettled/);
   });
 
-  it('FR4.SC12 — sorts entries by date descending', () => {
-    // Should compare dates in descending order
-    expect(source).toMatch(/sort/);
+  // Re-pointed by durable-data 02 FR5: the date-descending sort moved to the store's view
+  // builders (buildRequestsView / composeRequestsView); the same check as DD2.39.
+  it('FR4.SC12 — sorts entries by date descending (in src/lib/requestsStore.ts)', () => {
+    expect(fs.readFileSync(STORE_PATH, 'utf8')).toMatch(/sort/);
   });
 
   it('FR4.SC13 — maps 401/403 to auth error', () => {
@@ -127,6 +151,11 @@ describe('useMyRequests — static analysis of source contract', () => {
   it('FR4.SC16 — imports UseMyRequestsResult type', () => {
     expect(source).toMatch(/UseMyRequestsResult/);
   });
+
+  it('DD2.55 — retries through the shared predicate: retry: shouldRetryQuery, no more retry: 2', () => {
+    expect(source).toMatch(/retry:\s*shouldRetryQuery/);
+    expect(source).not.toMatch(/retry:\s*2\b/);
+  });
 });
 
 // ─── Fetch function contract tests ───────────────────────────────────────────
@@ -134,7 +163,13 @@ describe('useMyRequests — static analysis of source contract', () => {
 // the module's queryFn pattern. Since the queryFn is an async function,
 // we test it by driving the mocks and calling the exported helper directly.
 
-import { buildMyRequestsQueryFn, markMyRequestsForcedRefresh } from '../../hooks/useMyRequests';
+import {
+  buildMyRequestsQueryFn,
+  markMyRequestsForcedRefresh,
+  selectMyRequests,
+  toRequestsError,
+  useMyRequests,
+} from '../../hooks/useMyRequests';
 import type { WorkDiarySlot } from '../../types/api';
 
 /** Minimal WorkDiarySlot for test mocks — only fields relevant to useMyRequests logic. */
@@ -1322,6 +1357,310 @@ describe('DD2 — cache semantics', () => {
     expect(data?.entries).toEqual([WED_REQ, TUE_REQ, MON_REQ]);
     expect(data?.ownerKey).toBe(PROD_KEY);
     expect(client.getQueryState(QUERY_KEY)?.status).toBe('error');
+  });
+});
+
+// ─── durable-data 02-requests-store FR5: hook, display rule, env switch ──────
+
+const OLDER_REQ = entry(OLDER, 'Older request', 'APPROVED');
+
+describe('useMyRequests — DD2.56 selectMyRequests (owner and dev-mock display rule)', () => {
+  const entries = [TUE_REQ, MON_REQ];
+  const legacy = (error: MyRequestsData['error'] = null): MyRequestsData => ({ entries: [...entries], error });
+
+  it('no data yet → no entries, no error, staleDates [] and updatedAt null', () => {
+    expect(selectMyRequests(undefined, DD_CONFIG, null)).toEqual({
+      entries: [],
+      error: null,
+      staleDates: [],
+      updatedAt: null,
+    });
+  });
+
+  it('a legacy 1.1 / 1.2.0 blob (no ownerKey) → its entries, staleDates [] and updatedAt null', () => {
+    expect(selectMyRequests(legacy(), DD_CONFIG, null)).toEqual({
+      entries,
+      error: null,
+      staleDates: [],
+      updatedAt: null,
+    });
+  });
+
+  it('a view stamped with the current owner → its entries, staleDates and updatedAt', () => {
+    const data: MyRequestsData = { entries, error: null, staleDates: [MON], updatedAt: NOON, ownerKey: PROD_KEY };
+
+    expect(selectMyRequests(data, DD_CONFIG, null)).toEqual({
+      entries,
+      error: null,
+      staleDates: [MON],
+      updatedAt: NOON,
+    });
+    expect(selectMyRequests({ ...data, ownerKey: QA_KEY }, QA_CONFIG, null).entries).toEqual(entries);
+  });
+
+  it.each<[string, string, CrossoverConfig | null]>([
+    ["a '79996|prod' view under a QA config", PROD_KEY, QA_CONFIG],
+    ["a '79996|qa' view under a prod config", QA_KEY, DD_CONFIG],
+    ['a view stamped for another assignment', '11111|prod', DD_CONFIG],
+    ['a stamped view with no config', PROD_KEY, null],
+  ])('%s → no entries', (_label, ownerKey, config) => {
+    expect(selectMyRequests(view(entries, ownerKey), config, null).entries).toEqual([]);
+  });
+
+  describe("the 'dev-mock' view", () => {
+    const mockView = (): MyRequestsData => ({ entries: [...MOCK_MY_REQUESTS], error: null, ownerKey: 'dev-mock' });
+
+    it('is shown while the manager preview is on', () => {
+      expect(selectMyRequests(mockView(), { ...DD_CONFIG, devManagerView: true }, null).entries).toEqual(
+        MOCK_MY_REQUESTS,
+      );
+    });
+
+    it.each<[string, CrossoverConfig | null]>([
+      ['the preview toggled off', { ...DD_CONFIG, devManagerView: false }],
+      ['the preview toggle absent', DD_CONFIG],
+      ['no config', null],
+    ])('is hidden with %s', (_label, config) => {
+      expect(selectMyRequests(mockView(), config, null).entries).toEqual([]);
+    });
+  });
+
+  describe('error', () => {
+    it('the thrown query error wins over data.error', () => {
+      expect(selectMyRequests(legacy('auth'), DD_CONFIG, new NetworkError('offline')).error).toBe('network');
+      expect(selectMyRequests(legacy('network'), DD_CONFIG, new AuthError(401)).error).toBe('auth');
+    });
+
+    it("with no thrown error, a legacy blob's own error is kept; otherwise null", () => {
+      expect(selectMyRequests(legacy('network'), DD_CONFIG, null).error).toBe('network');
+      expect(selectMyRequests(legacy('auth'), DD_CONFIG, undefined).error).toBe('auth');
+      expect(selectMyRequests(view(entries, PROD_KEY), DD_CONFIG, null).error).toBeNull();
+    });
+
+    it('a failed refetch reports its error while the kept view stays on screen', () => {
+      const selected = selectMyRequests(view(entries, PROD_KEY), DD_CONFIG, new NetworkError('offline'));
+
+      expect(selected.entries).toEqual(entries);
+      expect(selected.error).toBe('network');
+    });
+
+    it('missing credentials on a cold cache → auth, with no entries', () => {
+      const noCreds = new AuthError(401, 'Credentials unavailable', { errorCode: NO_CREDENTIALS });
+
+      expect(selectMyRequests(undefined, DD_CONFIG, noCreds)).toEqual({
+        entries: [],
+        error: 'auth',
+        staleDates: [],
+        updatedAt: null,
+      });
+    });
+  });
+});
+
+describe('useMyRequests — DD2.57 toRequestsError', () => {
+  it.each<[string, 'auth' | 'network' | null, unknown]>([
+    ['AuthError(401)', 'auth', new AuthError(401)],
+    ['AuthError(403)', 'auth', new AuthError(403)],
+    ['AuthError NO_CREDENTIALS', 'auth', new AuthError(401, 'Credentials unavailable', { errorCode: NO_CREDENTIALS })],
+    ['AuthError AUTH_HTML_500 (an outage, not bad credentials)', 'network', new AuthError(401, 'HTML 500', { errorCode: AUTH_HTML_500 })],
+    ['NetworkError', 'network', new NetworkError('offline')],
+    ['ApiError(503)', 'network', new ApiError(503)],
+    ['a plain Error', 'network', new Error('boom')],
+    ['null', null, null],
+    ['undefined', null, undefined],
+  ])('%s → %p', (_label, expected, err) => {
+    expect(toRequestsError(err)).toBe(expected);
+  });
+});
+
+describe('useMyRequests — DD2.55 hook wiring (useQuery mocked)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  /** Calls the hook as a plain function, with `config` and a TanStack query result. */
+  function callHook(
+    config: CrossoverConfig | null,
+    query: { data?: MyRequestsData; error?: unknown; isLoading?: boolean } = {},
+  ) {
+    const refetch = jest.fn();
+    mockUseConfig.mockReturnValue({ config, isLoading: false, refetch: jest.fn() });
+    mockUseQuery.mockReturnValue({
+      data: query.data,
+      error: query.error ?? null,
+      isLoading: query.isLoading ?? false,
+      refetch,
+    });
+    const result = useMyRequests();
+    return { result, options: mockUseQuery.mock.lastCall![0], refetch };
+  }
+
+  it("queries ['myRequests', assignmentId] with staleTime 60 s, enabled only with an assignment (preserved)", () => {
+    const { options } = callHook(DD_CONFIG);
+    expect(options.queryKey).toEqual(['myRequests', '79996']);
+    expect(options.staleTime).toBe(60_000);
+    expect(options.enabled).toBe(true);
+    expect(typeof options.queryFn).toBe('function');
+
+    const signedOut = callHook(null).options;
+    expect(signedOut.queryKey).toEqual(['myRequests', null]);
+    expect(signedOut.enabled).toBe(false);
+  });
+
+  it('retries outages only, at most twice: a real 401 and missing credentials are never retried', () => {
+    const { options } = callHook(DD_CONFIG);
+
+    expect(typeof options.retry).toBe('function');
+    expect(options.retry(0, new NetworkError('offline'))).toBe(true);
+    expect(options.retry(1, new AuthError(401, 'HTML 500', { errorCode: AUTH_HTML_500 }))).toBe(true);
+    expect(options.retry(2, new NetworkError('offline'))).toBe(false);
+    expect(options.retry(0, new AuthError(401))).toBe(false);
+    expect(options.retry(0, new AuthError(401, 'Credentials unavailable', { errorCode: NO_CREDENTIALS }))).toBe(false);
+  });
+
+  it('returns the selected view with staleDates and updatedAt, plus isLoading and refetch', () => {
+    const data: MyRequestsData = {
+      entries: [TUE_REQ, MON_REQ],
+      error: null,
+      staleDates: [MON],
+      updatedAt: NOON,
+      ownerKey: PROD_KEY,
+    };
+    const { result, refetch } = callHook(DD_CONFIG, { data });
+    const { refetch: returnedRefetch, ...rest } = result;
+
+    expect(rest).toEqual({
+      entries: [TUE_REQ, MON_REQ],
+      error: null,
+      staleDates: [MON],
+      updatedAt: NOON,
+      isLoading: false,
+    });
+    expect(returnedRefetch).toBe(refetch);
+  });
+
+  it('while loading with no data → isLoading true, no entries, staleDates [] and updatedAt null', () => {
+    const { result } = callHook(DD_CONFIG, { isLoading: true });
+
+    expect(result.isLoading).toBe(true);
+    expect(result.entries).toEqual([]);
+    expect(result.error).toBeNull();
+    expect(result.staleDates).toEqual([]);
+    expect(result.updatedAt).toBeNull();
+  });
+
+  it('hides a view stamped for the other environment (a prod view under a QA config)', () => {
+    const { result } = callHook(QA_CONFIG, { data: view([TUE_REQ], PROD_KEY) });
+
+    expect(result.entries).toEqual([]);
+  });
+
+  it('a thrown AuthError(401) surfaces as auth while the kept view stays on screen', () => {
+    const { result } = callHook(DD_CONFIG, { data: view([TUE_REQ], PROD_KEY), error: new AuthError(401) });
+
+    expect(result.error).toBe('auth');
+    expect(result.entries).toEqual([TUE_REQ]);
+  });
+});
+
+// ─── DD2.58: the env switch removes the requests view (real QueryClient) ─────
+
+describe('DD2 — env switch', () => {
+  // handleSwitchEnvironment (app/modal.tsx) runs these cache steps in one startTransition:
+  // setQueryData(['config'], …), removeQueries({ queryKey: ['myRequests'] }), then
+  // invalidateQueries(). Its source order is pinned by modal-auth-cache.test.tsx
+  // (DD2.envSwitch); these cases check the outcome. The TanStack key carries no
+  // environment, so a prod view and a QA view share ['myRequests', '79996'].
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockAsyncStorage._reset();
+    signedIn();
+  });
+
+  // 3 in-window entries plus one older than catchUpStart, which a QA run never plans
+  const legacyBlob = (): MyRequestsData => ({ entries: [WED_REQ, TUE_REQ, MON_REQ, OLDER_REQ], error: null });
+
+  /** The switch's cache steps (optionally without the removal), then the QA config. */
+  async function switchToQA(client: QueryClient, { removeRequests }: { removeRequests: boolean }) {
+    if (removeRequests) client.removeQueries({ queryKey: ['myRequests'] });
+    await client.invalidateQueries();
+    signedIn(QA_CONFIG);
+  }
+
+  function runQuery(client: QueryClient) {
+    return client.fetchQuery({
+      queryKey: QUERY_KEY,
+      queryFn: buildMyRequestsQueryFn(WED) as never,
+      retry: false,
+      networkMode: 'always',
+    }) as Promise<MyRequestsData>;
+  }
+
+  it('a prod view + prod store, then the switch and an all-fail QA run → rejects, nothing cached under the key', async () => {
+    const prodRaw = await seedStore(threeRequestStore());
+    const client = newClient(view([WED_REQ, TUE_REQ, MON_REQ], PROD_KEY));
+    await switchToQA(client, { removeRequests: true });
+    mockFetchWorkDiary.mockRejectedValue(new NetworkError('offline'));
+
+    await expect(runQuery(client)).rejects.toBeInstanceOf(NetworkError);
+
+    // The prod store is not the QA owner's: the QA run plans the whole window, seeds
+    // nothing, and no prod entry survives under the key
+    expect(mockFetchWorkDiary).toHaveBeenCalledWith('79996', WED, CREDS, true);
+    expect(calledDates()).toEqual(desc(CATCH_UP, WED));
+    expect(client.getQueryData(QUERY_KEY)).toBeUndefined();
+    expect(await AsyncStorage.getItem(KEY)).toBe(prodRaw);
+  });
+
+  it('the same with a legacy blob (no ownerKey) in place of the prod view → also nothing cached', async () => {
+    await seedStore(threeRequestStore());
+    const client = newClient(legacyBlob());
+    await switchToQA(client, { removeRequests: true });
+    mockFetchWorkDiary.mockRejectedValue(new NetworkError('offline'));
+
+    await expect(runQuery(client)).rejects.toBeInstanceOf(NetworkError);
+
+    expect(client.getQueryData(QUERY_KEY)).toBeUndefined();
+  });
+
+  it('after the switch, a successful QA run carries nothing from the legacy blob', async () => {
+    const client = newClient(legacyBlob());
+    await switchToQA(client, { removeRequests: true });
+    mockFetchWorkDiary.mockResolvedValue([]);
+
+    const data = await runQuery(client);
+
+    expect(data.ownerKey).toBe(QA_KEY);
+    expect(data.entries).toEqual([]);
+  });
+
+  describe('control: the same switch without removeQueries', () => {
+    it('a QA run accepts the legacy blob as its prior and carries its older (prod) entry into the QA view', async () => {
+      const client = newClient(legacyBlob());
+      await switchToQA(client, { removeRequests: false });
+      mockFetchWorkDiary.mockResolvedValue([]);
+
+      const data = await runQuery(client);
+
+      expect(data.ownerKey).toBe(QA_KEY);
+      expect(data.entries).toEqual([OLDER_REQ]);
+    });
+
+    it('on a QA total failure the legacy blob is kept, and the display rule would show it under QA', async () => {
+      await seedStore(threeRequestStore());
+      const blob = legacyBlob();
+      const expected = snapshot(blob);
+      const client = newClient(blob);
+      await switchToQA(client, { removeRequests: false });
+      const err = new NetworkError('offline');
+      mockFetchWorkDiary.mockRejectedValue(err);
+
+      await expect(runQuery(client)).rejects.toBe(err);
+
+      const kept = client.getQueryData<MyRequestsData>(QUERY_KEY);
+      expect(kept).toEqual(expected);
+      expect(selectMyRequests(kept, QA_CONFIG, err).entries).toEqual(expected.entries);
+    });
   });
 });
 
