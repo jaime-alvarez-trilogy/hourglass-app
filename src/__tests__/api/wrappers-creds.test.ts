@@ -30,7 +30,7 @@ import {
 import { fetchTimesheet } from '../../api/timesheet';
 import { fetchPayments } from '../../api/payments';
 import { ApiError, AuthError } from '../../api/errors';
-import type { AuthCreds } from '../../api/authCreds';
+import { toAuthCreds, type AuthCreds } from '../../api/authCreds';
 import type { AuthCreds as ClientAuthCreds } from '../../api/client';
 import type { Credentials, CrossoverConfig } from '../../types/config';
 import type { PaymentsResponse, TimesheetResponse } from '../../lib/hours';
@@ -91,25 +91,16 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('FR4.a: toAuthCreds', () => {
-  // Required inside the tests so a missing module fails only these cases, not the file.
-  const load = () =>
-    jest.requireActual<typeof import('../../api/authCreds')>('../../api/authCreds');
-
-  it('FR4.a.1: adds the environment to stored credentials', () => {
-    expect(load().toAuthCreds({ username: 'u', password: 'p' }, true)).toEqual({
-      username: 'u',
-      password: 'p',
-      useQA: true,
-    });
-  });
-
-  it('FR4.a.2: returns a new object with exactly username/password/useQA and leaves the input untouched', () => {
-    const stored: Credentials = { username: 'u', password: 'p' };
-    const creds = load().toAuthCreds(stored, false);
-    expect(creds).toStrictEqual({ username: 'u', password: 'p', useQA: false });
-    expect(creds).not.toBe(stored);
-    expect(stored).toStrictEqual({ username: 'u', password: 'p' });
-  });
+  it.each([true, false])(
+    'FR4.a.1: adds useQA=%s to stored credentials as a new object, leaving the input untouched',
+    (useQA) => {
+      const stored: Credentials = { username: 'u', password: 'p' };
+      const creds = toAuthCreds(stored, useQA);
+      expect(creds).toStrictEqual({ username: 'u', password: 'p', useQA });
+      expect(creds).not.toBe(stored);
+      expect(stored).toStrictEqual({ username: 'u', password: 'p' });
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -224,9 +215,8 @@ describe('FR4.c: fetchTimesheet forwards creds on every strategy', () => {
 
     await expect(fetchTimesheet(CONFIG, TOKEN, CREDS)).resolves.toEqual(TIMESHEET);
 
-    expect(mockApiGet.mock.calls.map((c) => c[4])).toEqual([CREDS, CREDS, CREDS]);
-    expect(credsArg(mockApiGet, 1)).toBe(CREDS);
-    expect(credsArg(mockApiGet, 2)).toBe(CREDS);
+    expect(mockApiGet).toHaveBeenCalledTimes(3);
+    expect(mockApiGet.mock.calls.every((c) => c[4] === CREDS)).toBe(true);
   });
 
   it('FR4.c.3: without creds → all 3 calls carry an explicit trailing undefined', async () => {
@@ -297,21 +287,16 @@ describe('FR4.d: fetchPayments forwards creds', () => {
 });
 
 // ---------------------------------------------------------------------------
-// FR4.e — AuthCreds typing (asserted by `npm run typecheck`, not at runtime)
+// FR4.e — AuthCreds typing. Checked by `npm run typecheck` only (Jest does not
+// type-check), so it is a never-called function rather than a runtime test.
 // ---------------------------------------------------------------------------
 
-describe('FR4.e: AuthCreds typing', () => {
-  it('FR4.e.1: a bare Credentials (no useQA) is not accepted as creds; client.ts re-exports AuthCreds', () => {
-    const bare: Credentials = { username: 'u', password: 'p' };
-    // Never invoked: tsc is the assertion. If AuthCreds stops requiring useQA, the
-    // directive below is unused and `npm run typecheck` fails.
-    const passBareCredentials = () =>
-      // @ts-expect-error — creds must carry the environment (useQA)
-      fetchPayments(CONFIG, TOKEN, bare);
-    const viaClient: ClientAuthCreds = CREDS;
-    const back: AuthCreds = viaClient;
-
-    expect(passBareCredentials).toEqual(expect.any(Function));
-    expect(back).toBe(CREDS);
-  });
-});
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function typeChecksForAuthCreds(bare: Credentials, viaClient: ClientAuthCreds): AuthCreds {
+  // A bare Credentials (no useQA) is not accepted as creds. If AuthCreds stops
+  // requiring useQA, this directive is unused and the typecheck fails.
+  // @ts-expect-error — creds must carry the environment (useQA)
+  void fetchPayments(CONFIG, TOKEN, bare);
+  // client.ts re-exports the same AuthCreds type.
+  return viaClient;
+}

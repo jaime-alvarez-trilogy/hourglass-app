@@ -43,6 +43,10 @@ const noCredentials = () => new AuthError(401, undefined, { errorCode: 'NO_CREDE
 const outageAfterRenewal = () =>
   new ApiError(503, 'Server error after token renewal', { errorCode: 'HTML_5XX_AFTER_RENEWAL' });
 
+/** The one-retry form spec 03 will use in place of today's `retry: 1`. */
+const oneRetry = (failureCount: number, error: unknown) =>
+  failureCount < 1 && isRetryableError(error);
+
 // ---------------------------------------------------------------------------
 // FR3.a — error-code constants
 // ---------------------------------------------------------------------------
@@ -125,28 +129,6 @@ describe('FR3.c: shouldRetryQuery', () => {
 });
 
 // ---------------------------------------------------------------------------
-// FR3.d — the one-retry form spec 03 uses (today's retry: 1)
-// ---------------------------------------------------------------------------
-
-describe('FR3.d: one-retry form (n, e) => n < 1 && isRetryableError(e)', () => {
-  const oneRetry = (failureCount: number, error: unknown) =>
-    failureCount < 1 && isRetryableError(error);
-
-  // One `it` so the count cap (row 2, which short-circuits) is never green on its own.
-  it('FR3.d.1: retries an outage once and a credential failure never', () => {
-    const rows: [number, unknown, boolean][] = [
-      [0, networkError(), true],
-      [1, networkError(), false],
-      [0, new AuthError(401), false],
-      [0, outageAfterRenewal(), true],
-      [0, latched(), false],
-    ];
-
-    expect(rows.map(([n, e]) => oneRetry(n, e))).toEqual(rows.map(([, , expected]) => expected));
-  });
-});
-
-// ---------------------------------------------------------------------------
 // FR3.e — the rules under TanStack's real retryer
 // ---------------------------------------------------------------------------
 
@@ -205,13 +187,14 @@ describe('FR3.e: attempts under a real QueryClient', () => {
     expect(await attemptsUntilGiveUp(shouldRetryQuery, latched())).toBe(1);
   });
 
+  // The one-retry table (spec 03): (0, outage) → retry, (1, outage) → stop,
+  // (0, credential failure) → stop.
   it('FR3.e.3: the one-retry form runs an outage twice (today\'s retry: 1) and a credential failure once', async () => {
-    const oneRetry = (failureCount: number, error: unknown) =>
-      failureCount < 1 && isRetryableError(error);
-    const err = new ApiError(503);
-
-    expect(await attemptsUntilGiveUp(1, err)).toBe(2);
-    expect(await attemptsUntilGiveUp(oneRetry, err)).toBe(2);
+    for (const outage of [networkError(), new ApiError(503), outageAfterRenewal()]) {
+      expect(await attemptsUntilGiveUp(1, outage)).toBe(2);
+      expect(await attemptsUntilGiveUp(oneRetry, outage)).toBe(2);
+    }
     expect(await attemptsUntilGiveUp(oneRetry, new AuthError(401))).toBe(1);
+    expect(await attemptsUntilGiveUp(oneRetry, latched())).toBe(1);
   });
 });

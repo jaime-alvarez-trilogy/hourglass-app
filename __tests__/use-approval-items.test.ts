@@ -290,6 +290,51 @@ describe('FR3: rejectItem OVERTIME', () => {
 });
 
 // =============================================================================
+// DD1 FR4 (durable-data 01-auth-renewal): approveItem and rejectItem each build
+// their own creds, so each must take the environment from the loaded config (a
+// QA manager re-mints against QA). Kept above approveAll: hook renders after the
+// approveAll cases are not reliable (see the FR1 note below).
+// =============================================================================
+
+describe('DD1 FR4: approve / reject creds follow config.useQA', () => {
+  const QA_CREDS = { ...CREDS_WITH_ENV, useQA: true };
+
+  beforeEach(() => {
+    mockLoadConfig.mockResolvedValue({ ...MANAGER_CONFIG, useQA: true });
+  });
+
+  it('DD1_FR4_QA_approveItem_passes_useQA_true_creds', async () => {
+    const { get } = setupHook();
+    await flushAsync();
+    await act(async () => {
+      await get().approveItem(MANUAL_ITEM);
+    });
+    expect(mockApproveManual).toHaveBeenCalledWith(
+      'mock-token',
+      true,
+      MANAGER_CONFIG.userId,
+      MANUAL_ITEM.timecardIds,
+      QA_CREDS
+    );
+  });
+
+  it('DD1_FR4_QA_rejectItem_passes_useQA_true_creds', async () => {
+    const { get } = setupHook();
+    await flushAsync();
+    await act(async () => {
+      await get().rejectItem(OVERTIME_ITEM, 'Budget exceeded');
+    });
+    expect(mockRejectOvertime).toHaveBeenCalledWith(
+      'mock-token',
+      true,
+      OVERTIME_ITEM.overtimeId,
+      'Budget exceeded',
+      QA_CREDS
+    );
+  });
+});
+
+// =============================================================================
 // FR3: approveAll
 // =============================================================================
 

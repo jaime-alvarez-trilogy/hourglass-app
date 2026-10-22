@@ -747,6 +747,8 @@ describe('DD1.5: mint generation guard', () => {
     await expect(getAuthToken('u', 'p', true)).resolves.toBe('qa-tok');
     expect(tokenPosts()).toHaveLength(2);
     expect(tokenPosts()[1][0]).toContain('api-qa.crossover.com');
+    // The stale mint was not cached, but it did mint: one auth.token_minted per POST.
+    expect(logEvents(mockLogInfo, 'auth.token_minted')).toHaveLength(2);
   });
 
   it('DD1.5.b: a stale mint settling does not clear a newer in-flight mint (later callers join it)', async () => {
@@ -1072,6 +1074,24 @@ describe('DD1.9: failed-login latch', () => {
       expect(exposed).not.toContain(value);
     }
   });
+
+  // getAuthToken checks cache → in-flight mint → latch → mint: the latch only stops a
+  // new mint from starting, so latched creds still join one that is already running.
+  it('DD1.9.d: latched creds arriving while another mint is in flight join it (no latched error, no extra POST)', async () => {
+    await rejectLogin(401);
+    const corrected = deferred<unknown>();
+    routeFetch({ token: () => corrected.promise });
+
+    const other = tokenFor({ ...CREDS, password: 'pw-corrected' });
+    const latchedCaller = getCredsToken();
+    corrected.resolve(makeTokenResponse('tok-corrected'));
+
+    await expect(Promise.all([other, latchedCaller])).resolves.toEqual([
+      'tok-corrected',
+      'tok-corrected',
+    ]);
+    expect(tokenPosts()).toHaveLength(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1091,7 +1111,7 @@ describe('DD1.10: latch expiry', () => {
     expect(LOGIN_LATCH_MS).toBe(60_000);
   });
 
-  it('DD1.10.b: latched through a 1 s / 2 s retry cycle and at 59 999 ms; at 60 001 ms the same creds mint again', async () => {
+  it('DD1.10.b: latched through a 1 s / 2 s retry cycle and at 59 999 ms; from exactly 60 000 ms the same creds mint again', async () => {
     await rejectLogin(401);
 
     for (const elapsed of [1_000, 3_000, 59_999]) {
@@ -1100,7 +1120,8 @@ describe('DD1.10: latch expiry', () => {
     }
     expect(tokenPosts()).toHaveLength(0);
 
-    nowSpy.mockReturnValue(T0 + 60_001);
+    // Refused for LOGIN_LATCH_MS, not one millisecond longer (`Date.now() < until`).
+    nowSpy.mockReturnValue(T0 + 60_000);
     mockFetch.mockResolvedValueOnce(makeTokenResponse('tok-after-expiry'));
 
     await expect(getCredsToken()).resolves.toBe('tok-after-expiry');
@@ -1132,6 +1153,12 @@ describe('DD1.11: other credentials are not blocked', () => {
     ['a different password, same username', { ...CREDS, password: 'pw-corrected' }],
     ['the same username and password in the other environment', { ...CREDS, useQA: !CREDS.useQA }],
     ['a different username, same password', { ...CREDS, username: 'someone.else@example.com' }],
+    // `u@example.com` + `pw` vs `u@example.comp` + `w`: the same characters, split differently.
+    ['the same characters split differently between username and password', {
+      ...CREDS,
+      username: `${CREDS.username}${CREDS.password[0]}`,
+      password: CREDS.password.slice(1),
+    }],
   ])('DD1.11.a: while CREDS are latched, %s mints immediately', async (_label, other) => {
     await rejectLogin(401);
     expectLatchedError(await getCredsToken().catch((e) => e));

@@ -130,6 +130,19 @@ describe('useTeamRoster — buildTeamRosterQueryFn (query logic)', () => {
     expect(mockFetchTeamRoster.mock.calls[1][3]).toBe(creds);
   });
 
+  it('DD1 FR4: a QA config puts useQA true in the renewal creds', async () => {
+    mockLoadCredentials.mockResolvedValue(CREDENTIALS);
+    mockGetAuthToken.mockResolvedValue(TOKEN);
+    mockFetchMyTeams.mockResolvedValue([{ id: 2374, name: 'Team A' }]);
+    mockFetchTeamRoster.mockResolvedValue([]);
+
+    await buildTeamRosterQueryFn({ useQA: true })();
+
+    const qaCreds = { ...CREDENTIALS, useQA: true };
+    expect(mockFetchMyTeams).toHaveBeenCalledWith(TOKEN, true, qaCreds);
+    expect(mockFetchTeamRoster).toHaveBeenCalledWith('2374', TOKEN, true, qaCreds);
+  });
+
   it('flattens rosters from multiple teams into a single array', async () => {
     mockLoadCredentials.mockResolvedValue(CREDENTIALS);
     mockGetAuthToken.mockResolvedValue(TOKEN);

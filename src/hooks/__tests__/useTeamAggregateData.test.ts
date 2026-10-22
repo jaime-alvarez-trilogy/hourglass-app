@@ -194,6 +194,19 @@ describe('useTeamAggregateData — buildTeamAggregateQueryFn (query logic)', () 
       expect(mockFetchReportTimesheet).toHaveBeenCalledWith(member, '2026-07-27', TOKEN, false, CREDS_WITH_ENV);
     });
 
+    it('DD1 FR4: a QA config puts useQA true in the manager\'s renewal creds', async () => {
+      const member = makeMember();
+      mockFetchWorkDiary.mockResolvedValue([]);
+      mockFetchReportTimesheet.mockResolvedValue(null);
+
+      await buildTeamAggregateQueryFn({ ...CONFIG, useQA: true }, [member], '2026-07-27')();
+
+      expect(mockFetchReportTimesheet).toHaveBeenCalledWith(member, '2026-07-27', TOKEN, true, {
+        ...CREDENTIALS,
+        useQA: true,
+      });
+    });
+
     it('fetches one work-diary request per day across Mon-Wed when today is Wednesday', async () => {
       const member = makeMember();
       mockFetchWorkDiary.mockResolvedValue([]);
