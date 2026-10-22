@@ -6,12 +6,20 @@
 // It plans which days can still change, fetches only those, and writes only the days
 // that succeeded. A total failure throws (TanStack keeps the previous data and retries);
 // on a cold cache it first seeds the cache from the store ("seed-then-throw").
+// FR5: the hook retries through shouldRetryQuery and shows the view only to its owner
+// (selectMyRequests).
 
 import { useQuery, type QueryClient } from '@tanstack/react-query';
 import { useConfig } from './useConfig';
 import { loadConfig, loadCredentials } from '../store/config';
 import { fetchWorkDiary } from '../api/workDiary';
-import { AuthError, NetworkError, AUTH_HTML_500, NO_CREDENTIALS } from '../api/errors';
+import {
+  AuthError,
+  NetworkError,
+  AUTH_HTML_500,
+  NO_CREDENTIALS,
+  shouldRetryQuery,
+} from '../api/errors';
 import { groupSlotsIntoEntries } from '../lib/requestsUtils';
 import { isDaySettled, planRequestRefresh, todayLocal } from '../lib/requestsPlanner';
 import {
@@ -24,11 +32,16 @@ import {
 } from '../lib/requestsStore';
 import { MOCK_MY_REQUESTS } from '../lib/devMock';
 import { log } from '../lib/log';
-import type { Credentials } from '../types/config';
+import type { CrossoverConfig, Credentials } from '../types/config';
 import type { MyRequestsData, UseMyRequestsResult } from '../types/requests';
 
 /** ownerKey of the manager-preview view: never a prior, never stored (cross-spec contract). */
 const DEV_MOCK_OWNER_KEY = 'dev-mock';
+
+/** The view's owner stamp: `${assignmentId}|qa` or `${assignmentId}|prod`. */
+function toOwnerKey(assignmentId: string, useQA: boolean): string {
+  return `${assignmentId}|${useQA ? 'qa' : 'prod'}`;
+}
 
 // ─── Forced refresh (one-shot) ───────────────────────────────────────────────
 
@@ -56,6 +69,37 @@ export function toRequestsError(err: unknown): 'auth' | 'network' | null {
   if (!err) return null;
   if (err instanceof AuthError && err.errorCode !== AUTH_HTML_500) return 'auth';
   return 'network';
+}
+
+// ─── Display rule (exported for testing) ─────────────────────────────────────
+
+/**
+ * What the screen shows from the cached view. The TanStack key carries no environment,
+ * so a view is shown only to its owner: a legacy (unstamped) blob or the current
+ * `assignmentId|env`, and the 'dev-mock' view only while the manager preview is on.
+ * A thrown query error wins over the view's own (legacy) error.
+ */
+export function selectMyRequests(
+  data: MyRequestsData | undefined,
+  config: CrossoverConfig | null | undefined,
+  queryError: unknown,
+): Required<Pick<UseMyRequestsResult, 'entries' | 'error' | 'staleDates' | 'updatedAt'>> {
+  const ownerKey = config?.assignmentId
+    ? toOwnerKey(config.assignmentId, config.useQA === true)
+    : undefined;
+
+  const visible =
+    data !== undefined &&
+    (data.ownerKey === undefined ||
+      data.ownerKey === ownerKey ||
+      (data.ownerKey === DEV_MOCK_OWNER_KEY && config?.devManagerView === true));
+
+  return {
+    entries: visible ? data.entries : [],
+    error: toRequestsError(queryError) ?? data?.error ?? null,
+    staleDates: data?.staleDates ?? [],
+    updatedAt: data?.updatedAt ?? null,
+  };
 }
 
 // ─── Query function (exported for testing) ───────────────────────────────────
@@ -96,7 +140,7 @@ export function buildMyRequestsQueryFn(
     const { assignmentId } = config;
     const useQA = config.useQA === true;
     const owner: RequestsStoreOwner = { assignmentId, useQA };
-    const ownerKey = `${assignmentId}|${useQA ? 'qa' : 'prod'}`;
+    const ownerKey = toOwnerKey(assignmentId, useQA);
 
     const read = await readRequestsStore(owner);
     const baseDays = read.status === 'ok' ? read.store.days : {};
@@ -194,9 +238,9 @@ export function buildMyRequestsQueryFn(
 
 /**
  * React Query hook returning the user's own manual time request entries
- * (pending/approved/rejected) across the last 2 prior weeks plus the current week.
- * Iterates work diary day-by-day in parallel, tolerates per-day failures, and
- * only surfaces an error string when all days fail. Works for contributors and managers alike.
+ * (pending/approved/rejected) from the my_requests_v1 store view. A failed refresh
+ * keeps the previous view on screen and reports its error ('auth' | 'network');
+ * outages are retried through shouldRetryQuery. Works for contributors and managers alike.
  */
 export function useMyRequests(): UseMyRequestsResult {
   const { config } = useConfig();
@@ -207,13 +251,8 @@ export function useMyRequests(): UseMyRequestsResult {
     queryFn: buildMyRequestsQueryFn(),
     staleTime: 60_000,
     enabled: !!assignmentId,
-    retry: 2,
+    retry: shouldRetryQuery,
   });
 
-  return {
-    entries: data?.entries ?? [],
-    isLoading,
-    error: data?.error ?? (queryError ? 'network' : null),
-    refetch,
-  };
+  return { ...selectMyRequests(data, config, queryError), isLoading, refetch };
 }

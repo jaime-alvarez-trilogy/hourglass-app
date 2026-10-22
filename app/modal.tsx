@@ -135,6 +135,10 @@ export default function ModalScreen() {
               startTransition(() => {
                 // Update config immediately so the UI reflects the new environment.
                 queryClient.setQueryData(['config'], newConfig);
+                // durable-data 02: ['myRequests', assignmentId] carries no environment, so
+                // drop the old env's view outright; kept, it could be shown or carried
+                // forward under the new env if the first refresh fails.
+                queryClient.removeQueries({ queryKey: ['myRequests'] });
                 // Invalidate all other queries so they refetch from the new env.
                 // Using invalidateQueries (not resetQueries) so existing data stays
                 // visible during the refetch — resetQueries clears data immediately,

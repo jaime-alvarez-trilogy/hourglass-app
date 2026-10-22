@@ -1,6 +1,6 @@
 # Hourglass — Architecture Reference
 
-**Last mapped:** 2026-05-22. **Updated:** 2026-10-20 for Expo SDK 58 / iOS 27 (store-compliance spec 10): §5.2, §5.3, §5.7, §6.1, §7.1–7.3, §8.6.
+**Last mapped:** 2026-05-22. **Updated:** 2026-10-20 for Expo SDK 58 / iOS 27 (store-compliance spec 10): §5.2, §5.3, §5.7, §6.1, §7.1–7.3, §8.6. 2026-10-22 for durable-data 02-requests-store: §3.2, §3.3, §4.4, §6.3, §6.5, §8.5, §8.8.
 **Scope:** `hourglassws/` (Expo iOS app). Excludes deprecated Scriptable widgets at the repo root.
 
 A single document for understanding how the app fits together before touching any cross-cutting subsystem. Every section is keyed to file:line so claims are verifiable.
@@ -147,6 +147,7 @@ Four persistence layers. The same logical data sometimes appears in multiple lay
 | `notif_thursday_id` / `notif_monday_id` / `notif_expiry_id` | string | `useScheduledNotifications` | same; cancel-before-reschedule |
 | `push_token` | string | `src/lib/pushToken.ts:15` | sent to Railway server on register; cleared on logout |
 | `prev_approval_ids` | JSON `string[]` | `src/notifications/handler.ts` (`savePrevIds`) | set-difference dedup for instant approval notification. Legacy `prev_approval_count` is cleaned up on every write; both are in the `clearAll` wipe list. |
+| `my_requests_v1` | JSON `MyRequestsStore { version: 1, owner: { assignmentId, useQA }, days: { [YYYY-MM-DD]: { date, fetchedAt, entries, settled } } }` | `updateRequestsStore` (`src/lib/requestsStore.ts`), from the `useMyRequests` queryFn: serialized writes, per-date merge of successful fetches only, pruned to 24 weeks (`REQUESTS_RETENTION_WEEKS`), owner checked before and verified after `setItem` | `readRequestsStore` (same file) in the `useMyRequests` queryFn. Never throws: `ok` / `empty` (absent, corrupt, unknown version or another owner) / `unreadable` (`getItem` threw, so no write that run). Durable-data 02, §4.4. Wiped by `clearAll` (sign-out). |
 | `HOURGLASS_QUERY_CACHE` | TanStack Query persist payload | `PersistQueryClientProvider` (`app/_layout.tsx:80-83`) | full query cache, 24h max age |
 
 ### 3.3 TanStack Query
@@ -158,7 +159,7 @@ QueryClient configured at `app/_layout.tsx:68-76`: `staleTime: 15min`, retries 2
 | `['config']` | `useConfig` (`:13`) | AsyncStorage `crossover_config` | Infinity (manual invalidate) |
 | `['timesheet', weekStartDate, userId]` | `useTimesheet` (`:18`) | `fetchTimesheet()` | 15min |
 | `['payments', weekStartDate, userId]` | `usePayments` (`:18`) | payments API | 15min |
-| `['myRequests', assignmentId]` | `useMyRequests` | manual requests API | default |
+| `['myRequests', assignmentId]` | `useMyRequests` | store-backed view of `my_requests_v1`; `fetchWorkDiary` for the planned days only (§4.4) | 60 s; `retry: shouldRetryQuery` |
 | `['approvals']` | `useApprovalItems` (`:24`) | 6 parallel calls: manual + overtime × 3 weeks | manual invalidate after approve/reject |
 | `['paymentHistory', from, to, userId]` | `usePaymentHistory` | payments history | default |
 | `['earningsHistory', from, to, userId]` | `useEarningsHistory` | earnings ledger | default |
@@ -200,6 +201,27 @@ How a write at one layer reaches the others.
 2. `updateWidgetData` writes new snapshot.
 3. If `newCount > prevCount`, fire local notification.
 4. TanStack Query is **not** touched — on next foreground, queries are either still within `staleTime` (rehydrated from persisted cache) or refetched normally.
+
+### 4.4 My Requests refresh (durable-data 02)
+
+`my_requests_v1` (§3.2) is the source of truth. The TanStack value under `['myRequests', assignmentId]` is only a view built from it (`buildRequestsView` / `composeRequestsView`, `src/lib/requestsStore.ts`), stamped with an `ownerKey` (`assignmentId|qa`, `assignmentId|prod`, or `'dev-mock'`).
+
+1. **Trigger.** Mount, a focus or wake once `staleTime` (60 s) has passed, or `refetch`. The queryFn (`buildMyRequestsQueryFn`, `src/hooks/useMyRequests.ts`) captures `today` and `nowMs` once per run. `devManagerView` returns `MOCK_MY_REQUESTS` stamped `'dev-mock'`, with no store I/O and no credentials read.
+2. **Plan.** `planRequestRefresh` (`src/lib/requestsPlanner.ts`, pure) picks dates from the stored records; the first rule that applies wins:
+   - today, always;
+   - after `markMyRequestsForcedRefresh()` (one-shot), every date in the 3-week window `catchUpStart..today`;
+   - a day in the window with a PENDING entry, after 15 min (`PENDING_TTL_MS`);
+   - yesterday, after 60 min (`RECENT_TTL_MS`);
+   - current-week days, and closed-week days in the window that are not settled, once per calendar day;
+   - an unsettled stored day older than the window, after 6 h (`OLD_UNSETTLED_TTL_MS`).
+
+   A day is **settled** when it has no PENDING entry and was fetched on or after the Tuesday after its week (past the Sunday 23:59 UTC timecard deadline). Settled days are re-fetched only by a forced refresh. A missing day older than the window is never planned (that is the backfill, spec 05). A typical wake makes 1-2 `fetchWorkDiary` calls instead of 15-21.
+3. **Fetch.** `Promise.allSettled` over `fetchWorkDiary` (`src/api/workDiary.ts`) for the planned dates. Every work-diary call in the app (`useMyRequests`, `useAIData`, `useTeamAggregateData`, `crossoverData`) runs inside one FIFO limiter of `WORK_DIARY_CONCURRENCY = 4` (`src/lib/limit.ts`), so at most 4 are in flight. Concurrent identical calls (same `getAuthGeneration()`, environment, assignment and date) share one in-flight promise. There is no time-based memo, and the generation in the key stops a call made after `invalidateAuthToken()` from joining one started before it. Token mints never take a limiter slot, so the limiter cannot deadlock on a renewal.
+4. **Merge on success only.** A fulfilled array (even `[]`) becomes a stored day (`groupSlotsIntoEntries`, `fetchedAt`, `settled`). A rejection, or a non-array (an empty body), is a failed date: its record is kept byte for byte and the date is listed in the view's `staleDates`. `updateRequestsStore` is serialized and re-reads, merges per date, prunes to 24 weeks, checks the configured owner, writes, then verifies the owner (and removes the key if a sign-out raced the write). A failed date with no record keeps the prior same-owner (or legacy) view's entries, in the view only.
+5. **Throw on total failure.** If no planned day succeeded, nothing is written, `log.warn('requests.refresh_failed', { plannedDays, failedDays, kind })` fires, and the queryFn throws (the first real `AuthError`, else the first rejection, else `NetworkError`). TanStack keeps the previous data with status `'error'` and retries per `shouldRetryQuery` (outages only, at most twice). **Seed-then-throw:** on a cold cache (no same-owner or legacy prior) with stored days, the queryFn first `setQueryData`s the stored view, so the error state still shows the list. Missing credentials throw `AuthError(NO_CREDENTIALS)` the same way, after the store read.
+6. **Display.** `selectMyRequests` shows a view only to its owner: a legacy (unstamped) blob or the current `ownerKey`, and `'dev-mock'` only while `devManagerView` is on. `toRequestsError` maps the thrown error to `'auth'` (a real 401/403, including `NO_CREDENTIALS`) or `'network'` (anything else, including `AUTH_HTML_500`), and it wins over the view's own `error`.
+7. **Sign-out.** `clearAll()` wipes `my_requests_v1`. An in-flight write then fails the owner pre-check or is removed by the post-write verify, and `queryClient.clear()` drops the view.
+8. **Env switch.** `handleSwitchEnvironment` (`app/modal.tsx`) calls `invalidateAuthToken()` (generation bump) before minting against the new environment. Then, inside one `startTransition`: `setQueryData(['config'], newConfig)`, `removeQueries({ queryKey: ['myRequests'] })`, then `invalidateQueries()`. The key carries no environment, so without the removal the old environment's (or a legacy) view would be a valid prior under the new one: carried forward on a partial success, or kept and shown on a total failure. The store itself reads as `empty` for the other owner.
 
 ---
 
@@ -356,7 +378,7 @@ Pure async functions. No React, no hooks.
 | `timesheet.ts` | `fetchTimesheet` (3-strategy fallback) |
 | `approvals.ts` | `fetchPendingManual`, `fetchPendingOvertime`, `approveManual`, `rejectManual` |
 | `payments.ts` | `fetchPaymentHistory` |
-| `workDiary.ts` | `fetchWorkDiary` |
+| `workDiary.ts` | `fetchWorkDiary` (app-wide limiter of `WORK_DIARY_CONCURRENCY = 4`, in-flight sharing; §4.4), `__resetWorkDiaryInFlightForTests` |
 | `errors.ts` | `AuthError`, `NetworkError`, `ApiError`, the `AUTH_HTML_500` / `AUTH_LOGIN_LATCHED` / `NO_CREDENTIALS` / `HTML_5XX_AFTER_RENEWAL` codes, `isRetryableError`, `shouldRetryQuery`, `MAX_QUERY_RETRIES` |
 
 Auth token is **cached in module-scope memory** (`client.ts`, spec 04). First call mints via `POST /api/v3/token`; subsequent calls reuse the cached `userId:secret` string. Concurrent first-callers share a single in-flight mint (request dedup). `invalidateAuthToken()` is the hard reset (cache, in-flight mint, latch, generation); called from `app/modal.tsx` on sign-out and env switch and from `app/(auth)/not-contributor.tsx`. `apiGet`/`apiPut` take a fifth `creds?: AuthCreds` arg for a single renew-and-retry on auth failure (401 or Tomcat HTML 5xx); every production call passes it (§8.5). `mintAuthToken` (exported) bypasses the cache for `probeEnvironments`. Empty response bodies (approve/reject PUTs) parsed as `undefined`. Base URL switched via `getApiBase(useQA)` from `src/store/config.ts`.
@@ -381,6 +403,9 @@ Notable:
 - `approvals.ts` — `parseManualItems`, `parseOvertimeItems`. Raw API → domain model.
 - `ai.ts`, `aiAppBreakdown.ts`, `aiCone.ts`, `aiTier.ts` — AI% computation, app breakdown, tier classification.
 - `weeklyHistory.ts` — snapshot persistence.
+- `requestsPlanner.ts` — pure My Requests refresh planner (`planRequestRefresh`, `requestWindows`, `isDaySettled`, TTL constants, local date helpers). Durable-data 02, §4.4.
+- `requestsStore.ts` — the `my_requests_v1` store (`readRequestsStore`, serialized `updateRequestsStore`, `pruneDays`, `buildRequestsView`, `composeRequestsView`). Holds a module write chain, so not stateless.
+- `limit.ts` — `createLimiter(max)`, a FIFO concurrency limiter (used by `fetchWorkDiary`).
 - `pushToken.ts` — Expo push token registration with Railway server.
 - `approvalMeshSignal.ts`, `panelState.ts` — UI state machines.
 - `devMock.ts` — `MOCK_TEAM_ITEMS` for `devManagerView` toggle.
@@ -522,7 +547,7 @@ Spec 04 built the renew-and-retry but wired no caller, so a cached token that ex
 - **Single-flight renewal.** On a 401 or HTML 5xx, `apiGet`/`apiPut` call `invalidateIfCurrent(token)`, which clears the cache only if it still holds the failed token and never touches the in-flight mint. Then they get a token from `getAuthToken` and retry once. N concurrent 401s share one re-mint. A retried response that is still HTML 5xx becomes a retryable `ApiError(HTML_5XX_AFTER_RENEWAL)`, not "Authentication error".
 - **Failed-login latch.** A token-endpoint 401/403 latches a non-reversible FNV-1a fingerprint of env + username + password for `LOGIN_LATCH_MS` (60 s). Until then `getAuthToken` with the same credentials throws `AuthError(AUTH_LOGIN_LATCHED)` without a network call, so a password changed on the server cannot cause a storm of failed logins. Network, `ApiError` and `AUTH_HTML_500` mint failures never latch. A successful mint clears it. `mintAuthToken` ignores it.
 - **Generation guard.** `invalidateAuthToken()` is the hard reset, called only on sign-out (`handleSignOut` after `clearAll`), env switch (`handleSwitchEnvironment` before `fetchAndBuildConfig`) and not-contributor (`app/(auth)/not-contributor.tsx:28`). It clears the cache, the in-flight mint and the latch, and bumps `authGeneration`. A mint that started before the reset still resolves for its callers but writes neither the cache nor the latch.
-- **Residual risk.** The token TTL is still unknown, so renewal is reactive only. Callers that reuse one token across several calls (timesheet strategies, the history backfill loop, the 6 approval fetches) pay one extra 401 per remaining call after a renewal, with no extra mint. Hooks keep their numeric `retry` until durable-data specs 02/03/05 switch them to `isRetryableError` / `shouldRetryQuery`.
+- **Residual risk.** The token TTL is still unknown, so renewal is reactive only. Callers that reuse one token across several calls (timesheet strategies, the history backfill loop, the 6 approval fetches) pay one extra 401 per remaining call after a renewal, with no extra mint. `useMyRequests` retries through `shouldRetryQuery` since durable-data 02; the other hooks keep their numeric `retry` until specs 03/05 switch them to `isRetryableError` / `shouldRetryQuery`.
 
 ### 8.6 Two `components/` and two `hooks/` directories
 
@@ -537,6 +562,8 @@ Root-level `components/` and `hooks/` are Expo Starter scaffold leftovers. Produ
 ### 8.8 TanStack Query persisted cache + AsyncStorage caches overlap
 
 `hours_cache`, `ai_cache`, `widget_data`, `weekly_history`, and the `HOURGLASS_QUERY_CACHE` (full Query cache) all persist overlapping data. Manual AsyncStorage caches exist for instant-render on mount before queries resolve; Query persistence covers the rest. Clearing the Query cache does not clear the manual caches.
+
+**My Requests no longer depend on the persisted cache for history** (durable-data 02). Their history lives in `my_requests_v1` (§3.2), which only a successful per-day fetch writes, so a failed refresh, the persister's 24 h `maxAge` or a cleared Query cache cannot lose it. The persisted `['myRequests', assignmentId]` value is a view rebuilt from the store on every successful run, and seeded from it on a cold cache (§4.4). A legacy 1.1/1.2.0 blob is never imported into the store: its entries are carried forward in the view only, until the server gives each date a record.
 
 ### 8.9 Observability: local error log only (no automatic phone-home)
 
