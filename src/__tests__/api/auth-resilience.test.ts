@@ -13,7 +13,8 @@
  *
  * The `DD1.*` blocks at the end cover features/app/durable-data spec
  * 01-auth-renewal: single-flight renewal via `invalidateIfCurrent`, the
- * mint generation guard, no-creds eviction and the `auth.*` log events.
+ * mint generation guard, no-creds eviction, the `auth.*` log events and
+ * the 60 s failed-login latch.
  */
 
 const mockFetch = jest.fn();
@@ -34,9 +35,10 @@ import {
   getAuthToken,
   invalidateAuthToken,
   invalidateIfCurrent,
+  LOGIN_LATCH_MS,
   mintAuthToken,
 } from '../../api/client';
-import { AuthError, ApiError } from '../../api/errors';
+import { AuthError, ApiError, NetworkError } from '../../api/errors';
 import { log } from '../../lib/log';
 
 // ---------------------------------------------------------------------------
@@ -959,5 +961,366 @@ describe('DD1.8: auth log events', () => {
     for (const value of ['tok-stale-0001', 'tok-fresh-0002', secret.username, secret.password]) {
       expect(serialized).not.toContain(value);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.9-DD1.17 helpers — failed-login latch
+// ---------------------------------------------------------------------------
+
+type TestCreds = typeof CREDS;
+
+/** A JSON error in Crossover's `{errorCode, type, httpStatus, text}` envelope (docs/CROSSOVER_API.md F4). */
+function makeEnvelopeErrorResponse(status: number, errorCode: string, text: string) {
+  const envelope = { errorCode, type: 'ERROR', httpStatus: status, text };
+  return {
+    ok: false,
+    status,
+    json: async () => envelope,
+    text: async () => JSON.stringify(envelope),
+    headers: { get: (k: string) =>
+      k.toLowerCase() === 'content-type' ? 'application/json' : null,
+    },
+  };
+}
+
+function tokenFor(creds: TestCreds) {
+  return getAuthToken(creds.username, creds.password, creds.useQA);
+}
+
+/**
+ * Have the token endpoint reject `CREDS` through getAuthToken (the rejection that latches),
+ * then forget that fetch and its logs. The endpoint keeps answering `status` afterwards,
+ * like a server that still holds a different password.
+ */
+async function rejectLogin(status: 401 | 403 = 401) {
+  routeFetch({ token: () => makeJsonErrorResponse(status) });
+  await expect(getCredsToken()).rejects.toBeInstanceOf(AuthError);
+  mockFetch.mockClear();
+  clearLogMocks();
+}
+
+function expectLatchedError(err: unknown, statusCode: 401 | 403 = 401) {
+  expect(err).toBeInstanceOf(AuthError);
+  expect(err).toMatchObject({ errorCode: 'AUTH_LOGIN_LATCHED', statusCode });
+}
+
+/** The original rejection from the token endpoint, not the latch's synthetic one. */
+function expectServerRejection(err: unknown, statusCode: 401 | 403 = 401) {
+  expect(err).toBeInstanceOf(AuthError);
+  expect((err as AuthError).statusCode).toBe(statusCode);
+  expect((err as AuthError).errorCode).not.toBe('AUTH_LOGIN_LATCHED');
+}
+
+// ---------------------------------------------------------------------------
+// DD1.9 — a rejected login is latched for its credentials
+// ---------------------------------------------------------------------------
+
+describe('DD1.9: failed-login latch', () => {
+  it('DD1.9.a: mint 401 → AuthError(401); the same creds inside 60 s → AUTH_LOGIN_LATCHED with 0 fetches; logged once', async () => {
+    routeFetch({ token: () => makeJsonErrorResponse(401) });
+
+    expectServerRejection(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(1);
+
+    // A TanStack retry, then another: both refused locally.
+    expectLatchedError(await getCredsToken().catch((e) => e));
+    expectLatchedError(await getCredsToken().catch((e) => e));
+
+    expect(tokenPosts()).toHaveLength(1);
+    expect(logEvents(mockLogWarn, 'auth.login_latched')).toEqual([
+      ['auth.login_latched', { statusCode: 401 }],
+    ]);
+    expect(logEvents(mockLogInfo, 'auth.token_minted')).toHaveLength(0);
+  });
+
+  it('DD1.9.b: callers that joined the rejected mint get its 401; a caller after it settles is latched', async () => {
+    const mint = deferred<unknown>();
+    routeFetch({ token: () => mint.promise });
+
+    const joined = Promise.all([1, 2, 3].map(() => getCredsToken().catch((e) => e)));
+    mint.resolve(makeJsonErrorResponse(401));
+    for (const err of await joined) expectServerRejection(err);
+    expect(tokenPosts()).toHaveLength(1);
+
+    expectLatchedError(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(1);
+    expect(logEvents(mockLogWarn, 'auth.login_latched')).toHaveLength(1);
+  });
+
+  it('DD1.9.c: neither the latched error nor any log call carries the username, password or Basic string', async () => {
+    const secret = { username: 'jane.doe@example.com', password: 'hunter2-secret', useQA: false };
+    routeFetch({ token: () => makeJsonErrorResponse(401) });
+
+    await expect(tokenFor(secret)).rejects.toBeInstanceOf(AuthError);
+    const latched = await tokenFor(secret).catch((e) => e);
+
+    expectLatchedError(latched);
+    expect(logEvents(mockLogWarn, 'auth.login_latched')).toHaveLength(1);
+    const exposed = JSON.stringify([
+      (latched as AuthError).message,
+      (latched as AuthError).serverText,
+      ...mockLogInfo.mock.calls,
+      ...mockLogWarn.mock.calls,
+      ...mockLogError.mock.calls,
+    ]);
+    for (const value of [secret.username, secret.password, btoa(`${secret.username}:${secret.password}`)]) {
+      expect(exposed).not.toContain(value);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.10 — the latch lasts LOGIN_LATCH_MS from the rejection
+// ---------------------------------------------------------------------------
+
+describe('DD1.10: latch expiry', () => {
+  const T0 = Date.UTC(2026, 9, 22, 9, 0, 0);
+  let nowSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    nowSpy = jest.spyOn(Date, 'now').mockReturnValue(T0);
+  });
+  afterEach(() => nowSpy.mockRestore());
+
+  it('DD1.10.a: LOGIN_LATCH_MS is 60 s', () => {
+    expect(LOGIN_LATCH_MS).toBe(60_000);
+  });
+
+  it('DD1.10.b: latched through a 1 s / 2 s retry cycle and at 59 999 ms; at 60 001 ms the same creds mint again', async () => {
+    await rejectLogin(401);
+
+    for (const elapsed of [1_000, 3_000, 59_999]) {
+      nowSpy.mockReturnValue(T0 + elapsed);
+      expectLatchedError(await getCredsToken().catch((e) => e));
+    }
+    expect(tokenPosts()).toHaveLength(0);
+
+    nowSpy.mockReturnValue(T0 + 60_001);
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('tok-after-expiry'));
+
+    await expect(getCredsToken()).resolves.toBe('tok-after-expiry');
+    expect(tokenPosts()).toHaveLength(1);
+  });
+
+  it('DD1.10.c: a rejection after expiry latches again, for 60 s from that rejection', async () => {
+    await rejectLogin(401);
+
+    nowSpy.mockReturnValue(T0 + 60_001);
+    expectServerRejection(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(1);
+    expect(logEvents(mockLogWarn, 'auth.login_latched')).toEqual([
+      ['auth.login_latched', { statusCode: 401 }],
+    ]);
+
+    nowSpy.mockReturnValue(T0 + 60_001 + 59_999);
+    expectLatchedError(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.11 — the latch is keyed by environment + username + password
+// ---------------------------------------------------------------------------
+
+describe('DD1.11: other credentials are not blocked', () => {
+  it.each([
+    ['a different password, same username', { ...CREDS, password: 'pw-corrected' }],
+    ['the same username and password in the other environment', { ...CREDS, useQA: !CREDS.useQA }],
+    ['a different username, same password', { ...CREDS, username: 'someone.else@example.com' }],
+  ])('DD1.11.a: while CREDS are latched, %s mints immediately', async (_label, other) => {
+    await rejectLogin(401);
+    expectLatchedError(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(0);
+
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('tok-other'));
+    await expect(tokenFor(other)).resolves.toBe('tok-other');
+
+    expect(tokenPosts()).toHaveLength(1);
+    const [url, init] = tokenPosts()[0];
+    expect(url).toContain(other.useQA ? 'https://api-qa.crossover.com' : 'https://api.crossover.com');
+    expect(init.headers.Authorization).toBe(`Basic ${btoa(`${other.username}:${other.password}`)}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.12 — invalidateAuthToken() (sign-out / env switch) clears the latch
+// ---------------------------------------------------------------------------
+
+describe('DD1.12: invalidateAuthToken clears the latch', () => {
+  it('DD1.12.a: after invalidateAuthToken() during the latch, the same creds mint', async () => {
+    await rejectLogin(401);
+    expectLatchedError(await getCredsToken().catch((e) => e));
+
+    invalidateAuthToken();
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('tok-after-reset'));
+
+    await expect(getCredsToken()).resolves.toBe('tok-after-reset');
+    expect(tokenPosts()).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.13 — a successful getAuthToken mint clears the latch
+// ---------------------------------------------------------------------------
+
+describe('DD1.13: a successful mint clears the latch', () => {
+  it('DD1.13.a: latch A, mint B, evict B with invalidateIfCurrent → getAuthToken(A) makes 1 fetch', async () => {
+    const credsB = { ...CREDS, password: 'pw-corrected' };
+    await rejectLogin(401);
+    expectLatchedError(await getCredsToken().catch((e) => e));
+
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('tok-b'));
+    await expect(tokenFor(credsB)).resolves.toBe('tok-b');
+    invalidateIfCurrent('tok-b'); // empties the cache; does not touch the latch itself
+    expect(tokenPosts()).toHaveLength(1);
+
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('tok-a'));
+    await expect(getCredsToken()).resolves.toBe('tok-a');
+    expect(tokenPosts()).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.14 — mintAuthToken (the onboarding probe) neither reads nor writes the latch
+// ---------------------------------------------------------------------------
+
+describe('DD1.14: mintAuthToken bypasses the latch', () => {
+  it('DD1.14.a: a probe during the latch makes 1 fetch, and its success leaves getAuthToken latched', async () => {
+    await rejectLogin(401);
+    expectLatchedError(await getCredsToken().catch((e) => e));
+
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('probe-tok'));
+    await expect(mintAuthToken(CREDS.username, CREDS.password, CREDS.useQA)).resolves.toBe('probe-tok');
+    expect(tokenPosts()).toHaveLength(1);
+
+    expectLatchedError(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(1);
+  });
+
+  it('DD1.14.b: a rejected probe does not latch — getAuthToken still asks the server, and its own rejection latches', async () => {
+    routeFetch({ token: () => makeJsonErrorResponse(401) });
+
+    expectServerRejection(await mintAuthToken(CREDS.username, CREDS.password, CREDS.useQA).catch((e) => e));
+    expect(logEvents(mockLogWarn, 'auth.login_latched')).toHaveLength(0);
+
+    expectServerRejection(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(2);
+
+    expectLatchedError(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.15 — renewal inside apiGet/apiPut during the latch
+// ---------------------------------------------------------------------------
+
+describe('DD1.15: renewal during the latch', () => {
+  it.each([
+    ['apiGet', () => apiGet('/test', {}, 'stale', false, CREDS)],
+    ['apiPut', () => apiPut('/put', { a: 1 }, 'stale', false, CREDS)],
+  ])('DD1.15.a: %s 401 with creds rejects with the latched AuthError after 1 data fetch and 0 token POSTs', async (_name, call) => {
+    await rejectLogin(401);
+    routeFetch({ token: () => makeJsonErrorResponse(401), data: () => makeJsonErrorResponse(401) });
+
+    const err = await call().catch((e) => e);
+
+    expectLatchedError(err);
+    expect(dataFetches()).toHaveLength(1);
+    expect(tokenPosts()).toHaveLength(0);
+    expect(logEvents(mockLogWarn, 'auth.token_retried')).toHaveLength(0);
+  });
+
+  it('DD1.15.b: password changed on the server — a 401 wave makes 1 rejected re-mint, then later calls are latched with 0 token POSTs', async () => {
+    await seedCachedToken('stale');
+    const mint = deferred<unknown>();
+    routeFetch({ token: () => mint.promise, data: () => makeJsonErrorResponse(401) });
+
+    const wave = Promise.all(
+      [1, 2, 3, 4, 5].map(() => apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e)),
+    );
+    await flush(); // every caller has had its 401 and joined the re-mint
+    mint.resolve(makeJsonErrorResponse(401));
+    for (const err of await wave) expectServerRejection(err);
+
+    expect(tokenPosts()).toHaveLength(1);
+    expect(logEvents(mockLogWarn, 'auth.login_latched')).toEqual([
+      ['auth.login_latched', { statusCode: 401 }],
+    ]);
+
+    expectLatchedError(await apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e));
+    expect(tokenPosts()).toHaveLength(1);
+    expect(dataFetches()).toHaveLength(6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.16 — only a credential rejection (AuthError other than AUTH_HTML_500) latches
+// ---------------------------------------------------------------------------
+
+describe('DD1.16: which mint failures latch', () => {
+  it.each([
+    ['a NetworkError', () => Promise.reject(new TypeError('Network request failed')), NetworkError, undefined],
+    ['an HTML 500 (AUTH_HTML_500)', () => makeHtml5xxResponse(500), AuthError, 'AUTH_HTML_500'],
+    ['an HTML 503 (AUTH_HTML_500)', () => makeHtml5xxResponse(503), AuthError, 'AUTH_HTML_500'],
+    ['a JSON 500 (ApiError)', () => makeJsonErrorResponse(500), ApiError, undefined],
+  ])('DD1.16.a: %s from the token endpoint does not latch', async (_label, reply, ErrorClass, errorCode) => {
+    routeFetch({ token: reply });
+    const err = await getCredsToken().catch((e) => e);
+    expect(err).toBeInstanceOf(ErrorClass);
+    expect((err as { errorCode?: string }).errorCode).toBe(errorCode);
+    expect(logEvents(mockLogWarn, 'auth.login_latched')).toHaveLength(0);
+
+    // The next call still reaches the server. When the server does judge and reject the
+    // credentials, that rejection (and only that one) latches.
+    routeFetch({ token: () => makeJsonErrorResponse(401) });
+    expectServerRejection(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(2);
+
+    expectLatchedError(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(2);
+    expect(logEvents(mockLogWarn, 'auth.login_latched')).toHaveLength(1);
+  });
+
+  it('DD1.16.b: a mint 403 latches with statusCode 403 and rethrows the server\'s own error first', async () => {
+    routeFetch({ token: () => makeEnvelopeErrorResponse(403, 'CROS-0002', 'Forbidden') });
+
+    const first = await getCredsToken().catch((e) => e);
+    expectServerRejection(first, 403);
+    expect((first as AuthError).errorCode).toBe('CROS-0002');
+
+    expectLatchedError(await getCredsToken().catch((e) => e), 403);
+    expect(tokenPosts()).toHaveLength(1);
+    expect(logEvents(mockLogWarn, 'auth.login_latched')).toEqual([
+      ['auth.login_latched', { statusCode: 403 }],
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.17 — a rejection from a mint that is no longer current does not latch
+// ---------------------------------------------------------------------------
+
+describe('DD1.17: a stale mint rejection does not latch', () => {
+  it('DD1.17.a: a 401 that settles after invalidateAuthToken() reaches its caller, and the next same-creds call asks the server', async () => {
+    const staleMint = deferred<unknown>();
+    routeFetch({ token: () => makeJsonErrorResponse(401) });
+    mockFetch.mockReturnValueOnce(staleMint.promise);
+
+    const pending = getCredsToken().catch((e) => e);
+    invalidateAuthToken(); // sign-out / env switch while the login is in flight
+    staleMint.resolve(makeJsonErrorResponse(401));
+
+    expectServerRejection(await pending);
+    expect(logEvents(mockLogWarn, 'auth.login_latched')).toHaveLength(0);
+
+    // Not latched by the stale mint: this call reaches the server, and its own (current)
+    // rejection latches.
+    expectServerRejection(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(2);
+
+    expectLatchedError(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(2);
   });
 });
