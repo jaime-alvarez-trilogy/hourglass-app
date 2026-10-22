@@ -1,6 +1,7 @@
 // FR3, FR4, FR5: Centralized Crossover API client
 // Spec 04 (auth-resilience): in-memory token cache + Tomcat HTML 5xx -> AuthError.
-// durable-data 01-auth-renewal: single-flight renewal and the mint generation guard.
+// durable-data 01-auth-renewal: single-flight renewal, the mint generation guard
+// and the failed-login latch.
 
 import { AuthError, NetworkError, ApiError, type ErrorEnvelope } from './errors';
 import { getApiBase } from '../store/config';
@@ -18,6 +19,25 @@ let mintInFlight: Promise<string> | null = null;
 // Bumped by every hard reset (`invalidateAuthToken`). A mint that started under an
 // older generation must not write its token into the cache.
 let authGeneration = 0;
+
+/** How long a login rejected by the token endpoint is refused locally. */
+export const LOGIN_LATCH_MS = 60_000;
+
+// Failed-login latch. Holds only a non-reversible fingerprint of the rejected
+// env + username + password (never the password or the Basic string), so a
+// changed password cannot cause a storm of failed logins.
+let loginLatch: { fingerprint: string; until: number; statusCode: 401 | 403 } | null = null;
+
+/** FNV-1a 32-bit over env + username + password, as 8 lowercase hex chars. */
+function fingerprintCreds(username: string, password: string, useQA: boolean): string {
+  const input = `${useQA ? 'qa' : 'prod'}\u0000${username}\u0000${password}`;
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
 
 /**
  * Mint a fresh auth token by POSTing credentials to /api/v3/token.
@@ -70,6 +90,12 @@ export async function mintAuthToken(
  * Generation guard: the mint writes `cachedToken` only if no hard reset
  * (`invalidateAuthToken`) ran while it was in flight. Its callers still receive
  * the token either way.
+ *
+ * Failed-login latch: when the token endpoint rejects the credentials (an
+ * AuthError other than AUTH_HTML_500), the same env + username + password is
+ * refused for LOGIN_LATCH_MS with `AuthError(AUTH_LOGIN_LATCHED)` and no fetch.
+ * Only a current mint sets the latch; a successful mint or
+ * `invalidateAuthToken()` clears it. `mintAuthToken` ignores it.
  */
 export async function getAuthToken(
   username: string,
@@ -78,13 +104,36 @@ export async function getAuthToken(
 ): Promise<string> {
   if (cachedToken) return cachedToken;
   if (mintInFlight) return mintInFlight;
+  const fingerprint = fingerprintCreds(username, password, useQA);
+  if (loginLatch && loginLatch.fingerprint === fingerprint && Date.now() < loginLatch.until) {
+    throw new AuthError(loginLatch.statusCode, 'Login recently rejected', {
+      errorCode: 'AUTH_LOGIN_LATCHED',
+    });
+  }
   const gen = authGeneration;
   const p: Promise<string> = mintAuthToken(username, password, useQA)
-    .then((t) => {
-      if (gen === authGeneration && mintInFlight === p) cachedToken = t;
-      log.info('auth.token_minted', {});
-      return t;
-    })
+    .then(
+      (t) => {
+        if (gen === authGeneration && mintInFlight === p) {
+          cachedToken = t;
+          loginLatch = null;
+        }
+        log.info('auth.token_minted', {});
+        return t;
+      },
+      (err: unknown) => {
+        if (
+          err instanceof AuthError &&
+          err.errorCode !== 'AUTH_HTML_500' &&
+          gen === authGeneration &&
+          mintInFlight === p
+        ) {
+          loginLatch = { fingerprint, until: Date.now() + LOGIN_LATCH_MS, statusCode: err.statusCode };
+          log.warn('auth.login_latched', { statusCode: err.statusCode });
+        }
+        throw err;
+      },
+    )
     .finally(() => {
       if (mintInFlight === p) mintInFlight = null;
     });
@@ -102,9 +151,10 @@ export function invalidateIfCurrent(token: string): void {
 }
 
 /**
- * Hard reset: wipe the in-memory token cache and any pending in-flight mint,
- * and bump the mint generation so a mint already in flight cannot repopulate
- * the cache. Idempotent and safe to call when no token is cached.
+ * Hard reset: wipe the in-memory token cache, any pending in-flight mint and
+ * the failed-login latch, and bump the mint generation so a mint already in
+ * flight cannot repopulate the cache or set the latch. Idempotent and safe to
+ * call when no token is cached.
  *
  * Only for sign-out, env switch and not-contributor. A rejected token on a
  * data request goes through `invalidateIfCurrent` instead.
@@ -117,6 +167,7 @@ export function invalidateIfCurrent(token: string): void {
 export function invalidateAuthToken(): void {
   cachedToken = null;
   mintInFlight = null;
+  loginLatch = null;
   authGeneration++;
 }
 
