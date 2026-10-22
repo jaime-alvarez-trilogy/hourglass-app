@@ -184,6 +184,16 @@ export function invalidateAuthToken(): void {
   authGeneration++;
 }
 
+/**
+ * durable-data 02-requests-store FR1 — read-only view of the generation that
+ * `invalidateAuthToken()` bumps. `fetchWorkDiary` puts it in its in-flight
+ * sharing key, so a call made after a hard reset never joins a request started
+ * before it.
+ */
+export function getAuthGeneration(): number {
+  return authGeneration;
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
