@@ -177,4 +177,9 @@ describe('DD2 FR1: createLimiter', () => {
       await flush();
     });
   });
+
+  // Review fix: a limit below 1 would queue every task forever.
+  it.each([0, -1, 1.5, NaN, Infinity])('max %p throws a RangeError', (max) => {
+    expect(() => createLimiter(max)).toThrow(RangeError);
+  });
 });

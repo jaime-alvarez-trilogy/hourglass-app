@@ -1051,6 +1051,54 @@ describe('useMyRequests — DD2 store-backed queryFn (durable-data 02 FR4)', () 
     });
   });
 
+  // Review fix: a config read failure is logged before it propagates.
+  it('loadConfig throws → rejects with that error, logs requests.config_read_failed, and does no store I/O', async () => {
+    const storageErr = new Error('AsyncStorage unavailable');
+    mockLoadConfig.mockRejectedValue(storageErr);
+    mockLoadCredentials.mockResolvedValue(CREDS);
+    const client = newClient();
+
+    await expect(buildMyRequestsQueryFn(WED)(ctxOf(client))).rejects.toBe(storageErr);
+
+    expect(mockWarn).toHaveBeenCalledWith('requests.config_read_failed', {});
+    expect(mockLoadCredentials).not.toHaveBeenCalled();
+    expect(mockFetchWorkDiary).not.toHaveBeenCalled();
+    expect(mockAsyncStorage.getItem).not.toHaveBeenCalledWith(KEY);
+    expect(client.getQueryData(QUERY_KEY)).toBeUndefined();
+  });
+
+  // Review fix: production calls buildMyRequestsQueryFn() with no overrides.
+  describe('no overrides — the real clock', () => {
+    beforeEach(() => {
+      // Only Date is faked; timers and microtasks stay real for AsyncStorage and TanStack.
+      jest.useFakeTimers({
+        now: local(`${WED}T09:15`),
+        doNotFake: [
+          'hrtime', 'nextTick', 'performance', 'queueMicrotask', 'requestAnimationFrame',
+          'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback', 'setImmediate',
+          'clearImmediate', 'setInterval', 'clearInterval', 'setTimeout', 'clearTimeout',
+        ],
+      });
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('plans from todayLocal() and stamps every fetched day with Date.now(), not local noon', async () => {
+      signedIn();
+      serveDiary({});
+
+      const result = await buildMyRequestsQueryFn()();
+
+      expect(calledDates()).toEqual(desc(CATCH_UP, WED));
+      const store = await readStore();
+      const stamps = new Set(Object.values(store?.days ?? {}).map((d) => d.fetchedAt));
+      expect([...stamps]).toEqual([isoAt(`${WED}T09:15`)]);
+      expect(result.updatedAt).toBe(isoAt(`${WED}T09:15`));
+    });
+  });
+
   describe('DD2.47 — view-only carry-forward of a failed day with no record', () => {
     it('a failed day with no record but in the ctx prior stays in the view and is not stored', async () => {
       signedIn();

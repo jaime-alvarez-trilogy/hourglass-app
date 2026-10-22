@@ -73,9 +73,23 @@ function isStoreFor(value: unknown, owner: RequestsStoreOwner): value is MyReque
   );
 }
 
+/** The fields the planner and the view builders read without a guard. */
+function isStoredDay(value: unknown): value is StoredRequestDay {
+  if (typeof value !== 'object' || value === null) return false;
+  const d = value as Partial<StoredRequestDay>;
+  return (
+    typeof d.date === 'string' &&
+    typeof d.fetchedAt === 'string' &&
+    typeof d.settled === 'boolean' &&
+    Array.isArray(d.entries) &&
+    d.entries.every((e) => typeof e === 'object' && e !== null)
+  );
+}
+
 /**
  * Reads the store for `owner`. Never throws. Anything that is not a version-1 store of
- * this owner reads as `empty`; a getItem failure reads as `unreadable`.
+ * this owner reads as `empty`; a getItem failure reads as `unreadable`. A malformed day
+ * record is dropped (as if never fetched), so the rest of the store stays usable.
  */
 export async function readRequestsStore(owner: RequestsStoreOwner): Promise<RequestsStoreRead> {
   let raw: string | null;
@@ -93,7 +107,13 @@ export async function readRequestsStore(owner: RequestsStoreOwner): Promise<Requ
   } catch {
     return { status: 'empty' };
   }
-  return isStoreFor(parsed, owner) ? { status: 'ok', store: parsed } : { status: 'empty' };
+  if (!isStoreFor(parsed, owner)) return { status: 'empty' };
+
+  const days: Record<string, StoredRequestDay> = {};
+  for (const [date, day] of Object.entries(parsed.days as Record<string, unknown>)) {
+    if (isStoredDay(day)) days[date] = day;
+  }
+  return { status: 'ok', store: { ...parsed, days } };
 }
 
 // ─── Write ────────────────────────────────────────────────────────────────────

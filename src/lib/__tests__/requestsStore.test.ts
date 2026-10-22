@@ -329,6 +329,37 @@ describe('DD2.30 — unknown version and malformed data read as empty', () => {
     expect(await persisted()).toEqual(storeOf([fetched]));
     await expect(readRequestsStore(OWNER)).resolves.toEqual({ status: 'ok', store: storeOf([fetched]) });
   });
+
+  // Review fix: the planner and the view builders read entries/fetchedAt/settled unguarded.
+  const d2 = day('2026-03-10', TUE_EVENING, [entry('2026-03-10', 'Retro notes', 'PENDING')]);
+  const { entries: _entries, ...noEntries } = d2;
+
+  it.each([
+    ['no entries', noEntries],
+    ['entries: null', { ...d2, entries: null }],
+    ['a null entry', { ...d2, entries: [null] }],
+    ['fetchedAt not a string', { ...d2, fetchedAt: 0 }],
+    ['no settled', { ...d2, settled: undefined }],
+    ['no date', { ...d2, date: undefined }],
+    ['a null day', null],
+    ['a string day', 'corrupt'],
+  ])('a malformed day record (%s) is dropped; the other days still read', async (_label, bad) => {
+    await seedRaw(JSON.stringify({ version: 1, owner: OWNER, days: { ...byDate(d1), [d2.date]: bad } }));
+
+    const read = await readRequestsStore(OWNER);
+
+    expect(read).toEqual({ status: 'ok', store: storeOf([d1]) });
+    if (read.status !== 'ok') throw new Error('expected ok');
+    expect(() => buildRequestsView(read.store.days, TODAY)).not.toThrow();
+  });
+
+  it('the next update rewrites the store without the malformed day', async () => {
+    await seedRaw(JSON.stringify({ version: 1, owner: OWNER, days: { ...byDate(d1), [d2.date]: {} } }));
+    const fetched = day(TODAY, WED_MORNING, [entry(TODAY, 'Standup notes')]);
+
+    await expect(updateRequestsStore(OWNER, [fetched], TODAY)).resolves.toEqual(storeOf([d1, fetched]));
+    expect(await persisted()).toEqual(storeOf([d1, fetched]));
+  });
 });
 
 describe('DD2.31 — serialized writes', () => {

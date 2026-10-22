@@ -1,5 +1,5 @@
 /**
- * FR1 (05-cache-hygiene): clearAll removes all 14 AsyncStorage keys
+ * FR1 (05-cache-hygiene): clearAll removes every AsyncStorage key it owns (19)
  * FR2 (05-cache-hygiene): Sign-out call site clears TanStack Query cache and cancels notifications
  * FR3 (05-cache-hygiene): Modal env-switch clears all query cache with resetQueries
  */
@@ -26,7 +26,7 @@ import { clearAll } from '../../store/config';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const ALL_14_KEYS = [
+const ALL_KEYS = [
   'crossover_config',
   'crossover_username',
   'crossover_password',
@@ -54,7 +54,7 @@ beforeEach(() => {
   (AsyncStorage.getItem as jest.Mock).mockResolvedValue(null);
 });
 
-// ─── FR1: clearAll removes all 14 AsyncStorage keys ─────────────────────────
+// ─── FR1: clearAll removes every AsyncStorage key it owns (19) ──────────────
 
 describe('FR1: clearAll — removes all AsyncStorage keys', () => {
   it('calls AsyncStorage.multiRemove with all 19 keys', async () => {
@@ -63,7 +63,7 @@ describe('FR1: clearAll — removes all AsyncStorage keys', () => {
     expect(AsyncStorage.multiRemove).toHaveBeenCalledTimes(1);
     const [keys] = (AsyncStorage.multiRemove as jest.Mock).mock.calls[0];
     expect(keys).toHaveLength(19);
-    expect(keys).toEqual(expect.arrayContaining(ALL_14_KEYS));
+    expect(keys).toEqual(expect.arrayContaining(ALL_KEYS));
     expect(keys).toContain('my_requests_v1');
   });
 
@@ -71,7 +71,7 @@ describe('FR1: clearAll — removes all AsyncStorage keys', () => {
     await clearAll();
 
     const [keys] = (AsyncStorage.multiRemove as jest.Mock).mock.calls[0];
-    for (const key of ALL_14_KEYS) {
+    for (const key of ALL_KEYS) {
       expect(keys).toContain(key);
     }
   });
@@ -110,7 +110,7 @@ describe('FR1: clearAll — removes all AsyncStorage keys', () => {
     await clearAll();
 
     // multiRemove should be called; individual removeItem should NOT be called
-    // for the data keys (it may be used in secureDelete fallback but not for the 14)
+    // for the data keys (it may be used in the secureDelete fallback, but not for these keys)
     expect(AsyncStorage.multiRemove).toHaveBeenCalledTimes(1);
   });
 });

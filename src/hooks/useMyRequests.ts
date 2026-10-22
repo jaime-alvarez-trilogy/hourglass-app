@@ -125,7 +125,14 @@ export function buildMyRequestsQueryFn(
     const nowMs =
       nowOverride?.() ?? (todayOverride ? Date.parse(today + 'T12:00:00') : Date.now());
 
-    const config = await loadConfig();
+    // The owner is unknown until config is read, so there is no stored view to seed
+    let config: CrossoverConfig | null;
+    try {
+      config = await loadConfig();
+    } catch (err) {
+      log.warn('requests.config_read_failed', {});
+      throw err;
+    }
 
     // Dev: manager preview — fake my-requests, no store I/O; the force flag is kept
     if (config?.devManagerView) {
