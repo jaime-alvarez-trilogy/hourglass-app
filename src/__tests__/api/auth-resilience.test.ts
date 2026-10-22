@@ -13,8 +13,11 @@
  *
  * The `DD1.*` blocks at the end cover features/app/durable-data spec
  * 01-auth-renewal: single-flight renewal via `invalidateIfCurrent`, the
- * mint generation guard, no-creds eviction, the `auth.*` log events and
- * the 60 s failed-login latch.
+ * mint generation guard, no-creds eviction, the `auth.*` log events, the
+ * 60 s failed-login latch, HTML 5xx after renewal
+ * (`ApiError(HTML_5XX_AFTER_RENEWAL)`, body unread) and how the errors the
+ * client throws classify under `isRetryableError`. The pure predicate and
+ * constant tables live in retry-policy.test.ts.
  */
 
 const mockFetch = jest.fn();
@@ -38,8 +41,9 @@ import {
   LOGIN_LATCH_MS,
   mintAuthToken,
 } from '../../api/client';
-import { AuthError, ApiError, NetworkError } from '../../api/errors';
+import { AuthError, ApiError, NetworkError, isRetryableError } from '../../api/errors';
 import { log } from '../../lib/log';
+import { makeExpoLikeResponse } from '../../../__tests__/helpers/expoLikeResponse';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -1322,5 +1326,219 @@ describe('DD1.17: a stale mint rejection does not latch', () => {
 
     expectLatchedError(await getCredsToken().catch((e) => e));
     expect(tokenPosts()).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.18-DD1.20 helpers — HTML 5xx after renewal
+// ---------------------------------------------------------------------------
+
+const TOMCAT_HTML = 'text/html;charset=utf-8';
+
+/** A single-read Tomcat error page whose body reads are tracked (`reads`, the `text` mock). */
+function makeTrackedHtml5xx(status: number, contentType = TOMCAT_HTML) {
+  return makeExpoLikeResponse({
+    status,
+    body: `<!doctype html><html><head><title>HTTP Status ${status} - Internal Server Error</title></head><body>...</body></html>`,
+    headers: { 'content-type': contentType },
+  });
+}
+
+/** The data endpoint answers `first` to the stale token and `retried` to the renewed one. */
+function serveStaleThenFresh(first: unknown, retried: unknown) {
+  routeFetch({
+    token: mintSequence('fresh'),
+    data: (t) => (t === 'stale' ? first : retried),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// DD1.18 — apiGet: an HTML 5xx that survives a fresh token is a server error
+// ---------------------------------------------------------------------------
+
+describe('DD1.18: apiGet HTML 5xx after renewal', () => {
+  it.each([
+    ['HTML 503 → mint → HTML 503', () => makeHtml5xxResponse(503), 503, TOMCAT_HTML],
+    ['HTML 500 → mint → HTML 500', () => makeHtml5xxResponse(500), 500, 'text/html'],
+    ['JSON 401 → mint → HTML 502', () => makeJsonErrorResponse(401), 502, TOMCAT_HTML],
+  ])(
+    'DD1.18.a: with creds, %s rejects with a retryable ApiError(HTML_5XX_AFTER_RENEWAL) and never reads the retried body',
+    async (_label, trigger, status, contentType) => {
+      const retried = makeTrackedHtml5xx(status, contentType);
+      serveStaleThenFresh(trigger(), retried);
+
+      const err = await apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e);
+
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err).toMatchObject({
+        statusCode: status,
+        errorCode: 'HTML_5XX_AFTER_RENEWAL',
+        message: 'Server error after token renewal',
+      });
+      expect(isRetryableError(err)).toBe(true);
+      expect(retried.text).not.toHaveBeenCalled();
+      expect(retried.reads).toEqual([]);
+      expect(dataFetches().map((f) => f.authToken)).toEqual(['stale', 'fresh']);
+      expect(tokenPosts()).toHaveLength(1);
+    },
+  );
+
+  it('DD1.18.b: the renewed token stays cached — a query retry after the outage reuses it without minting', async () => {
+    await seedCachedToken('stale');
+    serveStaleThenFresh(makeHtml5xxResponse(503), makeTrackedHtml5xx(503));
+
+    const err = await apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e);
+    expect(err).toMatchObject({ statusCode: 503, errorCode: 'HTML_5XX_AFTER_RENEWAL' });
+    expect(tokenPosts()).toHaveLength(1);
+
+    await expect(getCredsToken()).resolves.toBe('fresh');
+    expect(tokenPosts()).toHaveLength(1);
+  });
+
+  // Pinned (passes before and after FR3): only a retried HTML 5xx is reclassified; any other
+  // non-OK retried response still goes through handleStatus, which reads the body once.
+  it.each([
+    [
+      'a JSON 503 envelope → ApiError(503) carrying the server errorCode',
+      () => makeEnvelopeErrorResponse(503, 'CROS-0503', 'Service unavailable'),
+      ApiError,
+      { statusCode: 503, errorCode: 'CROS-0503', serverText: 'Service unavailable' },
+    ],
+    ['a JSON 401 → AuthError(401)', () => makeJsonErrorResponse(401), AuthError, { statusCode: 401 }],
+    ['an HTML 404 → ApiError(404)', () => makeHtml4xxResponse(404), ApiError, { statusCode: 404 }],
+  ])('DD1.18.c: with creds, HTML 503 → mint → %s (handleStatus, unchanged)', async (_label, retried, ErrorClass, shape) => {
+    serveStaleThenFresh(makeHtml5xxResponse(503), retried());
+
+    const err = await apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ErrorClass);
+    expect(err).toMatchObject(shape);
+    expect((err as { errorCode?: string }).errorCode).not.toBe('HTML_5XX_AFTER_RENEWAL');
+    expect(dataFetches().map((f) => f.authToken)).toEqual(['stale', 'fresh']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.19 — apiPut mirror
+// ---------------------------------------------------------------------------
+
+describe('DD1.19: apiPut HTML 5xx after renewal', () => {
+  it.each([
+    ['HTML 503 → mint → HTML 503', () => makeHtml5xxResponse(503), 503],
+    ['JSON 401 → mint → HTML 500', () => makeJsonErrorResponse(401), 500],
+  ])(
+    'DD1.19.a: with creds, %s rejects with a retryable ApiError(HTML_5XX_AFTER_RENEWAL); the retry re-sent the same body',
+    async (_label, trigger, status) => {
+      const body = { approverId: '2362707', timecardIds: [101, 102], allowOvertime: false };
+      const retried = makeTrackedHtml5xx(status);
+      serveStaleThenFresh(trigger(), retried);
+
+      const err = await apiPut('/put', body, 'stale', false, CREDS).catch((e) => e);
+
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err).toMatchObject({
+        statusCode: status,
+        errorCode: 'HTML_5XX_AFTER_RENEWAL',
+        message: 'Server error after token renewal',
+      });
+      expect(isRetryableError(err)).toBe(true);
+      expect(retried.text).not.toHaveBeenCalled();
+      expect(retried.reads).toEqual([]);
+      const puts = dataFetches();
+      expect(puts.map((f) => f.authToken)).toEqual(['stale', 'fresh']);
+      expect(puts.map((f) => f.body)).toEqual([JSON.stringify(body), JSON.stringify(body)]);
+      expect(tokenPosts()).toHaveLength(1);
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// DD1.20 — the errors the client actually throws, under the shared retry predicate
+// ---------------------------------------------------------------------------
+
+describe('DD1.20: client errors classify as outage (retry) or credential problem (no retry)', () => {
+  it.each([
+    [
+      'offline: fetch rejects → NetworkError',
+      async () => {
+        routeFetch({
+          token: mintSequence('fresh'),
+          data: () => Promise.reject(new TypeError('Network request failed')),
+        });
+        return apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e);
+      },
+      NetworkError,
+      undefined,
+    ],
+    [
+      'no creds, first-response HTML 503 → AuthError(AUTH_HTML_500)',
+      async () => {
+        routeFetch({ token: mintSequence('fresh'), data: () => makeHtml5xxResponse(503) });
+        return apiGet('/test', {}, 'stale', false).catch((e) => e);
+      },
+      AuthError,
+      'AUTH_HTML_500',
+    ],
+    [
+      'JSON 503 → ApiError(503)',
+      async () => {
+        routeFetch({ token: mintSequence('fresh'), data: () => makeJsonErrorResponse(503) });
+        return apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e);
+      },
+      ApiError,
+      undefined,
+    ],
+  ])('DD1.20.a: %s is retryable', async (_label, scenario, ErrorClass, errorCode) => {
+    const err = await scenario();
+
+    expect(err).toBeInstanceOf(ErrorClass);
+    expect((err as { errorCode?: string }).errorCode).toBe(errorCode);
+    expect(isRetryableError(err)).toBe(true);
+  });
+
+  it.each([
+    [
+      'JSON 404 → ApiError(404)',
+      async () => {
+        routeFetch({ token: mintSequence('fresh'), data: () => makeJsonErrorResponse(404) });
+        return apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e);
+      },
+      ApiError,
+      undefined,
+    ],
+    [
+      'with creds, 401 → mint → 401 → AuthError(401)',
+      async () => {
+        routeFetch({ token: mintSequence('fresh'), data: () => makeJsonErrorResponse(401) });
+        return apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e);
+      },
+      AuthError,
+      undefined,
+    ],
+    [
+      'with creds, 401 → re-mint rejected (password changed) → AuthError(401)',
+      async () => {
+        routeFetch({ token: () => makeJsonErrorResponse(401), data: () => makeJsonErrorResponse(401) });
+        return apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e);
+      },
+      AuthError,
+      undefined,
+    ],
+    [
+      'with creds during the latch → AuthError(AUTH_LOGIN_LATCHED)',
+      async () => {
+        await rejectLogin(401);
+        routeFetch({ token: () => makeJsonErrorResponse(401), data: () => makeJsonErrorResponse(401) });
+        return apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e);
+      },
+      AuthError,
+      'AUTH_LOGIN_LATCHED',
+    ],
+  ])('DD1.20.b: %s is not retryable', async (_label, scenario, ErrorClass, errorCode) => {
+    const err = await scenario();
+
+    expect(err).toBeInstanceOf(ErrorClass);
+    expect((err as { errorCode?: string }).errorCode).toBe(errorCode);
+    expect(isRetryableError(err)).toBe(false);
   });
 });
