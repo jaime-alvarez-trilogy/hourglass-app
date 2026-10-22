@@ -45,6 +45,7 @@ const ALL_14_KEYS = [
   'prev_approval_count',
   'prev_approval_ids',
   'HOURGLASS_QUERY_CACHE',
+  'my_requests_v1',           // durable-data 02-requests-store FR3
 ];
 
 beforeEach(() => {
@@ -56,13 +57,14 @@ beforeEach(() => {
 // ─── FR1: clearAll removes all 14 AsyncStorage keys ─────────────────────────
 
 describe('FR1: clearAll — removes all AsyncStorage keys', () => {
-  it('calls AsyncStorage.multiRemove with all 18 keys', async () => {
+  it('calls AsyncStorage.multiRemove with all 19 keys', async () => {
     await clearAll();
 
     expect(AsyncStorage.multiRemove).toHaveBeenCalledTimes(1);
     const [keys] = (AsyncStorage.multiRemove as jest.Mock).mock.calls[0];
-    expect(keys).toHaveLength(18);
+    expect(keys).toHaveLength(19);
     expect(keys).toEqual(expect.arrayContaining(ALL_14_KEYS));
+    expect(keys).toContain('my_requests_v1');
   });
 
   it('includes every key from the full list — no key missing', async () => {
