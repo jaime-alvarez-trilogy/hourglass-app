@@ -71,7 +71,7 @@ export async function saveCredentials(username: string, password: string): Promi
 // Raw string literals intentionally avoid importing constants from hook files (would create import cycles).
 export async function clearAll(): Promise<void> {
   await Promise.all([
-    // All AsyncStorage keys (12 data keys + config, plus credential fallback for web)
+    // All AsyncStorage keys (16 data keys + config, plus the 2 credential fallbacks for web)
     AsyncStorage.multiRemove([
       'crossover_config',
       'crossover_username',   // web fallback — on iOS these live in SecureStore below
@@ -91,6 +91,7 @@ export async function clearAll(): Promise<void> {
       'prev_approval_count',
       'prev_approval_ids',
       'HOURGLASS_QUERY_CACHE',  // TanStack Query persisted cache
+      'my_requests_v1',         // durable-data 02-requests-store FR3 (REQUESTS_STORE_KEY)
     ]),
     // Credentials stored in SecureStore on iOS (no-op if not available). Best-effort:
     // expo-secure-store 58 rejects with a KeyChainException when SecItemDelete returns
