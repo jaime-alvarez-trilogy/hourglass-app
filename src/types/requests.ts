@@ -27,6 +27,24 @@ export interface ManualRequestEntry {
 }
 
 /**
+ * Value cached by TanStack Query under ['myRequests', assignmentId] (durable-data 02).
+ * A view derived from the my_requests_v1 store. A persisted 1.1/1.2.0 blob
+ * (`{entries, error}`) still type-checks: every field after `error` is optional.
+ */
+export interface MyRequestsData {
+  /** Stored days in retention plus view-only carry-forward, sorted by date descending */
+  entries: ManualRequestEntry[];
+  /** Always null from the store-backed queryFn; kept for legacy blobs */
+  error: 'auth' | 'network' | null;
+  /** Planned dates (YYYY-MM-DD, descending) whose fetch failed in the last run */
+  staleDates?: string[];
+  /** Latest fetchedAt (ISO-8601) within catchUpStart..today, or null if none */
+  updatedAt?: string | null;
+  /** `${assignmentId}|${'qa' | 'prod'}`, or 'dev-mock'. Undefined only on legacy blobs */
+  ownerKey?: string;
+}
+
+/**
  * Return type of the useMyRequests hook.
  */
 export interface UseMyRequestsResult {
@@ -37,4 +55,8 @@ export interface UseMyRequestsResult {
   error: 'auth' | 'network' | null;
   /** Triggers a fresh fetch */
   refetch: () => void;
+  /** Dates whose last refresh failed (their stored record is shown) */
+  staleDates?: string[];
+  /** Latest successful fetch within the 3-week window, or null */
+  updatedAt?: string | null;
 }
