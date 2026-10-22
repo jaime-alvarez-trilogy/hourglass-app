@@ -10,6 +10,10 @@
  * `invalidateAuthToken()` is called in beforeEach to reset state
  * between test cases (Jest module caching means top-level lets
  * survive across test cases within a file).
+ *
+ * The `DD1.*` blocks at the end cover features/app/durable-data spec
+ * 01-auth-renewal: single-flight renewal via `invalidateIfCurrent`, the
+ * mint generation guard, no-creds eviction and the `auth.*` log events.
  */
 
 const mockFetch = jest.fn();
@@ -20,14 +24,20 @@ jest.mock('../../store/config', () => ({
     useQA ? 'https://api-qa.crossover.com' : 'https://api.crossover.com',
 }));
 
+jest.mock('../../lib/log', () => ({
+  log: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+}));
+
 import {
   apiGet,
   apiPut,
   getAuthToken,
   invalidateAuthToken,
+  invalidateIfCurrent,
   mintAuthToken,
 } from '../../api/client';
 import { AuthError, ApiError } from '../../api/errors';
+import { log } from '../../lib/log';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -484,5 +494,470 @@ describe('FR9: handleStatus HTML 5xx → AuthError(AUTH_HTML_500)', () => {
 
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).statusCode).toBe(400);
+  });
+});
+
+// ===========================================================================
+// Durable-data 01-auth-renewal (DD1.*)
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// DD1 helpers
+// ---------------------------------------------------------------------------
+
+const TOKEN_PATH = '/api/v3/token';
+
+const mockLogInfo = log.info as jest.Mock;
+const mockLogWarn = log.warn as jest.Mock;
+const mockLogError = log.error as jest.Mock;
+
+function clearLogMocks() {
+  mockLogInfo.mockClear();
+  mockLogWarn.mockClear();
+  mockLogError.mockClear();
+}
+
+beforeEach(clearLogMocks);
+
+/** A promise whose settlement the test controls (holds a mint or a response open). */
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  let reject!: (e: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/** Let every queued promise continuation run (all callers reach the pending mint). */
+function flush(): Promise<void> {
+  return new Promise((res) => setTimeout(res, 0));
+}
+
+/**
+ * URL-routing fetch: POST /api/v3/token goes to `token()`, every other path goes
+ * to `data(authToken, url)`, keyed on the request's `x-auth-token` header.
+ */
+function routeFetch(handlers: {
+  token: () => unknown;
+  data?: (authToken: string, url: string) => unknown;
+}) {
+  mockFetch.mockImplementation(async (url: string, init: { headers: Record<string, string> }) => {
+    if (String(url).includes(TOKEN_PATH)) return handlers.token();
+    if (!handlers.data) throw new Error(`unexpected data fetch: ${url}`);
+    return handlers.data(init.headers['x-auth-token'], String(url));
+  });
+}
+
+/** Mint responses served in order; any extra mint gets an obviously wrong token. */
+function mintSequence(...tokens: string[]) {
+  return () => makeTokenResponse(tokens.shift() ?? 'unexpected-extra-mint');
+}
+
+function tokenPosts() {
+  return mockFetch.mock.calls.filter(([url]) => String(url).includes(TOKEN_PATH));
+}
+
+function dataFetches(): { url: string; authToken: string; body?: string }[] {
+  return mockFetch.mock.calls
+    .filter(([url]) => !String(url).includes(TOKEN_PATH))
+    .map(([url, init]) => ({
+      url: String(url),
+      authToken: init.headers['x-auth-token'],
+      body: init.body,
+    }));
+}
+
+function makeEmptyOkResponse() {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => undefined,
+    text: async () => '',
+    headers: { get: (_: string) => null },
+  };
+}
+
+/** Put `token` in the module cache through a real mint, then forget that mint's fetch and logs. */
+async function seedCachedToken(token: string) {
+  mockFetch.mockResolvedValueOnce(makeTokenResponse(token));
+  await expect(getAuthToken(CREDS.username, CREDS.password, CREDS.useQA)).resolves.toBe(token);
+  mockFetch.mockClear();
+  clearLogMocks();
+}
+
+function getCredsToken() {
+  return getAuthToken(CREDS.username, CREDS.password, CREDS.useQA);
+}
+
+function logEvents(mock: jest.Mock, category: string) {
+  return mock.mock.calls.filter(([c]) => c === category);
+}
+
+// ---------------------------------------------------------------------------
+// DD1.1 — a wave of concurrent auth failures shares one re-mint
+// ---------------------------------------------------------------------------
+
+describe('DD1.1: concurrent auth failures share a single re-mint', () => {
+  it('DD1.1.a: 15 concurrent apiGet 401s with the stale token make exactly 1 token POST and all resolve', async () => {
+    await seedCachedToken('stale');
+    const mint = deferred<unknown>();
+    routeFetch({
+      token: () => mint.promise,
+      data: (t) => (t === 'fresh' ? makeJsonOkResponse({ ok: true }) : makeJsonErrorResponse(401)),
+    });
+
+    const all = Promise.all(
+      Array.from({ length: 15 }, () =>
+        apiGet<{ ok: boolean }>('/test', {}, 'stale', false, CREDS),
+      ),
+    );
+    await flush(); // every caller has had its 401 and is waiting on the mint
+    mint.resolve(makeTokenResponse('fresh'));
+    const results = await all;
+
+    expect(results).toEqual(Array.from({ length: 15 }, () => ({ ok: true })));
+    expect(tokenPosts()).toHaveLength(1);
+    const fetches = dataFetches();
+    expect(fetches).toHaveLength(30);
+    expect(fetches.filter((f) => f.authToken === 'fresh')).toHaveLength(15);
+  });
+
+  it('DD1.1.b: apiPut mirror — 5 concurrent 401s share 1 mint and each retry re-sends its own body', async () => {
+    await seedCachedToken('stale');
+    const mint = deferred<unknown>();
+    routeFetch({
+      token: () => mint.promise,
+      data: (t) => (t === 'fresh' ? makeEmptyOkResponse() : makeJsonErrorResponse(401)),
+    });
+
+    const bodies = Array.from({ length: 5 }, (_, i) => ({ timecardId: i }));
+    const all = Promise.all(bodies.map((b) => apiPut('/put', b, 'stale', false, CREDS)));
+    await flush();
+    mint.resolve(makeTokenResponse('fresh'));
+    await all;
+
+    expect(tokenPosts()).toHaveLength(1);
+    const retries = dataFetches().filter((f) => f.authToken === 'fresh');
+    expect(retries.map((f) => f.body).sort()).toEqual(bodies.map((b) => JSON.stringify(b)).sort());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.2 — a late 401 with the old token never discards the fresh one
+// ---------------------------------------------------------------------------
+
+describe('DD1.2: interleaved renewal keeps the fresher token', () => {
+  it('DD1.2.a: B\'s late 401 with the stale token retries with A\'s fresh token, no second mint', async () => {
+    await seedCachedToken('stale');
+    const lateB = deferred<unknown>();
+    routeFetch({
+      token: mintSequence('fresh', 'fresh-2'),
+      data: (t, url) => {
+        if (t !== 'stale') return makeJsonOkResponse({ servedWith: t });
+        return url.endsWith('/b') ? lateB.promise : makeJsonErrorResponse(401);
+      },
+    });
+
+    // B's request leaves with the stale token; its 401 is held until A has renewed.
+    const b = apiGet<{ servedWith: string }>('/b', {}, 'stale', false, CREDS);
+    const a = await apiGet<{ servedWith: string }>('/a', {}, 'stale', false, CREDS);
+    expect(a).toEqual({ servedWith: 'fresh' });
+
+    lateB.resolve(makeJsonErrorResponse(401));
+    expect(await b).toEqual({ servedWith: 'fresh' });
+    expect(tokenPosts()).toHaveLength(1);
+
+    // The cache still holds A's token: the next getAuthToken makes 0 fetches.
+    const before = mockFetch.mock.calls.length;
+    await expect(getCredsToken()).resolves.toBe('fresh');
+    expect(mockFetch.mock.calls.length).toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.3 — invalidateIfCurrent only evicts the token it is given
+// ---------------------------------------------------------------------------
+
+describe('DD1.3: invalidateIfCurrent', () => {
+  it('DD1.3.a: a token other than the cached one is a no-op (next getAuthToken makes 0 fetches)', async () => {
+    await seedCachedToken('fresh');
+
+    invalidateIfCurrent('other');
+
+    await expect(getCredsToken()).resolves.toBe('fresh');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('DD1.3.b: the cached token is evicted (next getAuthToken mints once)', async () => {
+    await seedCachedToken('fresh');
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('fresh-2'));
+
+    invalidateIfCurrent('fresh');
+
+    await expect(getCredsToken()).resolves.toBe('fresh-2');
+    expect(tokenPosts()).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.4 — invalidateIfCurrent leaves an in-flight mint alone
+// ---------------------------------------------------------------------------
+
+describe('DD1.4: invalidateIfCurrent during an in-flight mint', () => {
+  it('DD1.4.a: a concurrent getAuthToken joins the pending mint, and that mint still fills the cache', async () => {
+    const mint = deferred<unknown>();
+    routeFetch({ token: () => mint.promise });
+
+    const first = getCredsToken();
+    invalidateIfCurrent('stale');
+    const second = getCredsToken();
+    mint.resolve(makeTokenResponse('tok'));
+
+    await expect(Promise.all([first, second])).resolves.toEqual(['tok', 'tok']);
+    expect(tokenPosts()).toHaveLength(1);
+    // The mint was still current (no generation bump), so the cache serves the next call.
+    await expect(getCredsToken()).resolves.toBe('tok');
+    expect(tokenPosts()).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.5 — a mint started before invalidateAuthToken() never fills the cache
+// ---------------------------------------------------------------------------
+
+describe('DD1.5: mint generation guard', () => {
+  it('DD1.5.a: env switch mid-mint — the caller gets its token, the next getAuthToken mints again', async () => {
+    const prodMint = deferred<unknown>();
+    mockFetch.mockReturnValueOnce(prodMint.promise);
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('qa-tok'));
+
+    const pending = getAuthToken('u', 'p', false);
+    invalidateAuthToken(); // env switch (app/modal.tsx)
+    prodMint.resolve(makeTokenResponse('prod-tok'));
+
+    await expect(pending).resolves.toBe('prod-tok');
+    await expect(getAuthToken('u', 'p', true)).resolves.toBe('qa-tok');
+    expect(tokenPosts()).toHaveLength(2);
+    expect(tokenPosts()[1][0]).toContain('api-qa.crossover.com');
+  });
+
+  it('DD1.5.b: a stale mint settling does not clear a newer in-flight mint (later callers join it)', async () => {
+    const oldMint = deferred<unknown>();
+    const newMint = deferred<unknown>();
+    routeFetch({ token: () => makeTokenResponse('unexpected-extra-mint') });
+    mockFetch.mockReturnValueOnce(oldMint.promise);
+    mockFetch.mockReturnValueOnce(newMint.promise);
+
+    const beforeReset = getCredsToken();
+    invalidateAuthToken(); // sign-out
+    const afterReset = getCredsToken();
+    oldMint.resolve(makeTokenResponse('old-tok'));
+    await expect(beforeReset).resolves.toBe('old-tok');
+
+    const late = getCredsToken();
+    newMint.resolve(makeTokenResponse('new-tok'));
+
+    await expect(Promise.all([afterReset, late])).resolves.toEqual(['new-tok', 'new-tok']);
+    expect(tokenPosts()).toHaveLength(2);
+    await expect(getCredsToken()).resolves.toBe('new-tok');
+    expect(tokenPosts()).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.6 — without creds, an auth-like response evicts its token (no retry)
+// ---------------------------------------------------------------------------
+
+describe('DD1.6: no-creds eviction', () => {
+  it('DD1.6.a: apiGet 401 → AuthError(401) after 1 data fetch, and the next getAuthToken mints', async () => {
+    await seedCachedToken('stale');
+    routeFetch({ token: mintSequence('fresh'), data: () => makeJsonErrorResponse(401) });
+
+    const err = await apiGet('/test', {}, 'stale', false).catch((e) => e);
+
+    expect(err).toBeInstanceOf(AuthError);
+    expect((err as AuthError).statusCode).toBe(401);
+    expect(dataFetches()).toHaveLength(1);
+    expect(tokenPosts()).toHaveLength(0);
+    await expect(getCredsToken()).resolves.toBe('fresh');
+    expect(tokenPosts()).toHaveLength(1);
+  });
+
+  it('DD1.6.b: apiGet HTML 500 → AuthError(AUTH_HTML_500) after 1 data fetch, and the next getAuthToken mints', async () => {
+    await seedCachedToken('stale');
+    routeFetch({ token: mintSequence('fresh'), data: () => makeHtml5xxResponse(500) });
+
+    const err = await apiGet('/test', {}, 'stale', false).catch((e) => e);
+
+    expect(err).toBeInstanceOf(AuthError);
+    expect((err as AuthError).errorCode).toBe('AUTH_HTML_500');
+    expect(dataFetches()).toHaveLength(1);
+    expect(tokenPosts()).toHaveLength(0);
+    await expect(getCredsToken()).resolves.toBe('fresh');
+    expect(tokenPosts()).toHaveLength(1);
+  });
+
+  it('DD1.6.c: apiPut 401 → AuthError(401) after 1 data fetch, and the next getAuthToken mints', async () => {
+    await seedCachedToken('stale');
+    routeFetch({ token: mintSequence('fresh'), data: () => makeJsonErrorResponse(401) });
+
+    const err = await apiPut('/put', { a: 1 }, 'stale', false).catch((e) => e);
+
+    expect(err).toBeInstanceOf(AuthError);
+    expect(dataFetches()).toHaveLength(1);
+    await expect(getCredsToken()).resolves.toBe('fresh');
+    expect(tokenPosts()).toHaveLength(1);
+  });
+
+  it('DD1.6.d: a 401 for a token that is no longer cached keeps the cached one (0 fetches next)', async () => {
+    await seedCachedToken('fresh');
+    routeFetch({ token: mintSequence('fresh-2'), data: () => makeJsonErrorResponse(401) });
+
+    await expect(apiGet('/test', {}, 'stale', false)).rejects.toBeInstanceOf(AuthError);
+
+    await expect(getCredsToken()).resolves.toBe('fresh');
+    expect(tokenPosts()).toHaveLength(0);
+  });
+
+  it('DD1.6.e: a non-auth failure (JSON 500) keeps the cached token', async () => {
+    await seedCachedToken('fresh');
+    routeFetch({ token: mintSequence('fresh-2'), data: () => makeJsonErrorResponse(500) });
+
+    await expect(apiGet('/test', {}, 'fresh', false)).rejects.toBeInstanceOf(ApiError);
+
+    await expect(getCredsToken()).resolves.toBe('fresh');
+    expect(tokenPosts()).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.7 — a 401 that persists after renewal (FR4.c contract, unchanged)
+// ---------------------------------------------------------------------------
+
+describe('DD1.7: 401 that persists with a fresh token', () => {
+  it('DD1.7.a: with creds, 401 → mint → 401 rejects with AuthError(401) after exactly 2 data fetches', async () => {
+    routeFetch({ token: mintSequence('fresh'), data: () => makeJsonErrorResponse(401) });
+
+    const err = await apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e);
+
+    expect(err).toBeInstanceOf(AuthError);
+    expect((err as AuthError).statusCode).toBe(401);
+    expect(dataFetches().map((f) => f.authToken)).toEqual(['stale', 'fresh']);
+    expect(tokenPosts()).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.8 — auth log events (src/lib/log.ts)
+// ---------------------------------------------------------------------------
+
+describe('DD1.8: auth log events', () => {
+  it('DD1.8.a: auth.token_minted fires once per successful getAuthToken mint — not on cache hits, joins, failed mints or mintAuthToken', async () => {
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('tok-1'));
+    await getCredsToken();
+    await getCredsToken(); // cache hit
+    expect(logEvents(mockLogInfo, 'auth.token_minted')).toEqual([['auth.token_minted', {}]]);
+
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('probe-tok'));
+    await mintAuthToken(CREDS.username, CREDS.password, CREDS.useQA);
+
+    invalidateAuthToken();
+    mockFetch.mockResolvedValueOnce(makeJsonErrorResponse(401));
+    await expect(getCredsToken()).rejects.toBeInstanceOf(AuthError);
+    expect(logEvents(mockLogInfo, 'auth.token_minted')).toHaveLength(1);
+
+    invalidateAuthToken();
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('tok-2'));
+    await Promise.all([getCredsToken(), getCredsToken(), getCredsToken()]);
+    expect(logEvents(mockLogInfo, 'auth.token_minted')).toEqual([
+      ['auth.token_minted', {}],
+      ['auth.token_minted', {}],
+    ]);
+  });
+
+  it('DD1.8.b: auth.token_retried { triggerStatusCode: 401 } fires once per apiGet retry, never without one', async () => {
+    routeFetch({
+      token: mintSequence('fresh'),
+      data: (t) => (t === 'fresh' ? makeJsonOkResponse({ ok: true }) : makeJsonErrorResponse(401)),
+    });
+
+    await expect(apiGet('/test', {}, 'stale', false)).rejects.toBeInstanceOf(AuthError);
+    expect(logEvents(mockLogWarn, 'auth.token_retried')).toHaveLength(0);
+
+    await apiGet('/test', {}, 'stale', false, CREDS);
+    expect(logEvents(mockLogWarn, 'auth.token_retried')).toEqual([
+      ['auth.token_retried', { triggerStatusCode: 401 }],
+    ]);
+  });
+
+  it.each([500, 503])(
+    'DD1.8.c: an HTML %i trigger logs auth.token_retried with that status',
+    async (status) => {
+      routeFetch({
+        token: mintSequence('fresh'),
+        data: (t) => (t === 'fresh' ? makeJsonOkResponse({ ok: true }) : makeHtml5xxResponse(status)),
+      });
+
+      await apiGet('/test', {}, 'stale', false, CREDS);
+
+      expect(logEvents(mockLogWarn, 'auth.token_retried')).toEqual([
+        ['auth.token_retried', { triggerStatusCode: status }],
+      ]);
+    },
+  );
+
+  it('DD1.8.d: apiPut retry logs auth.token_retried { triggerStatusCode: 401 }', async () => {
+    routeFetch({
+      token: mintSequence('fresh'),
+      data: (t) => (t === 'fresh' ? makeEmptyOkResponse() : makeJsonErrorResponse(401)),
+    });
+
+    await apiPut('/put', { a: 1 }, 'stale', false, CREDS);
+
+    expect(logEvents(mockLogWarn, 'auth.token_retried')).toEqual([
+      ['auth.token_retried', { triggerStatusCode: 401 }],
+    ]);
+  });
+
+  it('DD1.8.e: a concurrent wave logs 1 auth.token_minted and 1 auth.token_retried per caller', async () => {
+    await seedCachedToken('stale');
+    const mint = deferred<unknown>();
+    routeFetch({
+      token: () => mint.promise,
+      data: (t) => (t === 'fresh' ? makeJsonOkResponse({ ok: true }) : makeJsonErrorResponse(401)),
+    });
+
+    const all = Promise.all([1, 2, 3].map(() => apiGet('/test', {}, 'stale', false, CREDS)));
+    await flush();
+    mint.resolve(makeTokenResponse('fresh'));
+    await all;
+
+    expect(logEvents(mockLogInfo, 'auth.token_minted')).toHaveLength(1);
+    expect(logEvents(mockLogWarn, 'auth.token_retried')).toEqual(
+      Array.from({ length: 3 }, () => ['auth.token_retried', { triggerStatusCode: 401 }]),
+    );
+  });
+
+  it('DD1.8.f: no auth log call carries the token, username or password', async () => {
+    const secret = { username: 'jane.doe@example.com', password: 'hunter2-secret', useQA: false };
+    routeFetch({
+      token: mintSequence('tok-stale-0001', 'tok-fresh-0002'),
+      data: (t) =>
+        t === 'tok-fresh-0002' ? makeJsonOkResponse({ ok: true }) : makeJsonErrorResponse(401),
+    });
+
+    await getAuthToken(secret.username, secret.password, secret.useQA);
+    await apiGet('/test', {}, 'tok-stale-0001', false, secret);
+
+    const calls = [...mockLogInfo.mock.calls, ...mockLogWarn.mock.calls, ...mockLogError.mock.calls];
+    expect(calls.map(([category]) => category)).toEqual(
+      expect.arrayContaining(['auth.token_minted', 'auth.token_retried']),
+    );
+    const serialized = JSON.stringify(calls);
+    for (const value of ['tok-stale-0001', 'tok-fresh-0002', secret.username, secret.password]) {
+      expect(serialized).not.toContain(value);
+    }
   });
 });
