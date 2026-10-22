@@ -1,9 +1,17 @@
 // FR3, FR4, FR5: Centralized Crossover API client
 // Spec 04 (auth-resilience): in-memory token cache + Tomcat HTML 5xx -> AuthError.
-// durable-data 01-auth-renewal: single-flight renewal, the mint generation guard
-// and the failed-login latch.
+// durable-data 01-auth-renewal: single-flight renewal, the mint generation guard,
+// the failed-login latch and HTML 5xx after renewal -> ApiError.
 
-import { AuthError, NetworkError, ApiError, type ErrorEnvelope } from './errors';
+import {
+  AuthError,
+  NetworkError,
+  ApiError,
+  AUTH_HTML_500,
+  AUTH_LOGIN_LATCHED,
+  HTML_5XX_AFTER_RENEWAL,
+  type ErrorEnvelope,
+} from './errors';
 import { getApiBase } from '../store/config';
 import { log } from '../lib/log';
 
@@ -107,7 +115,7 @@ export async function getAuthToken(
   const fingerprint = fingerprintCreds(username, password, useQA);
   if (loginLatch && loginLatch.fingerprint === fingerprint && Date.now() < loginLatch.until) {
     throw new AuthError(loginLatch.statusCode, 'Login recently rejected', {
-      errorCode: 'AUTH_LOGIN_LATCHED',
+      errorCode: AUTH_LOGIN_LATCHED,
     });
   }
   const gen = authGeneration;
@@ -124,7 +132,7 @@ export async function getAuthToken(
       (err: unknown) => {
         if (
           err instanceof AuthError &&
-          err.errorCode !== 'AUTH_HTML_500' &&
+          err.errorCode !== AUTH_HTML_500 &&
           gen === authGeneration &&
           mintInFlight === p
         ) {
@@ -190,6 +198,11 @@ function getHeader(response: Response, name: string): string {
   return h.get(name) ?? '';
 }
 
+/** HTTP >= 500 with `content-type: text/html` (a Tomcat or load-balancer error page). */
+function isHtml5xx(response: Response): boolean {
+  return response.status >= 500 && getHeader(response, 'content-type').includes('text/html');
+}
+
 /**
  * Spec 04 — recognize "auth-like" responses that should trigger a retry-with-fresh-token:
  * - HTTP 401 (explicit auth failure)
@@ -200,12 +213,20 @@ function getHeader(response: Response, name: string): string {
  * needs an intact body for envelope parsing.
  */
 function shouldRetryAuth(response: Response): boolean {
-  if (response.status === 401) return true;
-  if (response.status >= 500) {
-    const ct = getHeader(response, 'content-type');
-    if (ct.includes('text/html')) return true;
+  return response.status === 401 || isHtml5xx(response);
+}
+
+/**
+ * durable-data 01-auth-renewal FR3 — a retried response that is still HTML 5xx
+ * came back for a token the token endpoint has just issued, so it is a server
+ * outage, not a bad token. Throw a retryable ApiError without reading the body.
+ */
+function throwIfHtml5xxAfterRenewal(response: Response): void {
+  if (isHtml5xx(response)) {
+    throw new ApiError(response.status, 'Server error after token renewal', {
+      errorCode: HTML_5XX_AFTER_RENEWAL,
+    });
   }
-  return false;
 }
 
 // Spec 03 (error-envelope) + Spec 04 (auth-resilience):
@@ -246,14 +267,11 @@ async function handleStatus(response: Response): Promise<never> {
   // (statusCode is 401 to satisfy the existing 401|403 type; real status lives
   // in serverText). AUTH_HTML_500 errorCode lets downstream code distinguish
   // this from a real 401.
-  if (response.status >= 500) {
-    const ct = getHeader(response, 'content-type');
-    if (ct.includes('text/html')) {
-      throw new AuthError(401, undefined, {
-        errorCode: 'AUTH_HTML_500',
-        text: `Token rejected — HTML 5xx response (status ${response.status})`,
-      });
-    }
+  if (isHtml5xx(response)) {
+    throw new AuthError(401, undefined, {
+      errorCode: AUTH_HTML_500,
+      text: `Token rejected — HTML 5xx response (status ${response.status})`,
+    });
   }
 
   throw new ApiError(response.status, undefined, envelope);
@@ -301,8 +319,9 @@ async function parseBody<T>(response: Response): Promise<T> {
  * Typed GET request. On an auth-like first response (401 or HTML 5xx) the
  * failed token is evicted with `invalidateIfCurrent`. When `creds` is provided,
  * a fresh token is then fetched via `getAuthToken` (concurrent failures share
- * one mint) and the request is retried exactly once. When `creds` is omitted:
- * one fetch, no retry; the next `getAuthToken` mints fresh.
+ * one mint) and the request is retried exactly once; a retried response that is
+ * still HTML 5xx throws `ApiError(HTML_5XX_AFTER_RENEWAL)`. When `creds` is
+ * omitted: one fetch, no retry; the next `getAuthToken` mints fresh.
  */
 export async function apiGet<T>(
   path: string,
@@ -332,6 +351,7 @@ export async function apiGet<T>(
       const fresh = await getAuthToken(creds.username, creds.password, creds.useQA);
       log.warn('auth.token_retried', { triggerStatusCode: response.status });
       response = await doFetch(fresh);
+      throwIfHtml5xxAfterRenewal(response);
     }
   }
 
@@ -377,6 +397,7 @@ export async function apiPut<T>(
       const fresh = await getAuthToken(creds.username, creds.password, creds.useQA);
       log.warn('auth.token_retried', { triggerStatusCode: response.status });
       response = await doFetch(fresh);
+      throwIfHtml5xxAfterRenewal(response);
     }
   }
 
