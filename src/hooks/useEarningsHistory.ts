@@ -14,6 +14,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useConfig } from './useConfig';
 import { loadCredentials } from '../store/config';
 import { getAuthToken, apiGet } from '../api/client';
+import { toAuthCreds } from '../api/authCreds';
 import type { Payment } from '../lib/payments';
 import { loadWeeklyHistory, mergeWeeklySnapshot, saveWeeklyHistory } from '../lib/weeklyHistory';
 
@@ -109,6 +110,7 @@ export function useEarningsHistory(
           { from, to },
           token,
           config.useQA,
+          toAuthCreds(creds, config.useQA),
         );
         if (Array.isArray(result)) return result;
       } catch {

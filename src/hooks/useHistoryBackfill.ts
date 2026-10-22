@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useConfig } from './useConfig';
 import { loadCredentials } from '../store/config';
 import { getAuthToken, apiGet } from '../api/client';
+import { toAuthCreds } from '../api/authCreds';
 import { countDiaryTags } from '../lib/ai';
 import {
   extractAppBreakdown,
@@ -184,6 +185,9 @@ async function runBackfill(
     return history; // Auth failure — return current history so overview still refreshes
   }
 
+  // One renewal creds object for every work-diary fetch below
+  const creds = toAuthCreds({ username, password }, useQA);
+
   let updated = [...history];
 
   // Process weeks sequentially (avoid API burst), days within each week in parallel
@@ -200,6 +204,7 @@ async function runBackfill(
           { assignmentId, date },
           token,
           useQA,
+          creds,
         )
       )
     );

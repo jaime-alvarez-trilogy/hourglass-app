@@ -12,6 +12,7 @@ import { useConfig } from './useConfig';
 import { useTeamRoster } from './useTeamRoster';
 import { loadCredentials } from '../store/config';
 import { getAuthToken } from '../api/client';
+import { toAuthCreds } from '../api/authCreds';
 import { fetchWorkDiary } from '../api/workDiary';
 import { fetchReportTimesheet } from '../api/team';
 import { countDiaryTags, aggregateAICache } from '../lib/ai';
@@ -147,6 +148,8 @@ export function buildTeamAggregateQueryFn(
     }
 
     const token = await getAuthToken(credentials.username, credentials.password, config.useQA);
+    // The manager's own creds: a renewal re-mints the manager's token, not a report's.
+    const creds = toAuthCreds(credentials, config.useQA);
 
     const today = todayOverride ?? todayUTC();
     const weekStartDate = getMondayOfWeekUTC(today);
@@ -167,7 +170,7 @@ export function buildTeamAggregateQueryFn(
             memberCache[date] = tagData;
           }
 
-          const timesheet = await fetchReportTimesheet(member, weekStartDate, token, config.useQA);
+          const timesheet = await fetchReportTimesheet(member, weekStartDate, token, config.useQA, creds);
           const hours = extractPaidHours(timesheet);
 
           const aiData = aggregateAICache(memberCache, today);

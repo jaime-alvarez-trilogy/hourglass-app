@@ -10,6 +10,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../api/client';
 import { getAuthToken } from '../api/client';
+import { toAuthCreds } from '../api/authCreds';
 import { loadCredentials } from '../store/config';
 import { useConfig } from './useConfig';
 import type { Payment } from '../lib/payments';
@@ -74,6 +75,7 @@ export function usePaymentHistory(numWeeks: number = 4): {
           { from, to },
           token,
           config.useQA,
+          toAuthCreds(creds, config.useQA),
         );
         if (Array.isArray(result)) return result;
       } catch {

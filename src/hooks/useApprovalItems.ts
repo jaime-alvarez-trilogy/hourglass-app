@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { loadConfig, loadCredentials } from '../store/config'
 import { getAuthToken } from '../api/client'
+import { toAuthCreds } from '../api/authCreds'
 import {
   fetchPendingManual,
   fetchPendingOvertime,
@@ -43,6 +44,8 @@ export async function fetchAllApprovalItems(): Promise<ApprovalItem[]> {
   if (!config || !config.isManager || !credentials) return []
 
   const token = await getAuthToken(credentials.username, credentials.password, config.useQA)
+  // One renewal creds object for all 6 fetches, built once like the token
+  const creds = toAuthCreds(credentials, config.useQA)
 
   const currentMonday = getWeekStartDate()
   const d1 = new Date(currentMonday + 'T12:00:00')
@@ -57,12 +60,12 @@ export async function fetchAllApprovalItems(): Promise<ApprovalItem[]> {
     rawManualPrev1, rawOvertimePrev1,
     rawManualPrev2, rawOvertimePrev2,
   ] = await Promise.all([
-    fetchPendingManual(token, config.useQA, currentMonday),
-    fetchPendingOvertime(token, config.useQA, currentMonday),
-    fetchPendingManual(token, config.useQA, prevMonday1),
-    fetchPendingOvertime(token, config.useQA, prevMonday1),
-    fetchPendingManual(token, config.useQA, prevMonday2),
-    fetchPendingOvertime(token, config.useQA, prevMonday2),
+    fetchPendingManual(token, config.useQA, currentMonday, creds),
+    fetchPendingOvertime(token, config.useQA, currentMonday, creds),
+    fetchPendingManual(token, config.useQA, prevMonday1, creds),
+    fetchPendingOvertime(token, config.useQA, prevMonday1, creds),
+    fetchPendingManual(token, config.useQA, prevMonday2, creds),
+    fetchPendingOvertime(token, config.useQA, prevMonday2, creds),
   ])
 
   const allItems: ApprovalItem[] = [
@@ -139,6 +142,7 @@ export function useApprovalItems(): {
 
     try {
       const token = await getAuthToken(credentials.username, credentials.password, config.useQA)
+      const creds = toAuthCreds(credentials, config.useQA)
 
       if (item.category === 'MANUAL') {
         const manualItem = item as ManualApprovalItem
@@ -147,10 +151,10 @@ export function useApprovalItems(): {
           setOptimisticItems(null)
           return
         }
-        await approveManual(token, config.useQA, config.userId, manualItem.timecardIds)
+        await approveManual(token, config.useQA, config.userId, manualItem.timecardIds, creds)
       } else {
         const overtimeItem = item as OvertimeApprovalItem
-        await approveOvertime(token, config.useQA, overtimeItem.overtimeId)
+        await approveOvertime(token, config.useQA, overtimeItem.overtimeId, creds)
       }
     } catch (err) {
       // Restore on failure
@@ -187,13 +191,14 @@ export function useApprovalItems(): {
 
     try {
       const token = await getAuthToken(credentials.username, credentials.password, config.useQA)
+      const creds = toAuthCreds(credentials, config.useQA)
 
       if (item.category === 'MANUAL') {
         const manualItem = item as ManualApprovalItem
-        await rejectManual(token, config.useQA, config.userId, manualItem.timecardIds, reason)
+        await rejectManual(token, config.useQA, config.userId, manualItem.timecardIds, reason, creds)
       } else {
         const overtimeItem = item as OvertimeApprovalItem
-        await rejectOvertime(token, config.useQA, overtimeItem.overtimeId, reason)
+        await rejectOvertime(token, config.useQA, overtimeItem.overtimeId, reason, creds)
       }
     } catch (err) {
       // Restore on failure

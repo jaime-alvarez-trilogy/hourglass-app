@@ -5,6 +5,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { getProfileDetail } from '../api/auth';
 import { getAuthToken } from '../api/client';
+import { toAuthCreds } from '../api/authCreds';
 import { loadConfig, loadCredentials, saveConfig } from '../store/config';
 import type { CrossoverConfig, Credentials } from '../types/config';
 
@@ -40,7 +41,11 @@ export async function runRoleRefresh(
       credentials.password,
       config.useQA,
     );
-    const detail = await getProfileDetail(token, config.useQA);
+    const detail = await getProfileDetail(
+      token,
+      config.useQA,
+      toAuthCreds(credentials, config.useQA),
+    );
     // Partial /detail: leave config untouched. Defaulting would persist
     // isManager: false or a team id of "undefined".
     if (!detail.avatarTypes || !detail.assignment?.team) return;

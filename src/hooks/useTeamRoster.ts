@@ -10,6 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useConfig } from './useConfig';
 import { loadCredentials } from '../store/config';
 import { getAuthToken } from '../api/client';
+import { toAuthCreds } from '../api/authCreds';
 import { fetchMyTeams, fetchTeamRoster } from '../api/team';
 import type { TeamMember } from '../types/api';
 
@@ -33,9 +34,10 @@ export function buildTeamRosterQueryFn(
       throw new Error('Missing credentials or config');
     }
     const token = await getAuthToken(credentials.username, credentials.password, config.useQA);
-    const teams = await fetchMyTeams(token, config.useQA);
+    const creds = toAuthCreds(credentials, config.useQA);
+    const teams = await fetchMyTeams(token, config.useQA, creds);
     const rosters = await Promise.all(
-      teams.map((team) => fetchTeamRoster(String(team.id), token, config.useQA)),
+      teams.map((team) => fetchTeamRoster(String(team.id), token, config.useQA, creds)),
     );
     return rosters.flat();
   };

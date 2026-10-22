@@ -7,6 +7,7 @@
 // Returns the first non-empty array response.
 
 import { apiGet } from './client';
+import type { AuthCreds } from './authCreds';
 import { AuthError } from './errors';
 import { getWeekStartDate } from '../lib/hours';
 import type { TimesheetResponse } from '../lib/hours';
@@ -19,11 +20,13 @@ function rethrowIfAuth(err: unknown): void {
 /**
  * Fetches the current week's timesheet, trying 3 endpoint parameter shapes in order and
  * returning the first non-empty response. Returns null if all strategies yield empty.
- * Rethrows AuthError immediately so the caller can re-onboard.
+ * Rethrows AuthError immediately so the caller can re-onboard. `creds` (forwarded to
+ * every strategy) lets the client renew an expired token and retry once.
  */
 export async function fetchTimesheet(
   config: CrossoverConfig,
-  token: string
+  token: string,
+  creds?: AuthCreds
 ): Promise<TimesheetResponse | null> {
   // Use UTC-safe Monday date for the payments-API-compatible week boundary
   const date = getWeekStartDate(true);
@@ -40,7 +43,8 @@ export async function fetchTimesheet(
       '/api/timetracking/timesheets',
       { ...baseParams, managerId: config.managerId, teamId: config.primaryTeamId },
       token,
-      config.useQA
+      config.useQA,
+      creds
     );
     if (Array.isArray(strategy1) && strategy1.length > 0) return strategy1[0];
   } catch (e) { rethrowIfAuth(e); /* fall through to next strategy */ }
@@ -51,7 +55,8 @@ export async function fetchTimesheet(
       '/api/timetracking/timesheets',
       { ...baseParams, managerId: config.managerId },
       token,
-      config.useQA
+      config.useQA,
+      creds
     );
     if (Array.isArray(strategy2) && strategy2.length > 0) return strategy2[0];
   } catch (e) { rethrowIfAuth(e); /* fall through to next strategy */ }
@@ -62,7 +67,8 @@ export async function fetchTimesheet(
       '/api/timetracking/timesheets',
       baseParams,
       token,
-      config.useQA
+      config.useQA,
+      creds
     );
     if (Array.isArray(strategy3) && strategy3.length > 0) return strategy3[0];
   } catch (e) { rethrowIfAuth(e); /* all strategies exhausted */ }

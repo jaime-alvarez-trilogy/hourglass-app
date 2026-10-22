@@ -10,6 +10,7 @@ import { loadCredentials, getApiBase } from '../store/config';
 import type { CrossoverConfig } from '../types/config';
 import type { TimesheetResponse } from '../lib/hours';
 import { getAuthToken } from '../api/client';
+import { toAuthCreds } from '../api/authCreds';
 
 /**
  * React Query wrapper around fetchTimesheet for the current week's data.
@@ -27,7 +28,7 @@ export function useTimesheet(config: CrossoverConfig | null) {
       const creds = await loadCredentials();
       if (!creds) throw new Error('No credentials');
       const token = await getAuthToken(creds.username, creds.password, config.useQA);
-      return fetchTimesheet(config, token);
+      return fetchTimesheet(config, token, toAuthCreds(creds, config.useQA));
     },
     enabled: !!config,
     staleTime: 15 * 60 * 1000, // 15 minutes

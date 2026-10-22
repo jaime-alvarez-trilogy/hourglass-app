@@ -2,6 +2,7 @@
 // Uses assignmentId (NOT userId) — critical distinction per MEMORY.md
 
 import { getAuthToken, apiGet } from './client';
+import { toAuthCreds } from './authCreds';
 import type { Credentials } from '../types/config';
 import type { WorkDiarySlot } from '../types/api';
 
@@ -10,7 +11,7 @@ import type { WorkDiarySlot } from '../types/api';
  *
  * @param assignmentId  assignment.id from config (e.g. "79996") — NOT userId
  * @param date          YYYY-MM-DD format (local timezone, no conversion)
- * @param credentials   username + password for Basic auth token fetch
+ * @param credentials   username + password for Basic auth token fetch (and renewal)
  * @param useQA         toggles between QA and production base URL
  */
 export async function fetchWorkDiary(
@@ -25,5 +26,6 @@ export async function fetchWorkDiary(
     { assignmentId, date },
     token,
     useQA,
+    toAuthCreds(credentials, useQA),
   );
 }

@@ -5,8 +5,12 @@
 // FR1 (02-team-aggregate-hook): fetchReportTimesheet — cross-user timesheet
 // fetch for one direct report. Single request, no fallback strategies (see
 // function doc for why this cannot reuse fetchTimesheet's 3-strategy shape).
+//
+// durable-data 01-auth-renewal FR4: each takes an optional trailing `creds` and
+// forwards it to apiGet, so an expired token is renewed and retried once.
 
 import { apiGet } from './client';
+import type { AuthCreds } from './authCreds';
 import type { RawTeam, RawTeamAssignment, TeamMember } from '../types/api';
 import type { TimesheetResponse } from '../lib/hours';
 
@@ -24,12 +28,14 @@ interface AssignmentsPage {
 export async function fetchMyTeams(
   token: string,
   useQA: boolean,
+  creds?: AuthCreds,
 ): Promise<RawTeam[]> {
   const response = await apiGet<RawTeam[] | null>(
     '/api/v2/teams',
     { status: 'ACTIVE' },
     token,
     useQA,
+    creds,
   );
   return Array.isArray(response) ? response : [];
 }
@@ -55,12 +61,14 @@ export async function fetchTeamRoster(
   teamId: string,
   token: string,
   useQA: boolean,
+  creds?: AuthCreds,
 ): Promise<TeamMember[]> {
   const response = await apiGet<AssignmentsPage | RawTeamAssignment[] | null>(
     '/api/v2/teams/assignments',
     { teamId, status: 'ACTIVE' },
     token,
     useQA,
+    creds,
   );
 
   let rows: RawTeamAssignment[];
@@ -100,6 +108,7 @@ export async function fetchReportTimesheet(
   weekStartDate: string,
   token: string,
   useQA: boolean,
+  creds?: AuthCreds,
 ): Promise<TimesheetResponse | null> {
   const response = await apiGet<TimesheetResponse[]>(
     '/api/timetracking/timesheets',
@@ -112,6 +121,7 @@ export async function fetchReportTimesheet(
     },
     token,
     useQA,
+    creds,
   );
   return Array.isArray(response) && response.length > 0 ? response[0] : null;
 }

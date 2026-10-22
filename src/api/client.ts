@@ -12,8 +12,11 @@ import {
   HTML_5XX_AFTER_RENEWAL,
   type ErrorEnvelope,
 } from './errors';
+import type { AuthCreds } from './authCreds';
 import { getApiBase } from '../store/config';
 import { log } from '../lib/log';
+
+export type { AuthCreds } from './authCreds';
 
 // ---------------------------------------------------------------------------
 // Spec 04 — token cache module state
@@ -328,7 +331,7 @@ export async function apiGet<T>(
   params: Record<string, string>,
   token: string,
   useQA: boolean,
-  creds?: { username: string; password: string; useQA: boolean },
+  creds?: AuthCreds,
 ): Promise<T> {
   const url = buildUrl(getApiBase(useQA), path, params);
 
@@ -369,7 +372,7 @@ export async function apiPut<T>(
   body: unknown,
   token: string,
   useQA: boolean,
-  creds?: { username: string; password: string; useQA: boolean },
+  creds?: AuthCreds,
 ): Promise<T> {
   const base = getApiBase(useQA);
   const serialized = JSON.stringify(body);
