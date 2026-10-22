@@ -1,8 +1,10 @@
 // FR3, FR4, FR5: Centralized Crossover API client
 // Spec 04 (auth-resilience): in-memory token cache + Tomcat HTML 5xx -> AuthError.
+// durable-data 01-auth-renewal: single-flight renewal and the mint generation guard.
 
 import { AuthError, NetworkError, ApiError, type ErrorEnvelope } from './errors';
 import { getApiBase } from '../store/config';
+import { log } from '../lib/log';
 
 // ---------------------------------------------------------------------------
 // Spec 04 — token cache module state
@@ -13,6 +15,9 @@ import { getApiBase } from '../store/config';
 
 let cachedToken: string | null = null;
 let mintInFlight: Promise<string> | null = null;
+// Bumped by every hard reset (`invalidateAuthToken`). A mint that started under an
+// older generation must not write its token into the cache.
+let authGeneration = 0;
 
 /**
  * Mint a fresh auth token by POSTing credentials to /api/v3/token.
@@ -57,10 +62,14 @@ export async function mintAuthToken(
 
 /**
  * Get an auth token. Returns the cached token if one exists, otherwise mints
- * a fresh one. Concurrent first-callers share a single in-flight mint.
+ * a fresh one. Concurrent callers share a single in-flight mint.
  *
- * To force a re-mint (e.g. after a 401 retry), call `invalidateAuthToken()`
- * first.
+ * To force a re-mint after a rejected token, call `invalidateIfCurrent(token)`
+ * first (the apiGet/apiPut retry does this).
+ *
+ * Generation guard: the mint writes `cachedToken` only if no hard reset
+ * (`invalidateAuthToken`) ran while it was in flight. Its callers still receive
+ * the token either way.
  */
 export async function getAuthToken(
   username: string,
@@ -69,20 +78,36 @@ export async function getAuthToken(
 ): Promise<string> {
   if (cachedToken) return cachedToken;
   if (mintInFlight) return mintInFlight;
-  mintInFlight = mintAuthToken(username, password, useQA)
+  const gen = authGeneration;
+  const p: Promise<string> = mintAuthToken(username, password, useQA)
     .then((t) => {
-      cachedToken = t;
+      if (gen === authGeneration && mintInFlight === p) cachedToken = t;
+      log.info('auth.token_minted', {});
       return t;
     })
     .finally(() => {
-      mintInFlight = null;
+      if (mintInFlight === p) mintInFlight = null;
     });
-  return mintInFlight;
+  mintInFlight = p;
+  return p;
 }
 
 /**
- * Wipe the in-memory token cache and any pending in-flight mint.
- * Idempotent and safe to call when no token is cached.
+ * Evict `token` from the cache only if it is still the cached one. Leaves any
+ * in-flight mint alone, so concurrent auth failures share one re-mint and a
+ * late 401 carrying an old token never discards a fresher one.
+ */
+export function invalidateIfCurrent(token: string): void {
+  if (cachedToken === token) cachedToken = null;
+}
+
+/**
+ * Hard reset: wipe the in-memory token cache and any pending in-flight mint,
+ * and bump the mint generation so a mint already in flight cannot repopulate
+ * the cache. Idempotent and safe to call when no token is cached.
+ *
+ * Only for sign-out, env switch and not-contributor. A rejected token on a
+ * data request goes through `invalidateIfCurrent` instead.
  *
  * MUST be called from `app/modal.tsx`:
  * - after `clearAll()` in `handleSignOut` (so the cache does not survive sign-out)
@@ -92,6 +117,7 @@ export async function getAuthToken(
 export function invalidateAuthToken(): void {
   cachedToken = null;
   mintInFlight = null;
+  authGeneration++;
 }
 
 // ---------------------------------------------------------------------------
@@ -221,10 +247,11 @@ async function parseBody<T>(response: Response): Promise<T> {
 // ---------------------------------------------------------------------------
 
 /**
- * Typed GET request. When `creds` is provided and the first response is
- * auth-like (401 or HTML 5xx), the cache is invalidated, a fresh token is
- * minted, and the request is retried exactly once. When `creds` is omitted,
- * behavior is identical to today: one fetch, no retry.
+ * Typed GET request. On an auth-like first response (401 or HTML 5xx) the
+ * failed token is evicted with `invalidateIfCurrent`. When `creds` is provided,
+ * a fresh token is then fetched via `getAuthToken` (concurrent failures share
+ * one mint) and the request is retried exactly once. When `creds` is omitted:
+ * one fetch, no retry; the next `getAuthToken` mints fresh.
  */
 export async function apiGet<T>(
   path: string,
@@ -248,10 +275,13 @@ export async function apiGet<T>(
 
   let response = await doFetch(token);
 
-  if (creds && shouldRetryAuth(response)) {
-    invalidateAuthToken();
-    const fresh = await getAuthToken(creds.username, creds.password, creds.useQA);
-    response = await doFetch(fresh);
+  if (shouldRetryAuth(response)) {
+    invalidateIfCurrent(token);
+    if (creds) {
+      const fresh = await getAuthToken(creds.username, creds.password, creds.useQA);
+      log.warn('auth.token_retried', { triggerStatusCode: response.status });
+      response = await doFetch(fresh);
+    }
   }
 
   if (!response.ok) await handleStatus(response);
@@ -290,10 +320,13 @@ export async function apiPut<T>(
 
   let response = await doFetch(token);
 
-  if (creds && shouldRetryAuth(response)) {
-    invalidateAuthToken();
-    const fresh = await getAuthToken(creds.username, creds.password, creds.useQA);
-    response = await doFetch(fresh);
+  if (shouldRetryAuth(response)) {
+    invalidateIfCurrent(token);
+    if (creds) {
+      const fresh = await getAuthToken(creds.username, creds.password, creds.useQA);
+      log.warn('auth.token_retried', { triggerStatusCode: response.status });
+      response = await doFetch(fresh);
+    }
   }
 
   if (!response.ok) await handleStatus(response);
