@@ -53,9 +53,11 @@ function fingerprintCreds(username: string, password: string, useQA: boolean): s
 /**
  * Mint a fresh auth token by POSTing credentials to /api/v3/token.
  *
- * Cache-bypass: this helper never reads from or writes to `cachedToken`.
- * Use it for one-off mints (e.g. `probeEnvironments`) where you want to
- * verify creds without affecting the session cache.
+ * Cache-bypass: this helper never reads from or writes to `cachedToken`, and
+ * it neither consults nor sets the failed-login latch (`loginLatch`). Use it
+ * for one-off mints (e.g. `probeEnvironments`) where you want to verify creds
+ * without affecting the session cache, so a wrong password during onboarding
+ * is never latched or blocked by an earlier latch.
  *
  * Side effects: a single `fetch` to the token endpoint. Throws on non-2xx.
  */
@@ -319,12 +321,35 @@ async function parseBody<T>(response: Response): Promise<T> {
 // ---------------------------------------------------------------------------
 
 /**
- * Typed GET request. On an auth-like first response (401 or HTML 5xx) the
- * failed token is evicted with `invalidateIfCurrent`. When `creds` is provided,
- * a fresh token is then fetched via `getAuthToken` (concurrent failures share
- * one mint) and the request is retried exactly once; a retried response that is
- * still HTML 5xx throws `ApiError(HTML_5XX_AFTER_RENEWAL)`. When `creds` is
- * omitted: one fetch, no retry; the next `getAuthToken` mints fresh.
+ * Shared renew-and-retry for apiGet/apiPut. On an auth-like first response (401
+ * or HTML 5xx) the failed token is evicted with `invalidateIfCurrent`, with or
+ * without `creds`. When `creds` is provided, a fresh token is fetched via
+ * `getAuthToken` (concurrent failures share one mint), `auth.token_retried` is
+ * logged and `doFetch` runs exactly once more; a retried response that is still
+ * HTML 5xx throws `ApiError(HTML_5XX_AFTER_RENEWAL)`. Returns the last response.
+ */
+async function fetchWithRenewal(
+  doFetch: (t: string) => Promise<Response>,
+  token: string,
+  creds?: AuthCreds,
+): Promise<Response> {
+  const response = await doFetch(token);
+  if (!shouldRetryAuth(response)) return response;
+  invalidateIfCurrent(token);
+  if (!creds) return response;
+  const fresh = await getAuthToken(creds.username, creds.password, creds.useQA);
+  log.warn('auth.token_retried', { triggerStatusCode: response.status });
+  const retried = await doFetch(fresh);
+  throwIfHtml5xxAfterRenewal(retried);
+  return retried;
+}
+
+/**
+ * Typed GET request. Renewal via `fetchWithRenewal`: on an auth-like first
+ * response (401 or HTML 5xx) the failed token is always evicted. With `creds`,
+ * the request is retried exactly once on a fresh token, and a retried response
+ * that is still HTML 5xx throws `ApiError(HTML_5XX_AFTER_RENEWAL)`. Without
+ * `creds`: one fetch, no retry; the next `getAuthToken` mints fresh.
  */
 export async function apiGet<T>(
   path: string,
@@ -346,26 +371,17 @@ export async function apiGet<T>(
     }
   }
 
-  let response = await doFetch(token);
-
-  if (shouldRetryAuth(response)) {
-    invalidateIfCurrent(token);
-    if (creds) {
-      const fresh = await getAuthToken(creds.username, creds.password, creds.useQA);
-      log.warn('auth.token_retried', { triggerStatusCode: response.status });
-      response = await doFetch(fresh);
-      throwIfHtml5xxAfterRenewal(response);
-    }
-  }
-
+  const response = await fetchWithRenewal(doFetch, token, creds);
   if (!response.ok) await handleStatus(response);
   return parseBody<T>(response);
 }
 
 /**
- * Typed PUT request. Same retry contract as `apiGet`: opt-in via optional
- * `creds` arg. The retry re-serializes `body` so the second fetch carries
- * the same payload (Response.body is single-shot per request).
+ * Typed PUT request. Same renewal contract as `apiGet` (`fetchWithRenewal`): the
+ * failed token is evicted even without `creds`; only the renew-and-retry needs
+ * `creds`, and a retried response that is still HTML 5xx throws
+ * `ApiError(HTML_5XX_AFTER_RENEWAL)`. Both fetches send the same pre-serialized
+ * `body` string (a request body is single-shot, so each fetch gets its own).
  */
 export async function apiPut<T>(
   path: string,
@@ -392,18 +408,7 @@ export async function apiPut<T>(
     }
   }
 
-  let response = await doFetch(token);
-
-  if (shouldRetryAuth(response)) {
-    invalidateIfCurrent(token);
-    if (creds) {
-      const fresh = await getAuthToken(creds.username, creds.password, creds.useQA);
-      log.warn('auth.token_retried', { triggerStatusCode: response.status });
-      response = await doFetch(fresh);
-      throwIfHtml5xxAfterRenewal(response);
-    }
-  }
-
+  const response = await fetchWithRenewal(doFetch, token, creds);
   if (!response.ok) await handleStatus(response);
   return parseBody<T>(response);
 }
