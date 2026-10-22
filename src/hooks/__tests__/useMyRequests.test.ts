@@ -1478,8 +1478,9 @@ describe('useMyRequests — DD2.55 hook wiring (useQuery mocked)', () => {
     jest.clearAllMocks();
   });
 
-  /** Calls the hook as a plain function, with `config` and a TanStack query result. */
-  function callHook(
+  /** Calls the hook as a plain function, with `config` and a TanStack query result. Named as a
+   *  hook so rules-of-hooks accepts the direct `useMyRequests()` call (no render is involved). */
+  function useMyRequestsWith(
     config: CrossoverConfig | null,
     query: { data?: MyRequestsData; error?: unknown; isLoading?: boolean } = {},
   ) {
@@ -1496,19 +1497,19 @@ describe('useMyRequests — DD2.55 hook wiring (useQuery mocked)', () => {
   }
 
   it("queries ['myRequests', assignmentId] with staleTime 60 s, enabled only with an assignment (preserved)", () => {
-    const { options } = callHook(DD_CONFIG);
+    const { options } = useMyRequestsWith(DD_CONFIG);
     expect(options.queryKey).toEqual(['myRequests', '79996']);
     expect(options.staleTime).toBe(60_000);
     expect(options.enabled).toBe(true);
     expect(typeof options.queryFn).toBe('function');
 
-    const signedOut = callHook(null).options;
+    const signedOut = useMyRequestsWith(null).options;
     expect(signedOut.queryKey).toEqual(['myRequests', null]);
     expect(signedOut.enabled).toBe(false);
   });
 
   it('retries outages only, at most twice: a real 401 and missing credentials are never retried', () => {
-    const { options } = callHook(DD_CONFIG);
+    const { options } = useMyRequestsWith(DD_CONFIG);
 
     expect(typeof options.retry).toBe('function');
     expect(options.retry(0, new NetworkError('offline'))).toBe(true);
@@ -1526,7 +1527,7 @@ describe('useMyRequests — DD2.55 hook wiring (useQuery mocked)', () => {
       updatedAt: NOON,
       ownerKey: PROD_KEY,
     };
-    const { result, refetch } = callHook(DD_CONFIG, { data });
+    const { result, refetch } = useMyRequestsWith(DD_CONFIG, { data });
     const { refetch: returnedRefetch, ...rest } = result;
 
     expect(rest).toEqual({
@@ -1540,7 +1541,7 @@ describe('useMyRequests — DD2.55 hook wiring (useQuery mocked)', () => {
   });
 
   it('while loading with no data → isLoading true, no entries, staleDates [] and updatedAt null', () => {
-    const { result } = callHook(DD_CONFIG, { isLoading: true });
+    const { result } = useMyRequestsWith(DD_CONFIG, { isLoading: true });
 
     expect(result.isLoading).toBe(true);
     expect(result.entries).toEqual([]);
@@ -1550,13 +1551,13 @@ describe('useMyRequests — DD2.55 hook wiring (useQuery mocked)', () => {
   });
 
   it('hides a view stamped for the other environment (a prod view under a QA config)', () => {
-    const { result } = callHook(QA_CONFIG, { data: view([TUE_REQ], PROD_KEY) });
+    const { result } = useMyRequestsWith(QA_CONFIG, { data: view([TUE_REQ], PROD_KEY) });
 
     expect(result.entries).toEqual([]);
   });
 
   it('a thrown AuthError(401) surfaces as auth while the kept view stays on screen', () => {
-    const { result } = callHook(DD_CONFIG, { data: view([TUE_REQ], PROD_KEY), error: new AuthError(401) });
+    const { result } = useMyRequestsWith(DD_CONFIG, { data: view([TUE_REQ], PROD_KEY), error: new AuthError(401) });
 
     expect(result.error).toBe('auth');
     expect(result.entries).toEqual([TUE_REQ]);
