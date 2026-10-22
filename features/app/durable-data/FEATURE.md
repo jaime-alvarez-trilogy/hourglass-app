@@ -235,7 +235,7 @@ Specs run **sequentially in this one worktree**, in numeric order. Each one can 
 
 | Date | Spec | Description |
 |------|------|-------------|
-| 2026-10-22 | [01-auth-renewal](specs/01-auth-renewal/spec-research.md) | Research: single-flight token renewal, failed-login latch, creds wired everywhere |
+| 2026-10-22 | [01-auth-renewal](specs/01-auth-renewal/spec.md) | Spec: single-flight token renewal, failed-login latch, creds wired everywhere |
 | 2026-10-22 | [02-requests-store](specs/02-requests-store/spec-research.md) | Research: per-day requests store, refresh planner, concurrency limit |
 | 2026-10-22 | [03-keep-last-good](specs/03-keep-last-good/spec-research.md) | Research: failures never become zeros/empties outside My Requests |
 | 2026-10-22 | [04-requests-history-ui](specs/04-requests-history-ui/spec-research.md) | Research: Older section, freshness note, forced pull-to-refresh |
