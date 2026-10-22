@@ -45,7 +45,7 @@ POST /api/v3/token
 Authorization: Basic base64(username:password)
 ```
 
-**Response:** the body is *either* a plain string `"userId:secret"` *or* JSON `{"token":"userId:secret"}`. Client code (`src/api/client.ts:32-38`) reads as text and tries to parse as JSON; if parse fails, treats text as the raw token.
+**Response:** the body is *either* a plain string `"userId:secret"` *or* JSON `{"token":"userId:secret"}`. Client code (`src/api/client.ts:84-91`) reads as text and tries to parse as JSON; if parse fails, treats text as the raw token.
 
 **Token format:** `userId:secret` where:
 - `userId` is the **login/profile ID** (e.g. `1190137`) — used by the server to identify the requester
@@ -53,15 +53,25 @@ Authorization: Basic base64(username:password)
 
 **Critical:** the `userId` in the token is **not** the ID used for timesheet or work diary queries. See §3.
 
-### Per-request token (no caching)
+### Token cache and renewal
 
-`getAuthToken` is called fresh **before every API request** (`src/api/client.ts:7-39`). There is no in-memory token cache, no expiry tracking, no refresh-on-401 logic. Each `apiGet`/`apiPut` triggers a `POST /api/v3/token` first.
+The token is held in module memory only (`cachedToken`, `src/api/client.ts:28`). It is never persisted, so every cold start mints again. The token TTL is still unknown (§15.F1), so renewal is reactive: no timer expires a token.
 
-- **Pro:** simple; never have to handle expired-token edge cases.
-- **Con:** 2× request volume; double the latency on every call.
-- **Con:** a failure to mint a token cascades into a request failure.
+- **Cache and single-flight mint.** `getAuthToken(username, password, useQA)` (`client.ts:111-153`) checks, in order: the cached token → an in-flight mint (`mintInFlight`, joined by every concurrent caller) → the failed-login latch → a new `POST /api/v3/token`. One mint serves every caller that arrives while it is in flight.
+- **Renewal on 401 / HTML 5xx.** On an auth-like first response (HTTP 401, or `>= 500` with `content-type: text/html`, see §15.F3), `apiGet`/`apiPut` call `invalidateIfCurrent(token)` (`client.ts:160-162`). It clears the cache only if the cache still holds the token that failed, and it never touches the in-flight mint. So N concurrent 401s share one re-mint, and a late 401 carrying an old token never discards a fresher one.
+  - **With `creds`** (an `AuthCreds` built by `toAuthCreds(credentials, config.useQA)`, `src/api/authCreds.ts`): get a token from `getAuthToken`, then retry the request **once**. Every production call now passes `creds`; the static jest guard `src/__tests__/api/creds-wiring.test.ts` fails if one does not.
+  - **Without `creds`:** one fetch, no retry. The failed token is still evicted, so the next `getAuthToken` mints.
+  - Callers that reuse one token for several calls (timesheet strategies 2-3, the history backfill loop, the 6 approval fetches) get one extra 401 per remaining call after a renewal, but no extra mint: `invalidateIfCurrent` is then a no-op and `getAuthToken` returns the fresh cached token.
+- **HTML 5xx after renewal.** If the retried response is still HTML 5xx, the token was just issued, so this is a server outage, not a bad token. The client throws `ApiError(status, 'Server error after token renewal', {errorCode: HTML_5XX_AFTER_RENEWAL})` without reading the body. It is retryable (§13). Any other non-OK retried response goes through `handleStatus` as usual; a 401 that persists with a fresh token becomes `AuthError(401)`.
+- **Failed-login latch (`LOGIN_LATCH_MS` = 60 s).** When the token endpoint rejects the credentials (an `AuthError` other than `AUTH_HTML_500`, i.e. a 401/403), `getAuthToken` refuses the same env + username + password for 60 s. It throws `AuthError(statusCode, 'Login recently rejected', {errorCode: AUTH_LOGIN_LATCHED})` without a network call. This stops a changed password from turning into a storm of failed logins (Crossover's lockout policy is undocumented).
+  - The latch is keyed by a non-reversible FNV-1a 32-bit fingerprint of `env + username + password`. The password and the `Basic` string are never stored.
+  - A different password or environment is not blocked. The only exception is a fingerprint collision, which delays it by at most 60 s.
+  - A `NetworkError`, `ApiError` or `AUTH_HTML_500` mint failure never latches: the credentials were not judged.
+  - A successful mint or `invalidateAuthToken()` clears the latch. `mintAuthToken` neither reads nor writes it.
+- **Generation guard.** `invalidateAuthToken()` (`client.ts:178-183`) is the hard reset, called only on sign-out, env switch and not-contributor (`app/modal.tsx:93,132`, `app/(auth)/not-contributor.tsx:28`). It clears the cache, the in-flight mint and the latch, and bumps `authGeneration`. A mint that started before the reset still resolves for its own callers, but it writes neither `cachedToken` nor the latch. So a pre-sign-out token cannot repopulate the cache, and a stale rejection cannot block the next sign-in.
+- **Bypass.** `mintAuthToken` (exported) always mints and never touches the cache or the latch. Onboarding's `probeEnvironments` uses it.
 
-Refactoring this to cache tokens would require knowing the token TTL — currently unknown. Phase B verification should observe whether the same `secret` works across multiple calls and for how long.
+Log events (`src/lib/log.ts`): `auth.token_minted` (info, `{}`), `auth.token_retried` (warn, `{triggerStatusCode}`), `auth.login_latched` (warn, `{statusCode}`). No token, username or password is logged.
 
 ### Credentials persistence
 
@@ -704,16 +714,39 @@ All client requests can throw three classes (`src/api/errors.ts`):
 | Class | When |
 |---|---|
 | `NetworkError` | `fetch()` itself throws (offline, DNS, timeout) |
-| `AuthError` | HTTP 401 or 403 |
-| `ApiError` | Any other non-2xx (400, 422, 500, etc.) — `.statusCode` carries the number |
+| `AuthError` | HTTP 401 or 403, a first-response Tomcat HTML 5xx (`AUTH_HTML_500`), or a latched login (`AUTH_LOGIN_LATCHED`). `.statusCode` is `401 \| 403` |
+| `ApiError` | Any other non-2xx (400, 422, 500, etc.), including HTML 5xx after renewal (`HTML_5XX_AFTER_RENEWAL`) — `.statusCode` carries the number |
 
-**Mapping:** `src/api/client.ts:42-52` — `handleStatus(status)` throws AuthError on 401/403, ApiError otherwise.
+**Mapping:** `handleStatus(response)` (`src/api/client.ts:240-281`) reads the body once for the envelope, then:
+- 401/403 → `AuthError(status)`;
+- HTML 5xx (`>= 500` with `content-type: text/html`) on the **first** response → `AuthError(401, …, {errorCode: AUTH_HTML_500})`. Crossover answers a bad or expired token with a Tomcat 500 page (§15.F3), so this keeps the AuthError-driven re-onboarding working for callers without creds. The real status is in `serverText`;
+- anything else → `ApiError(status)`.
 
-**Empty response bodies:** PUT endpoints (`/approved`, `/rejected`, overtime approval/rejection) return empty body on 200. Naïve `response.json()` would throw — `apiPut` reads as text first and returns `undefined` for empty bodies (`src/api/client.ts:97-101`, fixed in commit `1adca60`).
+With creds, an auth-like first response is renewed and retried before `handleStatus` sees it (§2). A retried response that is still HTML 5xx throws `ApiError(HTML_5XX_AFTER_RENEWAL)` directly.
+
+**Error codes.** Server envelopes carry `CROS-XXXX` codes (§15.F4) in `.errorCode`. The client adds four synthetic codes, exported as constants from `src/api/errors.ts`:
+
+| Code | Thrown as | Meaning | `isRetryableError` |
+|---|---|---|---|
+| `AUTH_HTML_500` | `AuthError(401)` | First-response HTML 5xx: most likely a bad or expired token. Callers without creds see it; with creds it triggers the renewal retry instead | `true` |
+| `AUTH_LOGIN_LATCHED` | `AuthError(401 \| 403)` | `getAuthToken` refused locally, with no fetch: the same credentials were rejected less than `LOGIN_LATCH_MS` (60 s) ago | `false` |
+| `NO_CREDENTIALS` | `AuthError` | A config exists but `loadCredentials()` returned null. Defined here; query functions start throwing it in durable-data spec 02 | `false` |
+| `HTML_5XX_AFTER_RENEWAL` | `ApiError(5xx)` | Still HTML 5xx after a freshly minted token: a server outage, not an auth failure. The body is not read | `true` |
+
+**Empty response bodies:** PUT endpoints (`/approved`, `/rejected`, overtime approval/rejection) return empty body on 200. Naïve `response.json()` would throw — `apiGet`/`apiPut` read as text first and return `undefined` for empty bodies (`parseBody`, `src/api/client.ts:307-315`, fixed in commit `1adca60`).
 
 **Error envelopes** from the server: not consistently documented. Some 4xx return JSON `{message: "..."}`, others return plain text, others empty body. We never display the raw server message to the user — only generic copy keyed off the error class.
 
-**No retry policy** anywhere. A flaky network → user sees a failed action. This is a known gap; design for retry-with-pending is documented but not implemented.
+**Retry policy.** Two layers:
+
+1. **In-client single retry.** `apiGet`/`apiPut` retry exactly once, and only on an auth-like first response (401 or HTML 5xx), after renewing the token (§2). Every production call passes creds, so every request gets it. There is no in-client retry for a `NetworkError` or any other status.
+2. **Query-level predicate** (`src/api/errors.ts`), for TanStack's `retry` option:
+   - `isRetryableError(err)`: `AuthError` → only `AUTH_HTML_500`; `NetworkError` → `true`; `ApiError` → `statusCode >= 500`, `408` or `429`; anything else → `true`. A real 401/403, a latched login and missing credentials are never retried.
+   - `shouldRetryQuery(failureCount, err)` = `failureCount < MAX_QUERY_RETRIES (2) && isRetryableError(err)`. TanStack v5 passes `failureCount` starting at 0.
+
+   Hooks still use a numeric `retry` (`1` or `2`; the `app/_layout.tsx:73` default is `2`). Durable-data specs 02, 03 and 05 switch them to the predicate. Until then, a retry of a latched login costs 0 fetches because the latch answers it locally.
+
+Approve/reject actions are not retried beyond the in-client renewal retry: a `NetworkError` still surfaces as a failed action, and `useApprovalItems` restores the list and refetches.
 
 ---
 
@@ -735,7 +768,7 @@ All client requests can throw three classes (`src/api/errors.ts`):
 
 8. **PUT empty-body bug history.** Crossover's approve/reject endpoints return literal empty bodies on success. Before commit `1adca60`, `response.json()` would throw "Unexpected end of input" — surfaced to the user as a JSON parse error during approval. The fix (read as text, parse only if non-empty) is now in `src/api/client.ts`.
 
-9. **Token has no in-memory cache.** Every API call mints a fresh token. We don't know the token TTL — possibly we could keep one for the duration of a session and only re-fetch on 401. Phase B should verify.
+9. **Token TTL is unknown.** The token is cached in memory and renewed only reactively, on a 401 or HTML 5xx (§2). Nothing refreshes it proactively, so the first request after expiry always costs one failed call plus one re-mint.
 
 10. **`amount` vs `paidHours × hourlyRate` mismatch.** We display `paidHours × hourlyRate` for internal consistency. Crossover's actual paid amount (`amount`) may differ slightly due to rounding or special-case adjustments. UI never shows `amount` directly.
 

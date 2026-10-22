@@ -350,15 +350,16 @@ Pure async functions. No React, no hooks.
 
 | File | Exports |
 |---|---|
-| `client.ts` | `getAuthToken` (cached), `mintAuthToken` (cache-bypass), `invalidateAuthToken`, `apiGet<T>`, `apiPut<T>` |
+| `client.ts` | `getAuthToken` (cached, latched), `mintAuthToken` (cache-bypass), `invalidateIfCurrent`, `invalidateAuthToken`, `LOGIN_LATCH_MS`, `apiGet<T>`, `apiPut<T>`, `type AuthCreds` |
+| `authCreds.ts` | `AuthCreds`, `toAuthCreds` (pure; production code imports `toAuthCreds` from here, not from `client.ts`) |
 | `auth.ts` | `getProfileDetail`, `fetchAndBuildConfig`, `probeEnvironments` |
 | `timesheet.ts` | `fetchTimesheet` (3-strategy fallback) |
 | `approvals.ts` | `fetchPendingManual`, `fetchPendingOvertime`, `approveManual`, `rejectManual` |
 | `payments.ts` | `fetchPaymentHistory` |
 | `workDiary.ts` | `fetchWorkDiary` |
-| `errors.ts` | `AuthError`, `NetworkError`, `ApiError` |
+| `errors.ts` | `AuthError`, `NetworkError`, `ApiError`, the `AUTH_HTML_500` / `AUTH_LOGIN_LATCHED` / `NO_CREDENTIALS` / `HTML_5XX_AFTER_RENEWAL` codes, `isRetryableError`, `shouldRetryQuery`, `MAX_QUERY_RETRIES` |
 
-Auth token is **cached in module-scope memory** (`client.ts`, spec 04). First call mints via `POST /api/v3/token`; subsequent calls reuse the cached `userId:secret` string. Concurrent first-callers share a single in-flight mint (request dedup). `invalidateAuthToken()` wipes the cache; called from `app/modal.tsx` on sign-out and env switch. `apiGet`/`apiPut` accept an optional fifth `creds` arg that opts into single-retry on auth failure (401 or Tomcat HTML 5xx). `mintAuthToken` (exported) bypasses the cache for `probeEnvironments`. Empty response bodies (approve/reject PUTs) parsed as `undefined`. Base URL switched via `getApiBase(useQA)` from `src/store/config.ts`.
+Auth token is **cached in module-scope memory** (`client.ts`, spec 04). First call mints via `POST /api/v3/token`; subsequent calls reuse the cached `userId:secret` string. Concurrent first-callers share a single in-flight mint (request dedup). `invalidateAuthToken()` is the hard reset (cache, in-flight mint, latch, generation); called from `app/modal.tsx` on sign-out and env switch and from `app/(auth)/not-contributor.tsx`. `apiGet`/`apiPut` take a fifth `creds?: AuthCreds` arg for a single renew-and-retry on auth failure (401 or Tomcat HTML 5xx); every production call passes it (§8.5). `mintAuthToken` (exported) bypasses the cache for `probeEnvironments`. Empty response bodies (approve/reject PUTs) parsed as `undefined`. Base URL switched via `getApiBase(useQA)` from `src/store/config.ts`.
 
 ### 6.4 `src/hooks/` (21 files)
 
@@ -511,9 +512,17 @@ Not a TODO list — a catalog of things to remember when touching these subsyste
 - **Mitigated** by spec `07-notification-lifecycle`, **broadened** by `09-orphan-sweep-migration`. On every `scheduleAll` mount, `sweepOrphanNotifications` calls `getAllScheduledNotificationsAsync()` and cancels **any** identifier not in `EXPECTED_IDENTIFIERS` (any prefix — `getAllScheduledNotificationsAsync` only returns this app's notifications). A reinstall, an AsyncStorage wipe, or a leftover build-9 random-id orphan is now self-healing on the next foreground.
 - **Residual risk**: any new scheduled notification introduced by a future spec must add its identifier to `EXPECTED_IDENTIFIERS` in the same PR, or the sweep will cancel it on next mount. Documented in `src/lib/scheduleLock.ts` JSDoc and `src/notifications/README.md` invariant 5.
 
-### 8.5 ~~Auth token refetched every request~~ (resolved by spec 04)
+### 8.5 ~~Auth token refetched every request~~ (resolved by spec 04; renewal wired by durable-data 01)
 
-Resolved 2026-05-28 by `04-auth-resilience` (resilience-fixes). `getAuthToken` (`src/api/client.ts:64`) now serves a module-scope `cachedToken`; concurrent first callers share a single in-flight mint via `mintInFlight`. `mintAuthToken` (exported) bypasses the cache for `probeEnvironments`. `invalidateAuthToken` is called from `app/modal.tsx` on sign-out (`handleSignOut` after `clearAll`) and env switch (`handleSwitchEnvironment` before `fetchAndBuildConfig`). `handleStatus` now recognizes Tomcat HTML 5xx (`content-type: text/html` on any `>= 500` response) as `AuthError(401, AUTH_HTML_500)` so the existing re-onboarding flow fires for expired tokens (the original CROSSOVER_API §15.F3 gap). Opt-in retry on `apiGet`/`apiPut` via optional fifth `creds` arg.
+Resolved 2026-05-28 by `04-auth-resilience` (resilience-fixes). `getAuthToken` (`src/api/client.ts:111`) now serves a module-scope `cachedToken`; concurrent first callers share a single in-flight mint via `mintInFlight`. `mintAuthToken` (exported) bypasses the cache for `probeEnvironments`. `handleStatus` recognizes Tomcat HTML 5xx (`content-type: text/html` on any `>= 500` response) as `AuthError(401, AUTH_HTML_500)` so the existing re-onboarding flow fires for expired tokens (the original CROSSOVER_API §15.F3 gap).
+
+Spec 04 built the renew-and-retry but wired no caller, so a cached token that expired stayed dead until the next cold start or sign-out. `01-auth-renewal` (durable-data, 2026-10-22) turned it on everywhere. Full lifecycle: CROSSOVER_API §2 "Token cache and renewal"; error codes and retry predicates: CROSSOVER_API §13.
+
+- **Wired at every call site.** Every API wrapper except `fetchWorkDiary` (which already takes `credentials`) takes a trailing `creds?: AuthCreds` and forwards it as the last `apiGet`/`apiPut` argument. Every production caller (hooks, `src/lib/crossoverData.ts`, `fetchAndBuildConfig`, `fetchWorkDiary`) builds it with `toAuthCreds` from `src/api/authCreds.ts` (in hooks, `toAuthCreds(credentials, config.useQA)`). That module is pure, so the many tests that factory-mock `src/api/client` still get a real `toAuthCreds`. The static guard `src/__tests__/api/creds-wiring.test.ts` fails if a production call to `apiGet`, `apiPut` or a wrapper omits creds.
+- **Single-flight renewal.** On a 401 or HTML 5xx, `apiGet`/`apiPut` call `invalidateIfCurrent(token)`, which clears the cache only if it still holds the failed token and never touches the in-flight mint. Then they get a token from `getAuthToken` and retry once. N concurrent 401s share one re-mint. A retried response that is still HTML 5xx becomes a retryable `ApiError(HTML_5XX_AFTER_RENEWAL)`, not "Authentication error".
+- **Failed-login latch.** A token-endpoint 401/403 latches a non-reversible FNV-1a fingerprint of env + username + password for `LOGIN_LATCH_MS` (60 s). Until then `getAuthToken` with the same credentials throws `AuthError(AUTH_LOGIN_LATCHED)` without a network call, so a password changed on the server cannot cause a storm of failed logins. Network, `ApiError` and `AUTH_HTML_500` mint failures never latch. A successful mint clears it. `mintAuthToken` ignores it.
+- **Generation guard.** `invalidateAuthToken()` is the hard reset, called only on sign-out (`handleSignOut` after `clearAll`), env switch (`handleSwitchEnvironment` before `fetchAndBuildConfig`) and not-contributor (`app/(auth)/not-contributor.tsx:28`). It clears the cache, the in-flight mint and the latch, and bumps `authGeneration`. A mint that started before the reset still resolves for its callers but writes neither the cache nor the latch.
+- **Residual risk.** The token TTL is still unknown, so renewal is reactive only. Callers that reuse one token across several calls (timesheet strategies, the history backfill loop, the 6 approval fetches) pay one extra 401 per remaining call after a renewal, with no extra mint. Hooks keep their numeric `retry` until durable-data specs 02/03/05 switch them to `isRetryableError` / `shouldRetryQuery`.
 
 ### 8.6 Two `components/` and two `hooks/` directories
 
