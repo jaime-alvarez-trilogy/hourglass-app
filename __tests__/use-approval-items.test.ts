@@ -1,5 +1,6 @@
 // FR3: useApprovalItems hook
 // FR1 (01-manager-history): three-week parallel fetch tests appended at bottom
+// durable-data 01-auth-renewal FR4: every approvals call carries renewal creds
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -72,6 +73,9 @@ const CONTRIBUTOR_CONFIG: CrossoverConfig = {
   ...MANAGER_CONFIG,
   isManager: false,
 };
+
+// loadCredentials() + MANAGER_CONFIG.useQA, as toAuthCreds builds them for the API wrappers.
+const CREDS_WITH_ENV = { username: 'user@test.com', password: 'pass', useQA: false };
 
 const MANUAL_ITEM: ManualApprovalItem = {
   id: 'mt-1-2',
@@ -190,7 +194,8 @@ describe('FR3: approveItem MANUAL', () => {
       'mock-token',
       false,
       MANAGER_CONFIG.userId, // approverId = config.userId
-      MANUAL_ITEM.timecardIds
+      MANUAL_ITEM.timecardIds,
+      CREDS_WITH_ENV
     );
   });
 
@@ -218,7 +223,8 @@ describe('FR3: approveItem OVERTIME', () => {
     expect(mockApproveOvertime).toHaveBeenCalledWith(
       'mock-token',
       false,
-      OVERTIME_ITEM.overtimeId
+      OVERTIME_ITEM.overtimeId,
+      CREDS_WITH_ENV
     );
   });
 
@@ -248,7 +254,8 @@ describe('FR3: rejectItem MANUAL', () => {
       false,
       MANAGER_CONFIG.userId,
       MANUAL_ITEM.timecardIds,
-      'Not valid'
+      'Not valid',
+      CREDS_WITH_ENV
     );
   });
 
@@ -276,7 +283,8 @@ describe('FR3: rejectItem OVERTIME', () => {
       'mock-token',
       false,
       OVERTIME_ITEM.overtimeId,
-      'Budget exceeded'
+      'Budget exceeded',
+      CREDS_WITH_ENV
     );
   });
 });
@@ -553,5 +561,51 @@ describe('FR1: fetchAllApprovalItems — edge cases', () => {
     const items = await fetchAllApprovalItems();
     expect(items).toEqual([]);
     expect(mockFetchManual).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// DD1 FR4 (durable-data 01-auth-renewal): the 6 pending fetches carry creds, so
+// an expired token is renewed once and each fetch retried instead of the whole
+// queue failing. One creds object per run (built once, like the token).
+// =============================================================================
+
+describe('DD1 FR4: fetchAllApprovalItems — pending fetches carry creds', () => {
+  beforeEach(() => {
+    mockFetchManual.mockReset();
+    mockFetchOvertime.mockReset();
+    mockLoadConfig.mockResolvedValue(MANAGER_CONFIG);
+    mockLoadCreds.mockResolvedValue({ username: 'user@test.com', password: 'pass' });
+    (getAuthToken as jest.Mock).mockResolvedValue('mock-token');
+    mockFetchManual.mockResolvedValue([]);
+    mockFetchOvertime.mockResolvedValue([]);
+  });
+
+  it('DD1_FR4_all_6_pending_fetches_carry_one_creds_object', async () => {
+    const { currentMonday, prevMonday1, prevMonday2 } = computeThreeWeeks();
+
+    await fetchAllApprovalItems();
+
+    const calls = [...mockFetchManual.mock.calls, ...mockFetchOvertime.mock.calls];
+    expect(calls).toHaveLength(6);
+    for (const week of [currentMonday, prevMonday1, prevMonday2]) {
+      expect(mockFetchManual).toHaveBeenCalledWith('mock-token', false, week, CREDS_WITH_ENV);
+      expect(mockFetchOvertime).toHaveBeenCalledWith('mock-token', false, week, CREDS_WITH_ENV);
+    }
+    expect(new Set(calls.map((c: any[]) => c[3])).size).toBe(1);
+  });
+
+  it('DD1_FR4_QA_config_puts_useQA_true_in_the_creds', async () => {
+    mockLoadConfig.mockResolvedValue({ ...MANAGER_CONFIG, useQA: true });
+
+    await fetchAllApprovalItems();
+
+    const credsArgs = [...mockFetchManual.mock.calls, ...mockFetchOvertime.mock.calls].map(
+      (c: any[]) => c[3],
+    );
+    expect(credsArgs).toHaveLength(6);
+    for (const creds of credsArgs) {
+      expect(creds).toEqual({ ...CREDS_WITH_ENV, useQA: true });
+    }
   });
 });

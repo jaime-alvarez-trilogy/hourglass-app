@@ -31,6 +31,9 @@ const THREE_DAYS_AGO = new Date(MONDAY.getTime() - 3 * 24 * 60 * 60 * 1000).toIS
 const EXACTLY_SEVEN_DAYS = new Date(MONDAY.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
 const MOCK_CREDS = { username: 'user@test.com', password: 'pass' };
+// durable-data 01-auth-renewal FR4: MOCK_CREDS + config.useQA, the renewal creds
+// getProfileDetail must receive.
+const CREDS_WITH_ENV = { ...MOCK_CREDS, useQA: false };
 const MOCK_TOKEN = 'auth-token';
 
 const makeConfig = (overrides: Partial<CrossoverConfig> = {}): CrossoverConfig => ({
@@ -128,7 +131,20 @@ describe('FR10: runRoleRefresh action', () => {
     expect(mockGetProfileDetail).toHaveBeenCalledWith(
       MOCK_TOKEN, // must be the exact token returned by getAuthToken
       config.useQA,
+      CREDS_WITH_ENV,
     );
+  });
+
+  it('DD1 FR4: a QA config puts useQA true in the renewal creds', async () => {
+    mockGetProfileDetail.mockResolvedValueOnce(makeDetailResponse());
+    const config = makeConfig({ useQA: true });
+
+    await runRoleRefresh(queryClient, config, MOCK_CREDS);
+
+    expect(mockGetProfileDetail).toHaveBeenCalledWith(MOCK_TOKEN, true, {
+      ...MOCK_CREDS,
+      useQA: true,
+    });
   });
 
   it('updates isManager from fresh detail response', async () => {

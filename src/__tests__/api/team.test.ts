@@ -4,6 +4,10 @@
 // FR1 (02-team-aggregate-hook): Tests for fetchReportTimesheet, extending this
 // file per spec.md's "Files to Create/Modify" table — written BEFORE
 // fetchReportTimesheet exists in src/api/team.ts.
+//
+// durable-data 01-auth-renewal FR4: each function takes an optional trailing
+// creds and always forwards it as the last apiGet argument (an explicit
+// trailing undefined without it), so the client can renew an expired token.
 
 import { fetchMyTeams, fetchTeamRoster, fetchReportTimesheet } from '../../api/team';
 import { AuthError, NetworkError } from '../../api/errors';
@@ -21,6 +25,7 @@ import { apiGet } from '../../api/client';
 const mockApiGet = apiGet as jest.Mock;
 
 const MOCK_TOKEN = '2374000:token123';
+const CREDS = { username: 'manager@example.com', password: 'pass123', useQA: false };
 
 beforeEach(() => {
   jest.resetAllMocks();
@@ -110,7 +115,21 @@ describe('FR2: fetchMyTeams', () => {
       { status: 'ACTIVE' },
       MOCK_TOKEN,
       false,
+      undefined,
     );
+  });
+
+  it('DD1 FR4: forwards the given creds object as the last apiGet argument', async () => {
+    mockApiGet.mockResolvedValueOnce([]);
+    await fetchMyTeams(MOCK_TOKEN, false, CREDS);
+    expect(mockApiGet).toHaveBeenCalledWith(
+      '/api/v2/teams',
+      { status: 'ACTIVE' },
+      MOCK_TOKEN,
+      false,
+      CREDS,
+    );
+    expect(mockApiGet.mock.calls[0][4]).toBe(CREDS);
   });
 
   it('passes useQA=true through to apiGet when requested', async () => {
@@ -121,6 +140,7 @@ describe('FR2: fetchMyTeams', () => {
       { status: 'ACTIVE' },
       MOCK_TOKEN,
       true,
+      undefined,
     );
   });
 
@@ -206,7 +226,21 @@ describe('FR3: fetchTeamRoster', () => {
       { teamId: '2374', status: 'ACTIVE' },
       MOCK_TOKEN,
       false,
+      undefined,
     );
+  });
+
+  it('DD1 FR4: forwards the given creds object as the last apiGet argument', async () => {
+    mockApiGet.mockResolvedValueOnce({ content: [] });
+    await fetchTeamRoster('2374', MOCK_TOKEN, false, CREDS);
+    expect(mockApiGet).toHaveBeenCalledWith(
+      '/api/v2/teams/assignments',
+      { teamId: '2374', status: 'ACTIVE' },
+      MOCK_TOKEN,
+      false,
+      CREDS,
+    );
+    expect(mockApiGet.mock.calls[0][4]).toBe(CREDS);
   });
 
   it('passes useQA=true through to apiGet when requested', async () => {
@@ -217,6 +251,7 @@ describe('FR3: fetchTeamRoster', () => {
       { teamId: '2374', status: 'ACTIVE' },
       MOCK_TOKEN,
       true,
+      undefined,
     );
   });
 
@@ -497,6 +532,7 @@ describe('FR1 (02-team-aggregate-hook): fetchReportTimesheet', () => {
       },
       MOCK_TOKEN,
       false,
+      undefined,
     );
   });
 
@@ -508,6 +544,7 @@ describe('FR1 (02-team-aggregate-hook): fetchReportTimesheet', () => {
       expect.anything(),
       MOCK_TOKEN,
       false,
+      undefined,
     );
   });
 
@@ -519,7 +556,22 @@ describe('FR1 (02-team-aggregate-hook): fetchReportTimesheet', () => {
       expect.anything(),
       MOCK_TOKEN,
       true,
+      undefined,
     );
+  });
+
+  it('DD1 FR4: forwards the given creds object (the manager\'s own) as the last apiGet argument', async () => {
+    mockApiGet.mockResolvedValueOnce([]);
+    await fetchReportTimesheet(MEMBER, WEEK_START, MOCK_TOKEN, false, CREDS);
+    expect(mockApiGet).toHaveBeenCalledTimes(1);
+    expect(mockApiGet).toHaveBeenCalledWith(
+      '/api/timetracking/timesheets',
+      expect.objectContaining({ userId: MEMBER.candidateId }),
+      MOCK_TOKEN,
+      false,
+      CREDS,
+    );
+    expect(mockApiGet.mock.calls[0][4]).toBe(CREDS);
   });
 
   it('returns the first array item when the API responds with a populated array', async () => {

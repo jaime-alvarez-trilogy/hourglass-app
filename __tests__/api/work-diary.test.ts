@@ -95,6 +95,7 @@ describe('FR6: fetchWorkDiary', () => {
       expect.any(Object),
       MOCK_TOKEN,
       false,
+      { username: 'user@example.com', password: 'secret', useQA: false },
     );
   });
 
@@ -129,6 +130,7 @@ describe('FR6: fetchWorkDiary', () => {
       expect.any(Object),
       MOCK_TOKEN,
       true,
+      { username: 'user@example.com', password: 'secret', useQA: true },
     );
   });
 
@@ -157,5 +159,21 @@ describe('FR6: fetchWorkDiary', () => {
     mockApiGet.mockResolvedValueOnce([]);
     const result = await fetchWorkDiary('79996', '2026-03-04', CREDENTIALS, false);
     expect(result).toEqual([]);
+  });
+});
+
+// durable-data 01-auth-renewal FR4: fetchWorkDiary keeps its signature and builds the
+// creds itself, so every caller (useAIData, useTeamAggregateData, fetchFreshData,
+// useMyRequests) can renew an expired token without passing anything new.
+describe('DD1 FR4: fetchWorkDiary passes renewal creds to apiGet', () => {
+  it('passes {username, password, useQA} as the 5th apiGet argument', async () => {
+    await fetchWorkDiary('79996', '2026-03-09', { username: 'u', password: 'p' }, false);
+    expect(mockApiGet).toHaveBeenCalledWith(
+      '/api/timetracking/workdiaries',
+      { assignmentId: '79996', date: '2026-03-09' },
+      MOCK_TOKEN,
+      false,
+      { username: 'u', password: 'p', useQA: false },
+    );
   });
 });

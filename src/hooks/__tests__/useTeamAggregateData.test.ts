@@ -47,6 +47,9 @@ const mockFetchReportTimesheet = fetchReportTimesheet as jest.MockedFunction<typ
 const mockLogError = log.error as jest.Mock;
 
 const CREDENTIALS = { username: 'manager@example.com', password: 'pass123' };
+// durable-data 01-auth-renewal FR4: the manager's own creds + env, so a report's
+// timesheet fetch can renew the manager's token.
+const CREDS_WITH_ENV = { ...CREDENTIALS, useQA: false };
 const TOKEN = '2374000:token123';
 
 const CONFIG: CrossoverConfig = {
@@ -188,7 +191,7 @@ describe('useTeamAggregateData — buildTeamAggregateQueryFn (query logic)', () 
       expect(mockFetchWorkDiary).toHaveBeenCalledTimes(1);
       expect(mockFetchWorkDiary).toHaveBeenCalledWith('1', '2026-07-27', CREDENTIALS, false);
       expect(mockFetchReportTimesheet).toHaveBeenCalledTimes(1);
-      expect(mockFetchReportTimesheet).toHaveBeenCalledWith(member, '2026-07-27', TOKEN, false);
+      expect(mockFetchReportTimesheet).toHaveBeenCalledWith(member, '2026-07-27', TOKEN, false, CREDS_WITH_ENV);
     });
 
     it('fetches one work-diary request per day across Mon-Wed when today is Wednesday', async () => {
@@ -207,7 +210,7 @@ describe('useTeamAggregateData — buildTeamAggregateQueryFn (query logic)', () 
       // Timesheet must be anchored to the week's Monday, not "today" — on a
       // non-Monday today these differ, so this catches a bug that passes
       // `today` straight through instead of the computed weekStartDate.
-      expect(mockFetchReportTimesheet).toHaveBeenCalledWith(member, '2026-07-27', TOKEN, false);
+      expect(mockFetchReportTimesheet).toHaveBeenCalledWith(member, '2026-07-27', TOKEN, false, CREDS_WITH_ENV);
     });
 
     it('fetches multiple reports concurrently, not serially', async () => {

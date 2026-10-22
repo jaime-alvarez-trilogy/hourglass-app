@@ -35,6 +35,8 @@ const mockFetchTeamRoster = fetchTeamRoster as jest.MockedFunction<typeof fetchT
 
 const CREDENTIALS = { username: 'manager@example.com', password: 'pass123' };
 const CONFIG = { useQA: false };
+// durable-data 01-auth-renewal FR4: renewal creds passed to every team request.
+const CREDS_WITH_ENV = { ...CREDENTIALS, useQA: false };
 const TOKEN = '2374000:token123';
 
 function makeMember(overrides: Partial<TeamMember> = {}): TeamMember {
@@ -109,9 +111,23 @@ describe('useTeamRoster — buildTeamRosterQueryFn (query logic)', () => {
 
     expect(mockGetAuthToken).toHaveBeenCalledTimes(1);
     expect(mockFetchTeamRoster).toHaveBeenCalledTimes(2);
-    expect(mockFetchTeamRoster).toHaveBeenCalledWith('2374', TOKEN, false);
-    expect(mockFetchTeamRoster).toHaveBeenCalledWith('5000', TOKEN, false);
+    expect(mockFetchTeamRoster).toHaveBeenCalledWith('2374', TOKEN, false, CREDS_WITH_ENV);
+    expect(mockFetchTeamRoster).toHaveBeenCalledWith('5000', TOKEN, false, CREDS_WITH_ENV);
     expect(result).toHaveLength(2);
+  });
+
+  it('DD1 FR4: fetchMyTeams and every fetchTeamRoster share one renewal creds object', async () => {
+    mockLoadCredentials.mockResolvedValue(CREDENTIALS);
+    mockGetAuthToken.mockResolvedValue(TOKEN);
+    mockFetchMyTeams.mockResolvedValue([{ id: 2374, name: 'Team A' }, { id: 5000, name: 'Team B' }]);
+    mockFetchTeamRoster.mockResolvedValue([]);
+
+    await buildTeamRosterQueryFn(CONFIG)();
+
+    expect(mockFetchMyTeams).toHaveBeenCalledWith(TOKEN, false, CREDS_WITH_ENV);
+    const creds = mockFetchMyTeams.mock.calls[0][2];
+    expect(mockFetchTeamRoster.mock.calls[0][3]).toBe(creds);
+    expect(mockFetchTeamRoster.mock.calls[1][3]).toBe(creds);
   });
 
   it('flattens rosters from multiple teams into a single array', async () => {

@@ -1,6 +1,7 @@
 // FR5: fetchAndBuildConfig + extractConfigFromDetail (src/api/auth.ts)
 // 05-onboarding-defense FR2/FR3/FR4: defensive parsing + NotContributorError
-import { fetchAndBuildConfig } from '../src/api/auth';
+// durable-data 01-auth-renewal FR4: every onboarding request carries renewal creds
+import { fetchAndBuildConfig, getProfileDetail } from '../src/api/auth';
 import { ApiError, AuthError, NetworkError, NotContributorError } from '../src/api/errors';
 import * as client from '../src/api/client';
 
@@ -34,6 +35,8 @@ const makeDetail = (overrides: Record<string, unknown> = {}) => ({
 });
 
 const MOCK_TOKEN = 'token123';
+// What fetchAndBuildConfig('user@test.com', 'pass', false) must pass as apiGet's 5th arg.
+const CREDS_WITH_ENV = { username: 'user@test.com', password: 'pass', useQA: false };
 const MOCK_PAYMENTS = [{ amount: 2000, paidHours: 40, currency: 'USD' }];
 // Detail with salary:0 to trigger payments-path tests
 const makeDetailNoSalary = (overrides: Record<string, unknown> = {}) =>
@@ -163,6 +166,7 @@ describe('FR5: fetchAndBuildConfig — happy path', () => {
       {},
       MOCK_TOKEN,
       false,
+      { username: 'user@test.com', password: 'pass', useQA: false },
     );
   });
 
@@ -510,5 +514,83 @@ describe('05-onboarding-defense FR4: NotContributorError terminal state', () => 
       .mockRejectedValueOnce(new ApiError(500))
       .mockRejectedValueOnce(new ApiError(500));
     await expect(fetchAndBuildConfig('u', 'p', false)).rejects.toThrow();
+  });
+});
+
+// ============================================================================
+// durable-data 01-auth-renewal FR4: creds on every onboarding request.
+// fetchAndBuildConfig builds toAuthCreds({ username, password }, useQA) once and
+// passes it to /detail, the /assignments fallback and the payments lookup, so a
+// token that expires mid-onboarding is renewed instead of failing setup.
+// ============================================================================
+
+describe('DD1 FR4: fetchAndBuildConfig passes renewal creds on every request', () => {
+  it('contributor path: /detail and the payments call carry the creds', async () => {
+    mockApiGet.mockImplementationOnce(async () => makeDetailNoSalary()); // salary 0 → payments
+    await fetchAndBuildConfig('user@test.com', 'pass', false);
+
+    expect(mockApiGet.mock.calls.map((args) => args[0])).toEqual([
+      '/api/identity/users/current/detail',
+      '/api/v3/users/current/payments',
+    ]);
+    expect(mockApiGet.mock.calls[0][4]).toEqual(CREDS_WITH_ENV);
+    expect(mockApiGet.mock.calls[1][4]).toEqual(CREDS_WITH_ENV);
+  });
+
+  it('pure-manager path: /detail, the /assignments fallback and payments share one creds object', async () => {
+    mockApiGet
+      .mockResolvedValueOnce(PURE_MANAGER_DETAIL) // /detail → no assignment
+      .mockResolvedValueOnce(POPULATED_PAGE); // /assignments; hourlyRate 0 → payments
+    await fetchAndBuildConfig('user@test.com', 'pass', false);
+
+    expect(mockApiGet.mock.calls.map((args) => args[0])).toEqual([
+      '/api/identity/users/current/detail',
+      '/api/v2/teams/assignments',
+      '/api/v3/users/current/payments',
+    ]);
+    const [detailCreds, assignmentsCreds, paymentsCreds] = mockApiGet.mock.calls.map(
+      (args) => args[4],
+    );
+    expect(detailCreds).toEqual(CREDS_WITH_ENV);
+    expect(assignmentsCreds).toBe(detailCreds);
+    expect(paymentsCreds).toBe(detailCreds);
+  });
+
+  it('QA onboarding: the creds carry useQA true', async () => {
+    await fetchAndBuildConfig('user@test.com', 'pass', true);
+    expect(mockApiGet).toHaveBeenNthCalledWith(
+      1,
+      '/api/identity/users/current/detail',
+      {},
+      MOCK_TOKEN,
+      true,
+      { username: 'user@test.com', password: 'pass', useQA: true },
+    );
+  });
+});
+
+describe('DD1 FR4: getProfileDetail forwards creds', () => {
+  it('passes the given creds object as the last apiGet argument', async () => {
+    const creds = { ...CREDS_WITH_ENV };
+    await getProfileDetail(MOCK_TOKEN, false, creds);
+    expect(mockApiGet).toHaveBeenCalledWith(
+      '/api/identity/users/current/detail',
+      {},
+      MOCK_TOKEN,
+      false,
+      creds,
+    );
+    expect(mockApiGet.mock.calls[0][4]).toBe(creds);
+  });
+
+  it('without creds passes an explicit trailing undefined', async () => {
+    await getProfileDetail(MOCK_TOKEN, false);
+    expect(mockApiGet).toHaveBeenCalledWith(
+      '/api/identity/users/current/detail',
+      {},
+      MOCK_TOKEN,
+      false,
+      undefined,
+    );
   });
 });
