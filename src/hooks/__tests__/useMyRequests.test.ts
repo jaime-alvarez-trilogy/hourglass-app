@@ -1952,3 +1952,81 @@ describe('useMyRequests — DD2 forced refresh flag', () => {
     expect(calledDates()).toEqual([WED]);
   });
 });
+
+// ─── durable-data cross-spec review ──────────────────────────────────────────
+
+describe('useMyRequests — cross-spec review: sign-out mid-run and the forced-refresh flag', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockAsyncStorage._reset();
+  });
+
+  it('a total failure after sign-out (config gone) never seeds the signed-out owner view into the client', async () => {
+    signedIn();
+    await seedStore(threeRequestStore());
+    const client = newClient();
+    // Signed in when the run starts, signed out by the time the fetches fail
+    mockLoadConfig.mockReset();
+    mockLoadConfig.mockResolvedValueOnce(DD_CONFIG).mockResolvedValue(null);
+    const err = new NetworkError('offline');
+    mockFetchWorkDiary.mockRejectedValue(err);
+
+    await expect(buildMyRequestsQueryFn(WED)(ctxOf(client))).rejects.toBe(err);
+
+    expect(client.getQueryData(QUERY_KEY)).toBeUndefined();
+  });
+
+  it('a forced run that fails totally keeps the flag, so the query retry still re-checks the whole window', async () => {
+    signedIn();
+    await seedStore(windowRecords(WED, `${WED}T08:00`));
+    markMyRequestsForcedRefresh();
+
+    mockFetchWorkDiary.mockRejectedValue(new NetworkError('offline'));
+    await expect(buildMyRequestsQueryFn(WED, () => local(`${WED}T08:05`))()).rejects.toBeInstanceOf(NetworkError);
+
+    mockFetchWorkDiary.mockReset();
+    mockFetchWorkDiary.mockResolvedValue([]);
+    await buildMyRequestsQueryFn(WED, () => local(`${WED}T08:06`))();
+    expect(calledDates()).toEqual(desc(CATCH_UP, WED));
+
+    // Consumed by the successful run: the next one is normal
+    mockFetchWorkDiary.mockClear();
+    await buildMyRequestsQueryFn(WED, () => local(`${WED}T08:10`))();
+    expect(calledDates()).toEqual([WED]);
+  });
+
+  it('the flag outlives at most 1 + MAX_QUERY_RETRIES failed forced runs (an outage does not force every later wake)', async () => {
+    signedIn();
+    await seedStore(windowRecords(WED, `${WED}T08:00`));
+    markMyRequestsForcedRefresh();
+    mockFetchWorkDiary.mockRejectedValue(new NetworkError('offline'));
+    for (let i = 0; i < 3; i++) {
+      await expect(buildMyRequestsQueryFn(WED, () => local(`${WED}T08:05`))()).rejects.toBeInstanceOf(NetworkError);
+    }
+
+    mockFetchWorkDiary.mockReset();
+    mockFetchWorkDiary.mockResolvedValue([]);
+    await buildMyRequestsQueryFn(WED, () => local(`${WED}T08:10`))();
+    expect(calledDates()).toEqual([WED]);
+  });
+
+  it('an earlier run still in flight cannot use up the flag meant for the visible (pull-to-refresh) run', async () => {
+    signedIn();
+    mockFetchWorkDiary.mockResolvedValue([]);
+    await seedStore(windowRecords(WED, `${WED}T08:00`));
+
+    // R1 (a focus refetch) is parked in its config read when the user pulls
+    let releaseR1!: () => void;
+    const r1Config = new Promise<CrossoverConfig>((r) => (releaseR1 = () => r(DD_CONFIG)));
+    mockLoadConfig.mockReturnValueOnce(r1Config);
+    const r1 = buildMyRequestsQueryFn(WED, () => local(`${WED}T08:05`))();
+
+    markMyRequestsForcedRefresh();
+    releaseR1();
+    await r1; // the orphan reaches the planner first
+    mockFetchWorkDiary.mockClear();
+
+    await buildMyRequestsQueryFn(WED, () => local(`${WED}T08:05`))(); // R2: the visible run
+    expect(calledDates()).toEqual(desc(CATCH_UP, WED));
+  });
+});
