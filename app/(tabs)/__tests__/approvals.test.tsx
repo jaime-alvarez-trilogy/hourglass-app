@@ -1055,6 +1055,20 @@ describe('ApprovalsScreen — durable-data 04 FR4 DD4.22: pull-to-refresh follow
     expect(refreshControl(tree).props.refreshing).toBe(false);
   });
 
+  it('a refetch that throws synchronously still drops the spinner', async () => {
+    const { myRefetch } = setupMocks({
+      entries: [MOCK_ENTRY_PENDING],
+      refetch: jest.fn(() => { throw new Error('sync failure'); }),
+    });
+    const tree = renderScreen();
+
+    act(() => { refreshControl(tree).props.onRefresh(); });
+    expect(myRefetch).toHaveBeenCalledTimes(1);
+
+    await settle();
+    expect(refreshControl(tree).props.refreshing).toBe(false);
+  });
+
   it('manager: both refetches are called at once, and the spinner follows My Requests (team refetch returns void)', async () => {
     const pending = deferred();
     const { myRefetch, teamRefetch } = setupMocks({

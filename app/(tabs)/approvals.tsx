@@ -130,13 +130,14 @@ export default function ApprovalsScreen() {
   // ─── Pull-to-refresh ────────────────────────────────────────────────────────
   // Both refetches start now. The spinner holds until the My Requests forced refetch
   // settles (resolved or rejected); the team refetch returns void, so its slot settles
-  // at once.
+  // at once. Each call runs inside a Promise executor, so a synchronous throw becomes a
+  // rejection instead of escaping before the spinner is cleared.
 
   function handleRefresh() {
     setPulling(true)
     Promise.allSettled([
-      Promise.resolve(myRefetch()),
-      isManager ? Promise.resolve(teamRefetch()) : null,
+      new Promise((resolve) => resolve(myRefetch())),
+      isManager ? new Promise((resolve) => resolve(teamRefetch())) : null,
     ]).finally(() => setPulling(false))
   }
 
@@ -197,6 +198,63 @@ export default function ApprovalsScreen() {
         )}
       </Animated.View>
     )
+  }
+
+  // My Requests Retry — shared by the freshness note, the banner and the incomplete card
+  function renderMyRetry(className?: string) {
+    return (
+      <AnimatedPressable onPress={myRefetch} className={className}>
+        <Text className="text-violet font-sans-semibold text-sm">Retry</Text>
+      </AnimatedPressable>
+    )
+  }
+
+  // My Requests with no visible entries. Exhaustive over MyRequestsEmptyState, so a new
+  // state fails to compile here instead of falling through to "No requests yet" (C3/C4).
+  function renderMyEmptyState() {
+    switch (myEmptyState) {
+      case 'error':
+        /* Nothing visible and the refresh failed: the banner alone, no empty card */
+        return myError ? (
+          <View
+            testID="my-requests-banner"
+            className="flex-row items-center bg-critical/10 mx-4 mb-3 px-4 py-2.5 rounded-xl gap-3"
+          >
+            <Text className="text-critical text-sm flex-1">
+              {requestsBannerText(myError, myErrorCode)}
+            </Text>
+            {myRetryable && renderMyRetry()}
+          </View>
+        ) : null
+      case 'incomplete':
+        /* Some days never refreshed: not a confirmed empty window, so offer Retry */
+        return (
+          <View className="px-4">
+            <Card>
+              <Text className="text-textSecondary text-sm text-center">
+                {INCOMPLETE_EMPTY_TEXT}
+              </Text>
+              {renderMyRetry('self-center mt-2')}
+            </Card>
+          </View>
+        )
+      case 'none':
+        /* FR4: Empty own requests — the whole window refreshed with none */
+        return (
+          <View className="px-4">
+            <Card>
+              <Text className="text-textSecondary text-sm text-center">
+                No requests yet
+              </Text>
+            </Card>
+          </View>
+        )
+      default: {
+        // TypeScript exhaustiveness guard
+        const _exhaustive: never = myEmptyState
+        return null
+      }
+    }
   }
 
   function renderMyRequestRow(row: MyRequestRow, index: number) {
@@ -384,11 +442,7 @@ export default function ApprovalsScreen() {
             {myNote !== null && (
               <View testID="my-requests-note" className="flex-row items-center mx-4 mb-2 gap-3">
                 <Text className="text-textSecondary text-xs flex-1">{myNote}</Text>
-                {myRetryable && (
-                  <AnimatedPressable onPress={myRefetch}>
-                    <Text className="text-violet font-sans-semibold text-sm">Retry</Text>
-                  </AnimatedPressable>
-                )}
+                {myRetryable && renderMyRetry()}
               </View>
             )}
 
@@ -398,43 +452,7 @@ export default function ApprovalsScreen() {
                 <SkeletonLoader className="h-16 rounded-2xl" />
               </View>
             ) : entries.length === 0 ? (
-              myEmptyState === 'error' && myError ? (
-                /* Nothing visible and the refresh failed: the banner alone, no empty card */
-                <View
-                  testID="my-requests-banner"
-                  className="flex-row items-center bg-critical/10 mx-4 mb-3 px-4 py-2.5 rounded-xl gap-3"
-                >
-                  <Text className="text-critical text-sm flex-1">
-                    {requestsBannerText(myError, myErrorCode)}
-                  </Text>
-                  {myRetryable && (
-                    <AnimatedPressable onPress={myRefetch}>
-                      <Text className="text-violet font-sans-semibold text-sm">Retry</Text>
-                    </AnimatedPressable>
-                  )}
-                </View>
-              ) : myEmptyState === 'incomplete' ? (
-                /* Some days never refreshed: not a confirmed empty window, so offer Retry */
-                <View className="px-4">
-                  <Card>
-                    <Text className="text-textSecondary text-sm text-center">
-                      {INCOMPLETE_EMPTY_TEXT}
-                    </Text>
-                    <AnimatedPressable onPress={myRefetch} className="self-center mt-2">
-                      <Text className="text-violet font-sans-semibold text-sm">Retry</Text>
-                    </AnimatedPressable>
-                  </Card>
-                </View>
-              ) : (
-                /* FR4: Empty own requests — the whole window refreshed with none */
-                <View className="px-4">
-                  <Card>
-                    <Text className="text-textSecondary text-sm text-center">
-                      No requests yet
-                    </Text>
-                  </Card>
-                </View>
-              )
+              renderMyEmptyState()
             ) : (
               myRequestRows.map(renderMyRequestRow)
             )}
