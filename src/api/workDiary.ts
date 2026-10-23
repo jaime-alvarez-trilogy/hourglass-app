@@ -5,6 +5,7 @@
 
 import { getAuthToken, apiGet, getAuthGeneration } from './client';
 import { toAuthCreds } from './authCreds';
+import { AuthResetError } from './errors';
 import { createLimiter } from '../lib/limit';
 import type { Credentials } from '../types/config';
 import type { WorkDiarySlot } from '../types/api';
@@ -26,7 +27,9 @@ const workDiaryInFlight = new Map<string, Promise<WorkDiarySlot[]>>();
  * Runs inside the app-wide work-diary limiter. A call whose generation, environment,
  * assignment and date match a pending request returns that same promise, with no new
  * request, limiter slot or token call. The resolved array is therefore shared between
- * joined callers and must be treated as read-only.
+ * joined callers and must be treated as read-only. A call still queued when
+ * `invalidateAuthToken()` runs rejects with `AuthResetError` when it reaches the front,
+ * without a token call or request.
  *
  * @param assignmentId  assignment.id from config (e.g. "79996") — NOT userId
  * @param date          YYYY-MM-DD format (local timezone, no conversion)
@@ -39,11 +42,15 @@ export function fetchWorkDiary(
   credentials: Credentials,
   useQA: boolean,
 ): Promise<WorkDiarySlot[]> {
-  const key = `${getAuthGeneration()}|${useQA ? 'qa' : 'prod'}|${assignmentId}|${date}`;
+  const gen = getAuthGeneration();
+  const key = `${gen}|${useQA ? 'qa' : 'prod'}|${assignmentId}|${date}`;
   const pending = workDiaryInFlight.get(key);
   if (pending) return pending;
 
   const p = workDiaryLimiter(async () => {
+    // Queued before a sign-out / env switch: drop it rather than log in again with
+    // the old account's credentials or the old environment.
+    if (getAuthGeneration() !== gen) throw new AuthResetError();
     const token = await getAuthToken(credentials.username, credentials.password, useQA);
     return apiGet<WorkDiarySlot[]>(
       '/api/timetracking/workdiaries',

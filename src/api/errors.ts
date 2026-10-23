@@ -68,6 +68,20 @@ export class ApiError extends Error {
 }
 
 /**
+ * A request that was made before a hard reset (`invalidateAuthToken()`: sign-out,
+ * env switch, not-contributor) and would otherwise have minted or renewed a token
+ * after it. It is dropped instead, so a stale caller never logs in with the old
+ * account's credentials or environment. Never retried; no consumer shows it.
+ */
+export class AuthResetError extends Error {
+  constructor() {
+    super('Request superseded by sign-out or environment switch');
+    this.name = 'AuthResetError';
+    Object.setPrototypeOf(this, AuthResetError.prototype);
+  }
+}
+
+/**
  * Thrown by `fetchAndBuildConfig` when the authenticated account has no
  * contributor (CANDIDATE) role and Hourglass cannot proceed with onboarding.
  *
@@ -97,9 +111,11 @@ export class NotContributorError extends Error {
  *   401/403, a latched login and missing credentials are not retried.
  * - NetworkError: always.
  * - ApiError: 5xx (including `HTML_5XX_AFTER_RENEWAL`), 408 and 429.
+ * - AuthResetError: never (the caller belongs to a signed-out account or old env).
  * - Anything else (TypeError, unknown throws): retried.
  */
 export function isRetryableError(err: unknown): boolean {
+  if (err instanceof AuthResetError) return false;
   if (err instanceof AuthError) return err.errorCode === AUTH_HTML_500;
   if (err instanceof NetworkError) return true;
   if (err instanceof ApiError) {

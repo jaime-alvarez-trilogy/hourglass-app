@@ -9,6 +9,7 @@ import {
   ApiError,
   AUTH_HTML_500,
   AUTH_LOGIN_LATCHED,
+  AuthResetError,
   HTML_5XX_AFTER_RENEWAL,
   type ErrorEnvelope,
 } from './errors';
@@ -25,8 +26,12 @@ export type { AuthCreds } from './authCreds';
 // explicit `invalidateAuthToken()`, or when sign-out / env-switch runs from
 // app/modal.tsx (FR7).
 
-let cachedToken: string | null = null;
-let mintInFlight: Promise<string> | null = null;
+// Both are keyed by the env + username + password fingerprint, so a caller never
+// receives (or joins a mint of) another account's or another environment's token.
+// durable-data cross-spec review: a stale caller (old account / old env) that
+// reaches getAuthToken after a hard reset must not hand its token to the new owner.
+let cachedToken: { fingerprint: string; token: string } | null = null;
+const mintsInFlight = new Map<string, Promise<string>>();
 // Bumped by every hard reset (`invalidateAuthToken`). A mint that started under an
 // older generation must not write its token into the cache.
 let authGeneration = 0;
@@ -94,8 +99,11 @@ export async function mintAuthToken(
 }
 
 /**
- * Get an auth token. Returns the cached token if one exists, otherwise mints
- * a fresh one. Concurrent callers share a single in-flight mint.
+ * Get an auth token. Returns the cached token if it was minted for the same
+ * env + username + password, otherwise mints a fresh one. Concurrent callers
+ * with the same credentials share a single in-flight mint; a caller with other
+ * credentials or another env never receives or joins it. The cache holds one
+ * token: the newest current mint replaces it.
  *
  * To force a re-mint after a rejected token, call `invalidateIfCurrent(token)`
  * first (the apiGet/apiPut retry does this).
@@ -115,9 +123,10 @@ export async function getAuthToken(
   password: string,
   useQA: boolean,
 ): Promise<string> {
-  if (cachedToken) return cachedToken;
-  if (mintInFlight) return mintInFlight;
   const fingerprint = fingerprintCreds(username, password, useQA);
+  if (cachedToken && cachedToken.fingerprint === fingerprint) return cachedToken.token;
+  const joined = mintsInFlight.get(fingerprint);
+  if (joined) return joined;
   if (loginLatch && loginLatch.fingerprint === fingerprint && Date.now() < loginLatch.until) {
     throw new AuthError(loginLatch.statusCode, 'Login recently rejected', {
       errorCode: AUTH_LOGIN_LATCHED,
@@ -127,8 +136,8 @@ export async function getAuthToken(
   const p: Promise<string> = mintAuthToken(username, password, useQA)
     .then(
       (t) => {
-        if (gen === authGeneration && mintInFlight === p) {
-          cachedToken = t;
+        if (gen === authGeneration && mintsInFlight.get(fingerprint) === p) {
+          cachedToken = { fingerprint, token: t };
           loginLatch = null;
         }
         log.info('auth.token_minted', {});
@@ -139,7 +148,7 @@ export async function getAuthToken(
           err instanceof AuthError &&
           err.errorCode !== AUTH_HTML_500 &&
           gen === authGeneration &&
-          mintInFlight === p
+          mintsInFlight.get(fingerprint) === p
         ) {
           loginLatch = { fingerprint, until: Date.now() + LOGIN_LATCH_MS, statusCode: err.statusCode };
           log.warn('auth.login_latched', { statusCode: err.statusCode });
@@ -148,9 +157,9 @@ export async function getAuthToken(
       },
     )
     .finally(() => {
-      if (mintInFlight === p) mintInFlight = null;
+      if (mintsInFlight.get(fingerprint) === p) mintsInFlight.delete(fingerprint);
     });
-  mintInFlight = p;
+  mintsInFlight.set(fingerprint, p);
   return p;
 }
 
@@ -160,7 +169,7 @@ export async function getAuthToken(
  * late 401 carrying an old token never discards a fresher one.
  */
 export function invalidateIfCurrent(token: string): void {
-  if (cachedToken === token) cachedToken = null;
+  if (cachedToken?.token === token) cachedToken = null;
 }
 
 /**
@@ -179,7 +188,7 @@ export function invalidateIfCurrent(token: string): void {
  */
 export function invalidateAuthToken(): void {
   cachedToken = null;
-  mintInFlight = null;
+  mintsInFlight.clear();
   loginLatch = null;
   authGeneration++;
 }
@@ -337,16 +346,22 @@ async function parseBody<T>(response: Response): Promise<T> {
  * `getAuthToken` (concurrent failures share one mint), `auth.token_retried` is
  * logged and `doFetch` runs exactly once more; a retried response that is still
  * HTML 5xx throws `ApiError(HTML_5XX_AFTER_RENEWAL)`. Returns the last response.
+ *
+ * A request that was sent before a hard reset (`invalidateAuthToken()`) never
+ * renews: it throws `AuthResetError` instead of minting with the old account's
+ * credentials or the old environment.
  */
 async function fetchWithRenewal(
   doFetch: (t: string) => Promise<Response>,
   token: string,
   creds?: AuthCreds,
 ): Promise<Response> {
+  const gen = authGeneration;
   const response = await doFetch(token);
   if (!shouldRetryAuth(response)) return response;
   invalidateIfCurrent(token);
   if (!creds) return response;
+  if (gen !== authGeneration) throw new AuthResetError();
   const fresh = await getAuthToken(creds.username, creds.password, creds.useQA);
   log.warn('auth.token_retried', { triggerStatusCode: response.status });
   const retried = await doFetch(fresh);

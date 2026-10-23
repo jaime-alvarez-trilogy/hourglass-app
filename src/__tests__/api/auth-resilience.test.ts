@@ -1075,21 +1075,20 @@ describe('DD1.9: failed-login latch', () => {
     }
   });
 
-  // getAuthToken checks cache → in-flight mint → latch → mint: the latch only stops a
-  // new mint from starting, so latched creds still join one that is already running.
-  it('DD1.9.d: latched creds arriving while another mint is in flight join it (no latched error, no extra POST)', async () => {
+  // The cache and the in-flight mint are keyed by the env + credentials fingerprint
+  // (durable-data cross-spec review), so latched creds never join a mint for other
+  // credentials: they get the latched error, and the corrected creds get their token.
+  it('DD1.9.d: latched creds arriving while a mint for other creds is in flight get the latched error (no extra POST, never the other token)', async () => {
     await rejectLogin(401);
     const corrected = deferred<unknown>();
     routeFetch({ token: () => corrected.promise });
 
     const other = tokenFor({ ...CREDS, password: 'pw-corrected' });
-    const latchedCaller = getCredsToken();
+    const latched = await getCredsToken().catch((e) => e);
     corrected.resolve(makeTokenResponse('tok-corrected'));
 
-    await expect(Promise.all([other, latchedCaller])).resolves.toEqual([
-      'tok-corrected',
-      'tok-corrected',
-    ]);
+    expectLatchedError(latched);
+    await expect(other).resolves.toBe('tok-corrected');
     expect(tokenPosts()).toHaveLength(1);
   });
 });
