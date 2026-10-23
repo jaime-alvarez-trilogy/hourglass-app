@@ -84,4 +84,18 @@ describe('FR7: app/modal.tsx invalidates the auth-token cache', () => {
     expect(removeIdx).toBeGreaterThan(configIdx);
     expect(removeIdx).toBeLessThan(invalidateIdx);
   });
+
+  // Cross-spec review: selectMyRequests hides the 'dev-mock' view once the preview is off,
+  // so without a refetch the card reads "No requests yet" until the next focus/pull.
+  it("toggleDevManagerView invalidates ['myRequests'] after setting the config", () => {
+    const toggleMatch = source.match(/async function toggleDevManagerView[\s\S]*?\n {2}}\n/);
+    expect(toggleMatch).not.toBeNull();
+    const body = toggleMatch![0];
+    const configIdx = body.search(/queryClient\.setQueryData\(\s*\[\s*['"]config['"]\s*\]/);
+    const invalidateIdx = body.search(
+      /queryClient\.invalidateQueries\(\s*\{\s*queryKey:\s*\[\s*['"]myRequests['"]\s*\]\s*\}\s*\)/,
+    );
+    expect(configIdx).toBeGreaterThan(-1);
+    expect(invalidateIdx).toBeGreaterThan(configIdx);
+  });
 });
