@@ -4,6 +4,11 @@
 // merges the days that came back through updateRequestsStore, then pauses. It stops on a
 // fully failed week, a non-retryable AuthError, a 429, a sign-out or owner change, an
 // unreadable store or the session cap, and never writes a failed day.
+// FR3 (DD5.24-DD5.34): startRequestsBackfillOnce, the session gate. At most one run per
+// JS session per owner (assignmentId|env), never for a signed-out user, the dev-mock
+// manager preview or a missing keychain entry, and it never rejects. After each stored
+// week it rebuilds the visible ['myRequests', assignmentId] view, but only a successful
+// same-owner (or legacy) one, keeping its error state and dataUpdatedAt.
 //
 // The runner is driven against the real planner and the real my_requests_v1 store on the
 // in-memory AsyncStorage __mocks__ (reset before every case), with `fetchWorkDiary`,
@@ -11,9 +16,11 @@
 // mockResolvedValue (not ...Once): the runner checks the owner before every week and the
 // store checks it twice per write. `today`, `nowMs` and `sleep` are injected, so no case
 // waits, reads the system clock or depends on the host time zone (expected dates come from
-// the UTC calendar helpers below, independent of the module under test).
+// the UTC calendar helpers below, independent of the module under test). The gate cases use
+// a real QueryClient (no retries, no GC timers) and clear the session flag before each case.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { QueryClient } from '@tanstack/react-query';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -32,7 +39,7 @@ jest.mock('../../lib/log', () => ({
 
 // ─── Imports ──────────────────────────────────────────────────────────────────
 
-import { loadConfig } from '../../store/config';
+import { loadConfig, loadCredentials } from '../../store/config';
 import { fetchWorkDiary } from '../../api/workDiary';
 import { ApiError, AuthError, NetworkError, AUTH_HTML_500, AUTH_LOGIN_LATCHED } from '../../api/errors';
 import { log } from '../../lib/log';
@@ -40,18 +47,22 @@ import * as planner from '../../lib/requestsPlanner';
 import {
   BACKFILL_START_DELAY_MS,
   BACKFILL_WEEK_PAUSE_MS,
+  __resetBackfillSessionForTests,
   runRequestsBackfill,
+  startRequestsBackfillOnce,
 } from '../useRequestsBackfill';
 import type { BackfillDeps, BackfillResult } from '../useRequestsBackfill';
 import type { MyRequestsStore, RequestsStoreOwner, StoredRequestDay } from '../../lib/requestsStore';
 import type { WorkDiarySlot } from '../../types/api';
 import type { CrossoverConfig } from '../../types/config';
-import type { ManualRequestEntry, ManualRequestStatus } from '../../types/requests';
+import type { ManualRequestEntry, ManualRequestStatus, MyRequestsData } from '../../types/requests';
 
 const mockLoadConfig = loadConfig as jest.MockedFunction<typeof loadConfig>;
+const mockLoadCredentials = loadCredentials as jest.MockedFunction<typeof loadCredentials>;
 const mockFetchWorkDiary = fetchWorkDiary as jest.MockedFunction<typeof fetchWorkDiary>;
 const mockAsyncStorage = AsyncStorage as jest.Mocked<typeof AsyncStorage> & { _reset: () => void };
 const mockInfo = log.info as jest.Mock;
+const mockError = log.error as jest.Mock;
 
 // ─── Owner and config ────────────────────────────────────────────────────────
 
@@ -827,5 +838,506 @@ describe('DD5.23 — a throwing onWeekStored never stops the backfill', () => {
     expect(calledDates()).toHaveLength(147);
     expect(await storedDates()).toEqual(ALL_BACKFILL_DATES);
     expect(doneLogs()).toEqual([COMPLETE_RUN]);
+  });
+});
+
+// ─── FR3 ─────────────────────────────────────────────────────────────────────
+
+describe('FR3: startRequestsBackfillOnce', () => {
+  /** What loadCredentials returns (the keychain): every gated run fetches with these. */
+  const KEYCHAIN_CREDS = { username: 'keychain@example.com', password: 'keychain-pass' };
+
+  const QUERY_KEY = ['myRequests', '79996'] as const;
+  const PROD_KEY = '79996|prod';
+  const QA_KEY = '79996|qa';
+  /** dataUpdatedAt of a seeded view: when the foreground refresh built it, not the backfill. */
+  const VIEW_UPDATED_MS = Date.parse('2026-10-21T08:00:00');
+
+  /** A short gated run: the newest week answers with empty bodies, so it stops after 7 requests. */
+  const ONE_WEEK_FAILED = result(0, 0, 7, 'week-failed');
+  /** Week 1 stored, week 2 failed (serveWeekThenFail). */
+  const ONE_WEEK_STORED = result(1, 7, 7, 'week-failed');
+
+  let clients: QueryClient[] = [];
+
+  /** A real QueryClient: no retries, and no GC timers left behind. */
+  function newClient(): QueryClient {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+    clients.push(client);
+    return client;
+  }
+
+  /** The gate with today, the clock and the pause injected (the hook passes none of them). */
+  function start(
+    client: QueryClient,
+    overrides: Partial<Omit<BackfillDeps, 'onWeekStored'>> = {},
+  ): Promise<BackfillResult | null> {
+    return startRequestsBackfillOnce(client, { today: TODAY, nowMs: () => NOW_MS, sleep, ...overrides });
+  }
+
+  /** fetchWorkDiary calls sorted by date: [assignmentId, date, credentials, useQA]. */
+  function callsByDate(): unknown[][] {
+    return [...mockFetchWorkDiary.mock.calls].sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
+  }
+
+  /** The calls one week of `owner` makes with the keychain credentials. */
+  const weekCalls = (monday: string, owner: RequestsStoreOwner = OWNER): unknown[][] =>
+    weekOf(monday).map((d) => [owner.assignmentId, d, KEYCHAIN_CREDS, owner.useQA]);
+
+  /** Reads of my_requests_v1 (the runner's first step). */
+  const storeReads = (): number => mockAsyncStorage.getItem.mock.calls.filter(([k]) => k === KEY).length;
+
+  /** Week 1 answers (`week1` per date, else []), week 2 answers with empty bodies: one stored week. */
+  function serveWeekThenFail(week1: Record<string, DayResult> = {}): void {
+    serveDiary({ ...week1, ...each(weekOf(SECOND_MONDAY), undefined) });
+  }
+
+  beforeEach(() => {
+    __resetBackfillSessionForTests();
+    mockLoadCredentials.mockReset();
+    mockLoadCredentials.mockResolvedValue(KEYCHAIN_CREDS);
+    mockFetchWorkDiary.mockResolvedValue(undefined as unknown as WorkDiarySlot[]);
+  });
+
+  afterEach(() => {
+    clients.forEach((c) => c.clear());
+    clients = [];
+  });
+
+  // ─── The session gate ──────────────────────────────────────────────────────
+
+  describe('DD5.24 — at most one run per owner per JS session', () => {
+    it('two concurrent calls for the same owner → one run (one week of requests); the other resolves null', async () => {
+      const client = newClient();
+
+      const outcomes: (BackfillResult | null)[] = await Promise.all([start(client), start(client)]);
+
+      expect(outcomes.filter((o) => o !== null)).toEqual([ONE_WEEK_FAILED]);
+      expect(outcomes.filter((o) => o === null)).toHaveLength(1);
+      expect(callsByDate()).toEqual(weekCalls(NEWEST_MONDAY));
+      expect(doneLogs()).toEqual([ONE_WEEK_FAILED]);
+    });
+
+    it('a call while the first run is still fetching → null, and no extra request', async () => {
+      const client = newClient();
+      const fetches: Deferred<WorkDiarySlot[] | undefined>[] = [];
+      mockFetchWorkDiary.mockImplementation(() => {
+        const d = deferred<WorkDiarySlot[] | undefined>();
+        fetches.push(d);
+        return d.promise as Promise<WorkDiarySlot[]>;
+      });
+
+      const first = start(client);
+      await flush();
+      expect(fetches).toHaveLength(7);
+
+      await expect(start(client)).resolves.toBeNull();
+      expect(fetches).toHaveLength(7);
+
+      fetches.forEach((d) => d.resolve(undefined));
+      await expect(first).resolves.toEqual(ONE_WEEK_FAILED);
+      expect(mockFetchWorkDiary).toHaveBeenCalledTimes(7);
+    });
+
+    it('a later call in the same session → null, with no request, no store read and no log', async () => {
+      const client = newClient();
+      await expect(start(client)).resolves.toEqual(ONE_WEEK_FAILED);
+      jest.clearAllMocks();
+
+      await expect(start(client)).resolves.toBeNull();
+
+      expect(mockFetchWorkDiary).not.toHaveBeenCalled();
+      expect(storeReads()).toBe(0);
+      expect(mockInfo).not.toHaveBeenCalled();
+      expect(mockError).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('DD5.25 — each owner (assignmentId|env) gets its own run', () => {
+    it.each<[string, CrossoverConfig, RequestsStoreOwner]>([
+      ['another assignmentId', OTHER_CONFIG, { assignmentId: '80001', useQA: false }],
+      ['the same assignment with useQA flipped', QA_CONFIG, QA_OWNER],
+    ])('%s → a new run, against that owner; the first owner stays marked', async (_label, next, owner) => {
+      const client = newClient();
+      await expect(start(client)).resolves.toEqual(ONE_WEEK_FAILED);
+      expect(callsByDate()).toEqual(weekCalls(NEWEST_MONDAY, OWNER));
+      mockFetchWorkDiary.mockClear();
+      mockLoadConfig.mockResolvedValue(next);
+
+      await expect(start(client)).resolves.toEqual(ONE_WEEK_FAILED);
+      expect(callsByDate()).toEqual(weekCalls(NEWEST_MONDAY, owner));
+
+      mockFetchWorkDiary.mockClear();
+      mockLoadConfig.mockResolvedValue(CONFIG);
+      await expect(start(client)).resolves.toBeNull();
+      expect(mockFetchWorkDiary).not.toHaveBeenCalled();
+    });
+
+    it('a config without useQA (older install) is the prod owner: it runs against prod, and prod is then marked', async () => {
+      const withoutEnv: Partial<CrossoverConfig> = { ...CONFIG };
+      delete withoutEnv.useQA;
+      mockLoadConfig.mockResolvedValue(withoutEnv as CrossoverConfig);
+      const client = newClient();
+      serveWeekThenFail();
+
+      await expect(start(client)).resolves.toEqual(ONE_WEEK_STORED);
+      expect(callsByDate()).toEqual([...weekCalls(SECOND_MONDAY), ...weekCalls(NEWEST_MONDAY)]);
+      expect((await readStore())!.owner).toEqual(OWNER);
+
+      mockFetchWorkDiary.mockClear();
+      mockLoadConfig.mockResolvedValue(CONFIG);
+      await expect(start(client)).resolves.toBeNull();
+      expect(mockFetchWorkDiary).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('DD5.26 — no run while signed out', () => {
+    it.each<[string, CrossoverConfig | null]>([
+      ['loadConfig → null', null],
+      ['a config with an empty assignmentId', { ...CONFIG, assignmentId: '' }],
+      ['a config without assignmentId', { ...CONFIG, assignmentId: undefined as unknown as string }],
+    ])('%s → null, with no store read, no request and no log; the next call, signed in, runs', async (_label, config) => {
+      mockLoadConfig.mockResolvedValue(config);
+      const client = newClient();
+
+      await expect(start(client)).resolves.toBeNull();
+
+      expect(mockFetchWorkDiary).not.toHaveBeenCalled();
+      expect(storeReads()).toBe(0);
+      expect(mockInfo).not.toHaveBeenCalled();
+
+      mockLoadConfig.mockResolvedValue(CONFIG);
+      await expect(start(client)).resolves.toEqual(ONE_WEEK_FAILED);
+      expect(callsByDate()).toEqual(weekCalls(NEWEST_MONDAY));
+    });
+  });
+
+  describe('DD5.27 — never for the dev-mock manager preview', () => {
+    it('devManagerView: true → null, with no keychain read, no store read and no request; the next call with it off runs', async () => {
+      mockLoadConfig.mockResolvedValue({ ...CONFIG, devManagerView: true });
+      const client = newClient();
+
+      await expect(start(client)).resolves.toBeNull();
+
+      expect(mockLoadCredentials).not.toHaveBeenCalled();
+      expect(mockAsyncStorage.getItem).not.toHaveBeenCalledWith(KEY);
+      expect(mockFetchWorkDiary).not.toHaveBeenCalled();
+      expect(mockInfo).not.toHaveBeenCalled();
+
+      // The preview did not use up the session's run
+      mockLoadConfig.mockResolvedValue({ ...CONFIG, devManagerView: false });
+      await expect(start(client)).resolves.toEqual(ONE_WEEK_FAILED);
+      expect(callsByDate()).toEqual(weekCalls(NEWEST_MONDAY));
+    });
+  });
+
+  describe('DD5.28 — never without a keychain entry', () => {
+    it('loadCredentials → null → null, with no store read and no request; the next call with credentials runs', async () => {
+      mockLoadCredentials.mockResolvedValue(null);
+      const client = newClient();
+
+      await expect(start(client)).resolves.toBeNull();
+
+      expect(storeReads()).toBe(0);
+      expect(mockFetchWorkDiary).not.toHaveBeenCalled();
+      expect(mockInfo).not.toHaveBeenCalled();
+
+      // The owner was not marked
+      mockLoadCredentials.mockResolvedValue(KEYCHAIN_CREDS);
+      await expect(start(client)).resolves.toEqual(ONE_WEEK_FAILED);
+      expect(callsByDate()).toEqual(weekCalls(NEWEST_MONDAY));
+    });
+  });
+
+  describe('DD5.29 — the gate never rejects', () => {
+    it.each<[string, (err: Error) => void]>([
+      ['loadConfig rejects', (err) => mockLoadConfig.mockRejectedValue(err)],
+      ['loadCredentials rejects (keychain locked)', (err) => mockLoadCredentials.mockRejectedValue(err)],
+    ])('%s → resolves null and logs requests.backfill_failed with the error; the next call runs', async (_label, fail) => {
+      const err = new Error('storage unavailable');
+      fail(err);
+      const client = newClient();
+
+      await expect(start(client)).resolves.toBeNull();
+
+      expect(mockError).toHaveBeenCalledTimes(1);
+      expect(mockError).toHaveBeenCalledWith('requests.backfill_failed', err);
+      expect(mockFetchWorkDiary).not.toHaveBeenCalled();
+      expect(mockInfo).not.toHaveBeenCalled();
+
+      // Nothing was started, so the owner was not marked
+      mockLoadConfig.mockResolvedValue(CONFIG);
+      mockLoadCredentials.mockResolvedValue(KEYCHAIN_CREDS);
+      await expect(start(client)).resolves.toEqual(ONE_WEEK_FAILED);
+    });
+  });
+
+  describe('FR3 — today, the clock and the pause: the injected ones, else the system (the hook injects none)', () => {
+    it('plans from todayLocal(), stamps fetchedAt with Date.now and pauses 500 ms on a timer', async () => {
+      const systemNow = new Date(2026, 9, 21, 12, 0); // local noon of TODAY
+      jest.useFakeTimers({ now: systemNow, doNotFake: ['nextTick', 'queueMicrotask', 'setImmediate'] });
+      try {
+        serveWeekThenFail();
+        const client = newClient();
+
+        const done = startRequestsBackfillOnce(client);
+        await flush();
+
+        // TODAY's newest backfill week, stamped with the system clock
+        expect(callsByDate()).toEqual(weekCalls(NEWEST_MONDAY));
+        expect((await readStore())!.days).toEqual(
+          byDate(weekOf(NEWEST_MONDAY).map((d) => emptyDay(d, systemNow.toISOString()))),
+        );
+
+        // The pause holds week 2 back for BACKFILL_WEEK_PAUSE_MS
+        jest.advanceTimersByTime(BACKFILL_WEEK_PAUSE_MS - 1);
+        await flush();
+        expect(mockFetchWorkDiary).toHaveBeenCalledTimes(7);
+
+        jest.advanceTimersByTime(1);
+        await flush();
+        expect(mockFetchWorkDiary).toHaveBeenCalledTimes(14);
+
+        await expect(done).resolves.toEqual(ONE_WEEK_STORED);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('an injected today and nowMs win over the system clock', async () => {
+      jest.useFakeTimers({
+        now: new Date(2031, 0, 15, 12, 0),
+        doNotFake: ['nextTick', 'queueMicrotask', 'setImmediate'],
+      });
+      try {
+        serveWeekThenFail();
+        await expect(start(newClient())).resolves.toEqual(ONE_WEEK_STORED);
+      } finally {
+        jest.useRealTimers();
+      }
+
+      expect(fetchedMondays()).toEqual([NEWEST_MONDAY, SECOND_MONDAY]);
+      expect((await readStore())!.days).toEqual(byDate(weekOf(NEWEST_MONDAY).map((d) => emptyDay(d))));
+    });
+  });
+
+  describe('DD5.34 — __resetBackfillSessionForTests', () => {
+    it('lets the same owner run again', async () => {
+      const client = newClient();
+      await expect(start(client)).resolves.toEqual(ONE_WEEK_FAILED);
+      await expect(start(client)).resolves.toBeNull();
+      mockFetchWorkDiary.mockClear();
+
+      __resetBackfillSessionForTests();
+
+      await expect(start(client)).resolves.toEqual(ONE_WEEK_FAILED);
+      expect(callsByDate()).toEqual(weekCalls(NEWEST_MONDAY));
+    });
+  });
+
+  // ─── The live view update (C8) ─────────────────────────────────────────────
+
+  // The foreground refresh has stored the 3-week window (2026-10-05..TODAY) and built the
+  // view from it, plus view-only entries carried from a 1.1 blob for dates it never stored.
+  const CURRENT_MONDAY = '2026-10-19';
+  const WINDOW_REQ = entry('2026-10-20', 'Window request', 'PENDING');
+  /** Carried for a week-1 date; the backfill now gets the server's answer for it. */
+  const SUPERSEDED = entry('2026-09-30', 'Before the backfill', 'PENDING');
+  /** Carried for a week-1 date the server now confirms has no request. */
+  const WITHDRAWN = entry('2026-10-01', 'Withdrawn request', 'APPROVED');
+  /** Carried for a date of week 2, which fails: still unrecorded. */
+  const UNRECORDED_WEEK2 = entry('2026-09-23', 'Week two request', 'APPROVED');
+  /** Carried for a week the run never reaches. */
+  const UNRECORDED_OLDER = entry('2026-08-12', 'Older request', 'REJECTED', 2, 'Not billable');
+  /** The server's answer for 2026-09-30. */
+  const SERVER_REQ = entry('2026-09-30', 'Server request', 'APPROVED');
+  const WEEK1_ANSWERS: Record<string, DayResult> = { '2026-09-30': [manual('Server request', 'APPROVED')] };
+
+  const CARRIED = [WINDOW_REQ, SUPERSEDED, WITHDRAWN, UNRECORDED_WEEK2, UNRECORDED_OLDER];
+  /** The view after week 1 is stored: the window, week 1 as stored, the still-unrecorded carries. */
+  const GROWN = [WINDOW_REQ, SERVER_REQ, UNRECORDED_WEEK2, UNRECORDED_OLDER];
+
+  async function seedWindow(owner: RequestsStoreOwner = OWNER): Promise<void> {
+    await seedStore(
+      asc('2026-10-05', TODAY).map((d) => {
+        const entries = d === WINDOW_REQ.date ? [WINDOW_REQ] : [];
+        return { date: d, fetchedAt: SEEDED_AT, entries, settled: d < CURRENT_MONDAY };
+      }),
+      owner,
+    );
+  }
+
+  /** A client holding `view` as a successful query, last updated at VIEW_UPDATED_MS. */
+  function clientWithView(view: MyRequestsData): QueryClient {
+    const client = newClient();
+    client.setQueryData<MyRequestsData>(QUERY_KEY, view, { updatedAt: VIEW_UPDATED_MS });
+    return client;
+  }
+
+  function storeBackedView(ownerKey: string): MyRequestsData {
+    return { entries: [...CARRIED], error: null, staleDates: ['2026-10-19'], updatedAt: SEEDED_AT, ownerKey };
+  }
+
+  describe('DD5.30 — each stored week is shown at once in a successful same-owner view', () => {
+    it("a prev entry in a still-unrecorded week is kept; one in the week just stored is replaced by that day's stored entries", async () => {
+      await seedWindow();
+      const client = clientWithView(storeBackedView(PROD_KEY));
+      serveWeekThenFail(WEEK1_ANSWERS);
+
+      await expect(start(client)).resolves.toEqual(ONE_WEEK_STORED);
+
+      const data = client.getQueryData<MyRequestsData>(QUERY_KEY)!;
+      expect(data.entries).toEqual(GROWN);
+      // The week-1 carries are gone: one answered, the other confirmed empty
+      expect(data.entries).not.toContainEqual(SUPERSEDED);
+      expect(data.entries).not.toContainEqual(WITHDRAWN);
+    });
+
+    it('freshness and error state are unchanged: dataUpdatedAt, status, error, staleDates and updatedAt; ownerKey set', async () => {
+      await seedWindow();
+      const client = clientWithView(storeBackedView(PROD_KEY));
+      serveWeekThenFail(WEEK1_ANSWERS);
+
+      await start(client);
+
+      expect(client.getQueryData(QUERY_KEY)).toEqual({
+        entries: GROWN,
+        error: null,
+        staleDates: ['2026-10-19'],
+        updatedAt: SEEDED_AT,
+        ownerKey: PROD_KEY,
+      });
+      const state = client.getQueryState(QUERY_KEY)!;
+      expect(state.status).toBe('success');
+      expect(state.error).toBeNull();
+      expect(state.dataUpdatedAt).toBe(VIEW_UPDATED_MS);
+    });
+
+    it.each<[string, MyRequestsData['error']]>([
+      ['error: null', null],
+      ["a persisted error: 'network'", 'network'],
+    ])('a legacy prev (no ownerKey, %s) is updated, stamped with the owner and keeps its error', async (_label, error) => {
+      await seedWindow();
+      const client = clientWithView({ entries: [...CARRIED], error });
+      serveWeekThenFail(WEEK1_ANSWERS);
+
+      await expect(start(client)).resolves.toEqual(ONE_WEEK_STORED);
+
+      expect(client.getQueryData(QUERY_KEY)).toEqual({ entries: GROWN, error, ownerKey: PROD_KEY });
+      expect(client.getQueryState(QUERY_KEY)!.dataUpdatedAt).toBe(VIEW_UPDATED_MS);
+    });
+
+    it("a QA owner's QA-stamped view is updated too", async () => {
+      mockLoadConfig.mockResolvedValue(QA_CONFIG);
+      await seedWindow(QA_OWNER);
+      const client = clientWithView(storeBackedView(QA_KEY));
+      serveWeekThenFail(WEEK1_ANSWERS);
+
+      await expect(start(client)).resolves.toEqual(ONE_WEEK_STORED);
+
+      expect(client.getQueryData<MyRequestsData>(QUERY_KEY)).toEqual({ ...storeBackedView(QA_KEY), entries: GROWN });
+      expect(client.getQueryState(QUERY_KEY)!.dataUpdatedAt).toBe(VIEW_UPDATED_MS);
+    });
+
+    it('the view grows after each stored week, while the run is still going', async () => {
+      await seedWindow();
+      const client = clientWithView(storeBackedView(PROD_KEY));
+      const WEEK2_REQ = entry('2026-09-22', 'Second week request', 'PENDING');
+      serveDiary({
+        ...WEEK1_ANSWERS,
+        '2026-09-22': [manual('Second week request', 'PENDING')],
+        ...each(weekOf('2026-09-14'), undefined),
+      });
+      // Each pause comes right after a week was stored: capture the view there
+      const seen: (MyRequestsData | undefined)[] = [];
+      const pause = jest.fn(async (_ms: number) => {
+        seen.push(client.getQueryData<MyRequestsData>(QUERY_KEY));
+      });
+
+      await expect(start(client, { sleep: pause })).resolves.toEqual(result(2, 14, 7, 'week-failed'));
+
+      expect(seen.map((v) => v?.entries)).toEqual([
+        GROWN,
+        // Week 2 is now recorded too, so its carried entry is gone
+        [WINDOW_REQ, SERVER_REQ, WEEK2_REQ, UNRECORDED_OLDER],
+      ]);
+      expect(client.getQueryState(QUERY_KEY)!.dataUpdatedAt).toBe(VIEW_UPDATED_MS);
+    });
+  });
+
+  describe('DD5.31 — a view of another owner is never touched', () => {
+    it.each<[string, CrossoverConfig, string]>([
+      ['a QA view while prod is configured', CONFIG, QA_KEY],
+      ['a prod view while QA is configured', QA_CONFIG, PROD_KEY],
+      ["the manager preview ('dev-mock')", CONFIG, 'dev-mock'],
+    ])('%s → the same reference after a stored week; the week is still stored', async (_label, config, stamp) => {
+      mockLoadConfig.mockResolvedValue(config);
+      const prev: MyRequestsData = { entries: [...CARRIED], error: null, staleDates: [], updatedAt: null, ownerKey: stamp };
+      const before = JSON.parse(JSON.stringify(prev)) as MyRequestsData;
+      const client = clientWithView(prev);
+      serveWeekThenFail(WEEK1_ANSWERS);
+
+      await expect(start(client)).resolves.toEqual(ONE_WEEK_STORED);
+
+      expect(client.getQueryData(QUERY_KEY)).toBe(prev);
+      expect(prev).toEqual(before);
+      expect(client.getQueryState(QUERY_KEY)!.dataUpdatedAt).toBe(VIEW_UPDATED_MS);
+      // The backfill itself ran for the configured owner
+      expect((await readStore())!.owner).toEqual({ assignmentId: '79996', useQA: config.useQA });
+      expect(await storedDates()).toEqual(weekOf(NEWEST_MONDAY));
+    });
+  });
+
+  describe('DD5.32 — an errored view is left as it is', () => {
+    it("a query in status 'error' that still holds data keeps the same data, error and dataUpdatedAt; the week is stored", async () => {
+      await seedWindow();
+      const prev = storeBackedView(PROD_KEY);
+      const client = clientWithView(prev);
+      // The foreground refresh failed after the view was built (spec 04's "Can't sign in" state)
+      const err = new AuthError(401);
+      await expect(
+        client.fetchQuery({ queryKey: QUERY_KEY, queryFn: () => Promise.reject(err), networkMode: 'always' }),
+      ).rejects.toBe(err);
+      expect(client.getQueryState(QUERY_KEY)!.status).toBe('error');
+      serveWeekThenFail(WEEK1_ANSWERS);
+
+      await expect(start(client)).resolves.toEqual(ONE_WEEK_STORED);
+
+      const state = client.getQueryState(QUERY_KEY)!;
+      expect(client.getQueryData(QUERY_KEY)).toBe(prev);
+      expect(state.status).toBe('error');
+      expect(state.error).toBe(err);
+      expect(state.dataUpdatedAt).toBe(VIEW_UPDATED_MS);
+      // Stored, so the next successful refresh shows it
+      expect((await readStore())!.days['2026-09-30'].entries).toEqual([SERVER_REQ]);
+    });
+  });
+
+  describe('DD5.33 — no view is created where there was none', () => {
+    it('no cached data → still no ["myRequests", assignmentId] data after a stored week', async () => {
+      const client = newClient();
+      serveWeekThenFail(WEEK1_ANSWERS);
+
+      await expect(start(client)).resolves.toEqual(ONE_WEEK_STORED);
+
+      expect(client.getQueryData(QUERY_KEY)).toBeUndefined();
+      expect(await storedDates()).toEqual(weekOf(NEWEST_MONDAY));
+    });
+
+    it('a cold-start query still loading (pending, no data) is not given data by the backfill', async () => {
+      const client = newClient();
+      const foreground = deferred<MyRequestsData>();
+      const loading = client.fetchQuery({ queryKey: QUERY_KEY, queryFn: () => foreground.promise, networkMode: 'always' });
+      expect(client.getQueryState(QUERY_KEY)!.status).toBe('pending');
+      serveWeekThenFail(WEEK1_ANSWERS);
+
+      await expect(start(client)).resolves.toEqual(ONE_WEEK_STORED);
+
+      expect(client.getQueryData(QUERY_KEY)).toBeUndefined();
+      expect(client.getQueryState(QUERY_KEY)!.status).toBe('pending');
+
+      foreground.resolve({ entries: [], error: null, ownerKey: PROD_KEY });
+      await loading;
+    });
   });
 });
