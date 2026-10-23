@@ -95,7 +95,7 @@ Same file. A real `QueryClient` (`new QueryClient()`), seeded with `setQueryData
 ## Phase 5.1: Implementation
 
 ### FR1: `planBackfillWeek`
-- [ ] `src/lib/requestsPlanner.ts`: add `BACKFILL_MAX_WEEKS_PER_SESSION`, `BackfillWeek` and `planBackfillWeek` in a new `// ─── planBackfillWeek` section, with a header-comment line (`durable-data 05-requests-backfill FR1`). Update the `planRequestRefresh` doc line "left to the backfill (spec 05)" to name `planBackfillWeek`. — **partially done**: the constants/types/function and the `FR1` header-comment line were added exactly as specified (confirmed in `git diff 9eecc3c..HEAD -- src/lib/requestsPlanner.ts`), but the `planRequestRefresh` doc comment at `src/lib/requestsPlanner.ts:142` still reads "left to the backfill (spec 05)" verbatim — byte-identical to the pre-spec version at `9eecc3c` — and was never updated to name `planBackfillWeek`.
+- [x] `src/lib/requestsPlanner.ts`: add `BACKFILL_MAX_WEEKS_PER_SESSION`, `BackfillWeek` and `planBackfillWeek` in a new `// ─── planBackfillWeek` section, with a header-comment line (`durable-data 05-requests-backfill FR1`). Update the `planRequestRefresh` doc line "left to the backfill (spec 05)" to name `planBackfillWeek`. — done (doc line updated in a follow-up commit).
 - [x] Commit `feat(FR1): …`.
 
 ### FR2: `runRequestsBackfill`

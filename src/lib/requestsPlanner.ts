@@ -139,7 +139,7 @@ export function isDaySettled(date: string, entries: ManualRequestEntry[], fetchD
  * Plans which dates in retentionStart..today to fetch. Each date gets the first
  * reason that applies (research Decision 3); settled days are only re-checked by
  * `force`, and only inside the 3-week window. A missing older day is left to the
- * backfill (spec 05).
+ * backfill (`planBackfillWeek` below, spec 05).
  *
  * An unparseable `fetchedAt` counts as never fetched (no fetch day, age ∞); a
  * future `fetchedAt` (clock skew) counts as fresh for every rule.
