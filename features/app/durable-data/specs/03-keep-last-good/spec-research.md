@@ -227,7 +227,7 @@ export function shouldDehydrateQuery(query: Query): boolean;
 
 1. **Static** (add to `src/hooks/__tests__/useHoursData.test.ts`): the write effect's guard still contains both `!timesheetQuery.isError` and `!paymentsQuery.isError`, and the cache-serving branch still keys on `eitherError && cache`.
 2. **Behavioural, at the query level** (new describe in `__tests__/hooks/useHoursData.test.ts`): a real `QueryClient` runs the `useTimesheet` queryFn (`fetchTimesheet` with every strategy rejecting `NetworkError`). The result is `getQueryState(['timesheet', …]).status === 'error'`, and prior `data` is retained when it was seeded.
-3. **Behavioural, the whole hook** (new file `__tests__/hooks/useHoursData.keep-last-good.test.tsx`, using the `setupHook` pattern):
+3. **Behavioural, the whole hook** (new file `__tests__/hooks/useHoursData.keep-last-good.test.ts`, using the `setupHook` pattern):
    - seed `hours_cache` with a non-zero `CachedHours` and capture the raw string;
    - mock `apiGet` so every timesheet strategy and the payments call reject with `NetworkError`;
    - render `useHoursData`, then flush the retries (`retry` is a function, so use `retryDelay: 0` via the test `QueryClient` defaults).
@@ -321,7 +321,7 @@ export function shouldDehydrateQuery(query: Query): boolean;
 ### Verification commands
 
 ```
-npx jest __tests__/hooks/useHoursData.test.ts __tests__/hooks/useHoursData.keep-last-good.test.tsx src/hooks/__tests__/useHoursData.test.ts __tests__/use-ai-data.test.ts \
+npx jest __tests__/hooks/useHoursData.test.ts __tests__/hooks/useHoursData.keep-last-good.test.ts src/hooks/__tests__/useHoursData.test.ts __tests__/use-ai-data.test.ts \
   src/hooks/__tests__/usePaymentHistory.test.ts src/hooks/__tests__/useTeamAggregateData.test.ts \
   src/lib/__tests__/weeklyHistory.test.ts src/lib/__tests__/queryPersist.test.ts src/__tests__/lib/crossoverData.test.ts \
   src/__tests__/hooks/useWidgetSync.test.ts app/__tests__/layout-notifications.test.tsx app/__tests__/root-layout-tokens.test.tsx
