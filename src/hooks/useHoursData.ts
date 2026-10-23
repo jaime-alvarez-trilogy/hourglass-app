@@ -85,8 +85,11 @@ export function useHoursData(): UseHoursDataResult {
   const bothError = timesheetQuery.isError && paymentsQuery.isError;
   const eitherError = timesheetQuery.isError || paymentsQuery.isError;
   const eitherLoading = timesheetQuery.isLoading || paymentsQuery.isLoading;
-  const hasLiveData =
-    timesheetQuery.data !== undefined && paymentsQuery.data !== undefined && !bothError;
+  // A payments-only failure with no payments row yet still serves the fresh timesheet:
+  // calculateHours falls back to the timesheet total and total × rate (as it did when
+  // fetchPayments swallowed errors). The cache write below still needs both queries clean.
+  const paymentsUsable = paymentsQuery.data !== undefined || paymentsQuery.isError;
+  const hasLiveData = timesheetQuery.data !== undefined && paymentsUsable && !bothError;
 
   const refetch = () => {
     timesheetQuery.refetch();
@@ -102,7 +105,7 @@ export function useHoursData(): UseHoursDataResult {
     const weeklyLimit = config.weeklyLimit ?? 40;
     return calculateHours(
       timesheetQuery.data!,
-      paymentsQuery.data!,
+      paymentsQuery.data ?? null,
       hourlyRate,
       weeklyLimit,
     );
