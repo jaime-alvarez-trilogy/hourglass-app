@@ -199,8 +199,9 @@ export function planBackfillWeek(
   const { catchUpStart, retentionStart } = requestWindows(today);
   for (let monday = addDays(catchUpStart, -7); monday >= retentionStart; monday = addDays(monday, -7)) {
     if (skip?.has(monday)) continue;
+    // monday ≤ catchUpStart − 7, so every date of its week is already < catchUpStart
     const dates = dateRange(monday, addDays(monday, 6)).filter(
-      (d) => d < catchUpStart && !Object.prototype.hasOwnProperty.call(days, d),
+      (d) => !Object.prototype.hasOwnProperty.call(days, d),
     );
     if (dates.length > 0) return { monday, dates };
   }

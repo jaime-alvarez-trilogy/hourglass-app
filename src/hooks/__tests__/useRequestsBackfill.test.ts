@@ -855,6 +855,26 @@ describe('DD5.23 — a throwing onWeekStored never stops the backfill', () => {
     expect(calledDates()).toHaveLength(147);
     expect(await storedDates()).toEqual(ALL_BACKFILL_DATES);
     expect(doneLogs()).toEqual([COMPLETE_RUN]);
+    // Visible, not silent: one requests.backfill_view_update_failed per run, class name only
+    expect(mockError).toHaveBeenCalledTimes(1);
+    expect(mockError).toHaveBeenCalledWith('requests.backfill_view_update_failed', expect.any(Error));
+  });
+
+  it('a non-Error throw logs UnknownError', async () => {
+    const throwing = jest.fn((_store: MyRequestsStore): void => {
+      throw 'view update failed';
+    });
+
+    await expect(run({ onWeekStored: throwing })).resolves.toEqual(COMPLETE_RUN);
+
+    expect(mockError).toHaveBeenCalledTimes(1);
+    expect(mockError).toHaveBeenCalledWith('requests.backfill_view_update_failed', 'UnknownError');
+  });
+
+  it('a view update that does not throw logs no error', async () => {
+    await expect(run({ onWeekStored: jest.fn() })).resolves.toEqual(COMPLETE_RUN);
+
+    expect(mockError).not.toHaveBeenCalled();
   });
 });
 
@@ -1086,6 +1106,20 @@ describe('FR3: startRequestsBackfillOnce', () => {
       mockLoadConfig.mockResolvedValue(CONFIG);
       mockLoadCredentials.mockResolvedValue(KEYCHAIN_CREDS);
       await expect(start(client)).resolves.toEqual(ONE_WEEK_FAILED);
+    });
+
+    it.each<[string, unknown]>([
+      ['a string', 'storage unavailable'],
+      ['a plain object', { code: 'E_KEYCHAIN' }],
+    ])('a non-Error rejection (%s) → resolves null and logs requests.backfill_failed as UnknownError', async (_label, reason) => {
+      mockLoadCredentials.mockRejectedValue(reason);
+      const client = newClient();
+
+      await expect(start(client)).resolves.toBeNull();
+
+      expect(mockError).toHaveBeenCalledTimes(1);
+      expect(mockError).toHaveBeenCalledWith('requests.backfill_failed', 'UnknownError');
+      expect(mockFetchWorkDiary).not.toHaveBeenCalled();
     });
   });
 

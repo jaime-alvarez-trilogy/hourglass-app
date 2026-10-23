@@ -105,7 +105,8 @@ function stopReasonFor(reasons: unknown[]): 'auth' | 'throttled' | null {
  * Backfills my_requests_v1 for `owner`, one week at a time, newest first, down to
  * retentionStart. Each week's fulfilled days are merged before any stop check, so a week
  * that ends the run still keeps what came back. Never writes a failed day. Never rejects
- * from a throwing `onWeekStored`; logs requests.backfill_done once and resolves its result.
+ * from a throwing `onWeekStored` (logs requests.backfill_view_update_failed once per run);
+ * logs requests.backfill_done once and resolves its result.
  */
 export async function runRequestsBackfill(
   owner: RequestsStoreOwner,
@@ -115,6 +116,7 @@ export async function runRequestsBackfill(
   let weeksStored = 0;
   let daysStored = 0;
   let daysFailed = 0;
+  let viewUpdateFailed = false;
 
   const finish = (stopReason: BackfillStopReason): BackfillResult => {
     log.info('requests.backfill_done', { weeksStored, daysStored, daysFailed, stopReason });
@@ -168,8 +170,13 @@ export async function runRequestsBackfill(
       daysStored += fetched.length;
       try {
         deps.onWeekStored?.(stored);
-      } catch {
-        // View only (C13): the week is stored, and the next refresh composes the view from it
+      } catch (err) {
+        // View only (C13): the week is stored, and the next refresh composes the view from it.
+        // Logged once per run (class name only), so a broken view update is visible, not noisy.
+        if (!viewUpdateFailed) {
+          viewUpdateFailed = true;
+          log.error('requests.backfill_view_update_failed', err instanceof Error ? err : 'UnknownError');
+        }
       }
     }
 
