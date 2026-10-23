@@ -2,6 +2,7 @@
 // Decides which work-diary dates can still change and must be re-downloaded, from the
 // stored per-day records. No I/O: deterministic given `today` and `nowMs`.
 // The date helpers moved here from useMyRequests.ts (one owner for the date math).
+// FR1 (05-requests-backfill): planBackfillWeek picks the next older week with missing days.
 
 import { getWeekStartDate } from './approvals';
 import type { ManualRequestEntry } from '../types/requests';
@@ -17,6 +18,8 @@ export const RECENT_TTL_MS = 60 * 60_000;
 export const OLD_UNSETTLED_TTL_MS = 6 * 60 * 60_000;
 /** Mirrors WEEKLY_HISTORY_MAX. Defined here so the store can import it without a runtime cycle. */
 export const REQUESTS_RETENTION_WEEKS = 24;
+/** REQUESTS_RETENTION_WEEKS (24) − the 3 weeks of the catch-up window: the weeks the backfill covers. */
+export const BACKFILL_MAX_WEEKS_PER_SESSION = 21;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -50,6 +53,13 @@ export interface RefreshPlan {
   dates: string[];
   /** One reason per date in `dates`. */
   reasons: Record<string, RefreshReason>;
+}
+
+export interface BackfillWeek {
+  /** A Monday in [retentionStart, catchUpStart). */
+  monday: string;
+  /** Dates in monday..monday+6, < catchUpStart, with no record in the store; ascending. */
+  dates: string[];
 }
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
@@ -170,4 +180,29 @@ export function planRequestRefresh({ today, nowMs, days, force }: RefreshPlanInp
     }
   }
   return { dates, reasons };
+}
+
+// ─── planBackfillWeek ─────────────────────────────────────────────────────────
+
+/**
+ * Plans the next backfill week (spec 05): the newest Monday in [retentionStart,
+ * catchUpStart), not in `skip`, with at least one date that has no record, and exactly
+ * those dates. Null when there is none. Resumable from the data alone: a date without a
+ * key in `days` is the only thing it plans. Only generated dates are looked up, so
+ * non-date store keys are ignored.
+ */
+export function planBackfillWeek(
+  days: Record<string, StoredRequestDay>,
+  today: string,
+  skip?: ReadonlySet<string>,
+): BackfillWeek | null {
+  const { catchUpStart, retentionStart } = requestWindows(today);
+  for (let monday = addDays(catchUpStart, -7); monday >= retentionStart; monday = addDays(monday, -7)) {
+    if (skip?.has(monday)) continue;
+    const dates = dateRange(monday, addDays(monday, 6)).filter(
+      (d) => d < catchUpStart && !Object.prototype.hasOwnProperty.call(days, d),
+    );
+    if (dates.length > 0) return { monday, dates };
+  }
+  return null;
 }
