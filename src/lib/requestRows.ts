@@ -3,8 +3,14 @@
 // older behind one toggle row. Expanded, the older entries are grouped by month, newest
 // month first, with malformed dates under "Other dates" last. No I/O and no clock: the
 // screen passes the week bounds and the toggle state.
+// FR2: the My Requests copy. The quiet freshness note over visible entries, the no-data
+// banner, whether Retry is offered, and the empty state. The 'auth' copy stays neutral
+// about the cause; only NO_CREDENTIALS gets its own text, because Retry cannot fix it.
 
-import type { ManualRequestEntry } from '../types/requests';
+import { NO_CREDENTIALS } from '../api/errors';
+import type { ManualRequestEntry, UseMyRequestsResult } from '../types/requests';
+
+type RequestsError = UseMyRequestsResult['error'];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -115,3 +121,111 @@ export function buildMyRequestRows(
 
   return rows;
 }
+
+// ─── FR2: formatUpdatedAgo ────────────────────────────────────────────────────
+
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+
+/** Local noon of the calendar day holding `ms`. The noon anchor keeps DST out of day math. */
+function localNoon(ms: number): number {
+  const d = new Date(ms);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12).getTime();
+}
+
+/**
+ * How long before `nowMs` (never the system clock) `iso` was: 'just now' under a minute,
+ * a future time included; then 'N min ago' and 'N h ago', floored; from 24 h on, calendar
+ * days between the local dates ('yesterday', 'N days ago'). Null, undefined or unparseable
+ * → '', so the caller drops its " · updated …" suffix.
+ */
+export function formatUpdatedAgo(iso: string | null | undefined, nowMs: number): string {
+  if (typeof iso !== 'string') return '';
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return '';
+
+  const ageMs = nowMs - then;
+  if (ageMs < MINUTE_MS) return 'just now';
+  if (ageMs < HOUR_MS) return `${Math.floor(ageMs / MINUTE_MS)} min ago`;
+
+  const days = Math.round((localNoon(nowMs) - localNoon(then)) / DAY_MS);
+  // days < 1 past 24 h only on a 25 h fall-back day: still the same date, so stay in hours.
+  if (ageMs < DAY_MS || days < 1) return `${Math.floor(ageMs / HOUR_MS)} h ago`;
+  return days === 1 ? 'yesterday' : `${days} days ago`;
+}
+
+// ─── FR2: note, banner, Retry and empty state ─────────────────────────────────
+
+export interface FreshnessNoteArgs {
+  hasEntries: boolean;
+  error: RequestsError;
+  errorCode: string | null;
+  staleDates: readonly string[];
+  updatedAt: string | null;
+  nowMs: number;
+}
+
+/**
+ * The quiet line under "My Requests" while entries are visible, or null when there is
+ * nothing to say (no entries, or a clean refresh). An error wins over stale dates, and
+ * errorCode only matters for 'auth'.
+ */
+export function freshnessNote({
+  hasEntries,
+  error,
+  errorCode,
+  staleDates,
+  updatedAt,
+  nowMs,
+}: FreshnessNoteArgs): string | null {
+  if (!hasEntries) return null;
+  const ago = formatUpdatedAgo(updatedAt, nowMs);
+  const upd = ago ? ` · updated ${ago}` : '';
+
+  if (error === 'network') return `Showing saved requests${upd}`;
+  if (error === 'auth') {
+    return errorCode === NO_CREDENTIALS
+      ? 'Saved sign-in missing · showing saved requests · sign out and back in from Settings'
+      : `Can't sign in to Crossover right now · showing saved requests${upd}`;
+  }
+  if (staleDates.length > 0) return `Some days couldn't refresh${upd}`;
+  return null;
+}
+
+/** The red banner text when nothing is visible. */
+export function requestsBannerText(
+  error: NonNullable<RequestsError>,
+  errorCode: string | null,
+): string {
+  if (error === 'network') return 'Could not load requests.';
+  return errorCode === NO_CREDENTIALS
+    ? 'Your saved sign-in is missing. Sign out and back in from Settings.'
+    : "Can't sign in to Crossover right now. If this keeps happening, sign out and back in from Settings.";
+}
+
+/**
+ * Whether the note or banner offers Retry: only for an error, and never for 'auth' +
+ * NO_CREDENTIALS, where the queryFn throws again before any request is made.
+ */
+export function requestsErrorRetryable(error: RequestsError, errorCode: string | null): boolean {
+  if (!error) return false;
+  return !(error === 'auth' && errorCode === NO_CREDENTIALS);
+}
+
+export type MyRequestsEmptyState = 'error' | 'incomplete' | 'none';
+
+/**
+ * What to show when no entries are visible: the banner alone for an error (C4), the honest
+ * incomplete card when some days never refreshed (C3), else "No requests yet".
+ */
+export function myRequestsEmptyState(
+  error: RequestsError,
+  staleDates: readonly string[],
+): MyRequestsEmptyState {
+  if (error) return 'error';
+  return staleDates.length > 0 ? 'incomplete' : 'none';
+}
+
+/** The empty card text for the 'incomplete' state (C3). */
+export const INCOMPLETE_EMPTY_TEXT = "Some days couldn't refresh, so requests may be missing.";
