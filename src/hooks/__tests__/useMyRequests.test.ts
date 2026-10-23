@@ -4,6 +4,8 @@
 // the store-backed queryFn (merge on success, throw on total failure, seed-then-throw),
 // and FR5 (DD2.55-DD2.58): the hook's retry predicate, selectMyRequests (owner and
 // dev-mock display rule), toRequestsError, and the env switch's removal of the view.
+// Extended by features/app/durable-data/specs/04-requests-history-ui FR3 (DD4.14-DD4.17):
+// selectMyRequests' errorCode, the forced refetch and the restore-aware isLoading.
 //
 // Strategy: Static analysis of the hook source file + AsyncStorage/mock
 // integration tests. renderHook via @testing-library/react-hooks is not
@@ -18,13 +20,16 @@
 // Fixture times are local wall-clock times, so the cases hold in any host time zone.
 //
 // DD2.55 calls the hook as a plain function: `useQuery` and `useConfig` are mocked to
-// capture the options and feed a query result (as in hooksCredsForwarding.test.ts). The
-// rest of @tanstack/react-query is the real one, so the QueryClient cases are unaffected.
+// capture the options and feed a query result (as in hooksCredsForwarding.test.ts), and
+// `useIsRestoring` is mocked too (the real one reads React context, which throws outside a
+// render). The rest of @tanstack/react-query is the real one, so the QueryClient cases are
+// unaffected.
 
 import * as fs from 'fs';
 import * as path from 'path';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { QueryClient, useQuery } from '@tanstack/react-query';
+import { QueryClient, useIsRestoring, useQuery } from '@tanstack/react-query';
+import { stripComments } from '../../../__tests__/helpers/stripComments';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -44,6 +49,7 @@ jest.mock('../../lib/log', () => ({
 jest.mock('@tanstack/react-query', () => ({
   ...jest.requireActual('@tanstack/react-query'),
   useQuery: jest.fn(),
+  useIsRestoring: jest.fn(() => false),
 }));
 
 jest.mock('../../hooks/useConfig', () => ({
@@ -55,7 +61,15 @@ jest.mock('../../hooks/useConfig', () => ({
 import { loadConfig, loadCredentials } from '../../store/config';
 import { fetchWorkDiary } from '../../api/workDiary';
 import { useConfig } from '../../hooks/useConfig';
-import { ApiError, AuthError, NetworkError, AUTH_HTML_500, NO_CREDENTIALS } from '../../api/errors';
+import {
+  ApiError,
+  AuthError,
+  NetworkError,
+  AUTH_HTML_500,
+  AUTH_LOGIN_LATCHED,
+  HTML_5XX_AFTER_RENEWAL,
+  NO_CREDENTIALS,
+} from '../../api/errors';
 import { log } from '../../lib/log';
 import { MOCK_MY_REQUESTS } from '../../lib/devMock';
 import type { MyRequestsStore, RequestsStoreOwner, StoredRequestDay } from '../../lib/requestsStore';
@@ -69,6 +83,7 @@ const mockAsyncStorage = AsyncStorage as jest.Mocked<typeof AsyncStorage> & { _r
 const mockWarn = log.warn as jest.Mock;
 const mockUseQuery = useQuery as jest.Mock;
 const mockUseConfig = useConfig as jest.Mock;
+const mockUseIsRestoring = useIsRestoring as jest.Mock;
 
 // ─── Static analysis ──────────────────────────────────────────────────────────
 
@@ -155,6 +170,31 @@ describe('useMyRequests — static analysis of source contract', () => {
   it('DD2.55 — retries through the shared predicate: retry: shouldRetryQuery, no more retry: 2', () => {
     expect(source).toMatch(/retry:\s*shouldRetryQuery/);
     expect(source).not.toMatch(/retry:\s*2\b/);
+  });
+});
+
+// durable-data 04-requests-history-ui FR3: code only, so a name in a comment never counts.
+describe('useMyRequests — DD4.15 static analysis (forced refetch, restore-aware isLoading)', () => {
+  let code: string;
+  let hookBody: string;
+
+  beforeAll(() => {
+    code = stripComments(fs.readFileSync(HOOK_PATH, 'utf8'));
+    hookBody = code.slice(code.indexOf('export function useMyRequests('));
+  });
+
+  it('imports useIsRestoring from @tanstack/react-query', () => {
+    expect(code).toMatch(/import\s*\{[^}]*\buseIsRestoring\b[^}]*\}\s*from\s*['"]@tanstack\/react-query['"]/);
+  });
+
+  it('the returned refetch is a closure that calls markMyRequestsForcedRefresh() before the query refetch', () => {
+    expect(hookBody).toMatch(
+      /\(\s*\)\s*=>\s*\{\s*markMyRequestsForcedRefresh\(\s*\)\s*;?\s*return\s+(?:\w+\.)?\w*[rR]efetch\(\s*\)\s*;?\s*\}/,
+    );
+  });
+
+  it('has no useCallback (the hook is also called outside a render, C6)', () => {
+    expect(code).not.toMatch(/\buseCallback\b/);
   });
 });
 
@@ -1433,6 +1473,7 @@ describe('useMyRequests — DD2.56 selectMyRequests (owner and dev-mock display 
     expect(selectMyRequests(undefined, DD_CONFIG, null)).toEqual({
       entries: [],
       error: null,
+      errorCode: null,
       staleDates: [],
       updatedAt: null,
     });
@@ -1442,6 +1483,7 @@ describe('useMyRequests — DD2.56 selectMyRequests (owner and dev-mock display 
     expect(selectMyRequests(legacy(), DD_CONFIG, null)).toEqual({
       entries,
       error: null,
+      errorCode: null,
       staleDates: [],
       updatedAt: null,
     });
@@ -1453,6 +1495,7 @@ describe('useMyRequests — DD2.56 selectMyRequests (owner and dev-mock display 
     expect(selectMyRequests(data, DD_CONFIG, null)).toEqual({
       entries,
       error: null,
+      errorCode: null,
       staleDates: [MON],
       updatedAt: NOON,
     });
@@ -1511,10 +1554,49 @@ describe('useMyRequests — DD2.56 selectMyRequests (owner and dev-mock display 
       expect(selectMyRequests(undefined, DD_CONFIG, noCreds)).toEqual({
         entries: [],
         error: 'auth',
+        errorCode: 'NO_CREDENTIALS',
         staleDates: [],
         updatedAt: null,
       });
     });
+  });
+});
+
+// ─── durable-data 04-requests-history-ui FR3: errorCode, forced refetch, isLoading ──
+
+describe('useMyRequests — DD4.14 selectMyRequests errorCode (C2: only for auth)', () => {
+  const entries = [TUE_REQ, MON_REQ];
+
+  it.each<[string, 'auth' | 'network' | null, string | null, unknown]>([
+    ['AuthError NO_CREDENTIALS', 'auth', 'NO_CREDENTIALS', new AuthError(401, 'Credentials unavailable', { errorCode: NO_CREDENTIALS })],
+    ['AuthError AUTH_LOGIN_LATCHED', 'auth', 'AUTH_LOGIN_LATCHED', new AuthError(401, 'Login latched', { errorCode: AUTH_LOGIN_LATCHED })],
+    ['AuthError(401) with no code', 'auth', null, new AuthError(401)],
+    // The AuthError's own code passes through, whatever it is (a server envelope code here)
+    ['AuthError(403) with a server code', 'auth', 'CROS-0005', new AuthError(403, 'Forbidden', { errorCode: 'CROS-0005' })],
+    ['AuthError AUTH_HTML_500 (an outage, so no auth code)', 'network', null, new AuthError(401, 'HTML 500', { errorCode: AUTH_HTML_500 })],
+    // An ApiError carries errorCode too, but it is never an auth error
+    ['ApiError HTML_5XX_AFTER_RENEWAL', 'network', null, new ApiError(503, 'HTML 503', { errorCode: HTML_5XX_AFTER_RENEWAL })],
+    ['NetworkError', 'network', null, new NetworkError('offline')],
+    ['{} (a restored errored query, spec 03)', 'network', null, {}],
+    ['no error', null, null, null],
+  ])('%s → error %p, errorCode %p', (_label, error, errorCode, err) => {
+    const selected = selectMyRequests(view(entries, PROD_KEY), DD_CONFIG, err);
+
+    expect([selected.error, selected.errorCode]).toEqual([error, errorCode]);
+    expect(selected.entries).toEqual(entries);
+  });
+
+  it("a legacy blob's own error: 'auth' with no thrown error → ('auth', null)", () => {
+    const selected = selectMyRequests({ entries: [...entries], error: 'auth' }, DD_CONFIG, undefined);
+
+    expect([selected.error, selected.errorCode]).toEqual(['auth', null]);
+  });
+
+  it('the thrown error wins over a legacy error, code included', () => {
+    const noCreds = new AuthError(401, 'Credentials unavailable', { errorCode: NO_CREDENTIALS });
+    const selected = selectMyRequests({ entries: [...entries], error: 'network' }, DD_CONFIG, noCreds);
+
+    expect([selected.error, selected.errorCode]).toEqual(['auth', 'NO_CREDENTIALS']);
   });
 });
 
@@ -1534,28 +1616,33 @@ describe('useMyRequests — DD2.57 toRequestsError', () => {
   });
 });
 
+/** Calls the hook as a plain function, with `config` and a TanStack query result. Named as a
+ *  hook so rules-of-hooks accepts the direct `useMyRequests()` call (no render is involved).
+ *  `env` feeds `useConfig().isLoading` and `useIsRestoring()`; the query's `refetch` returns
+ *  `query.refetchResult`. Module-level: the forced refresh block at the end of the file uses it. */
+function useMyRequestsWith(
+  config: CrossoverConfig | null,
+  query: { data?: MyRequestsData; error?: unknown; isLoading?: boolean; refetchResult?: unknown } = {},
+  env: { configLoading?: boolean; isRestoring?: boolean } = {},
+) {
+  const refetch = jest.fn(() => query.refetchResult);
+  mockUseConfig.mockReturnValue({ config, isLoading: env.configLoading ?? false, refetch: jest.fn() });
+  mockUseIsRestoring.mockReturnValue(env.isRestoring ?? false);
+  mockUseQuery.mockReturnValue({
+    data: query.data,
+    error: query.error ?? null,
+    isLoading: query.isLoading ?? false,
+    refetch,
+  });
+  const result = useMyRequests();
+  return { result, options: mockUseQuery.mock.lastCall![0], refetch };
+}
+
 describe('useMyRequests — DD2.55 hook wiring (useQuery mocked)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockUseIsRestoring.mockReturnValue(false);
   });
-
-  /** Calls the hook as a plain function, with `config` and a TanStack query result. Named as a
-   *  hook so rules-of-hooks accepts the direct `useMyRequests()` call (no render is involved). */
-  function useMyRequestsWith(
-    config: CrossoverConfig | null,
-    query: { data?: MyRequestsData; error?: unknown; isLoading?: boolean } = {},
-  ) {
-    const refetch = jest.fn();
-    mockUseConfig.mockReturnValue({ config, isLoading: false, refetch: jest.fn() });
-    mockUseQuery.mockReturnValue({
-      data: query.data,
-      error: query.error ?? null,
-      isLoading: query.isLoading ?? false,
-      refetch,
-    });
-    const result = useMyRequests();
-    return { result, options: mockUseQuery.mock.lastCall![0], refetch };
-  }
 
   it("queries ['myRequests', assignmentId] with staleTime 60 s, enabled only with an assignment (preserved)", () => {
     const { options } = useMyRequestsWith(DD_CONFIG);
@@ -1594,11 +1681,15 @@ describe('useMyRequests — DD2.55 hook wiring (useQuery mocked)', () => {
     expect(rest).toEqual({
       entries: [TUE_REQ, MON_REQ],
       error: null,
+      errorCode: null,
       staleDates: [MON],
       updatedAt: NOON,
       isLoading: false,
     });
-    expect(returnedRefetch).toBe(refetch);
+    // The returned refetch is the forced one; its behaviour is DD4.16, in the forced refresh
+    // block last in the file (calling it sets the module-level flag). Selecting never refetches.
+    expect(typeof returnedRefetch).toBe('function');
+    expect(refetch).not.toHaveBeenCalled();
   });
 
   it('while loading with no data → isLoading true, no entries, staleDates [] and updatedAt null', () => {
@@ -1622,6 +1713,50 @@ describe('useMyRequests — DD2.55 hook wiring (useQuery mocked)', () => {
 
     expect(result.error).toBe('auth');
     expect(result.entries).toEqual([TUE_REQ]);
+  });
+
+  it('a thrown NO_CREDENTIALS AuthError surfaces its errorCode through the hook', () => {
+    const noCreds = new AuthError(401, 'Credentials unavailable', { errorCode: NO_CREDENTIALS });
+    const { result } = useMyRequestsWith(DD_CONFIG, { data: view([TUE_REQ], PROD_KEY), error: noCreds });
+
+    expect(result.error).toBe('auth');
+    expect(result.errorCode).toBe('NO_CREDENTIALS');
+    expect(result.entries).toEqual([TUE_REQ]);
+  });
+});
+
+describe('useMyRequests — DD4.17 restore-aware isLoading (C8)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockUseIsRestoring.mockReturnValue(false);
+  });
+
+  it('while the persister restores (config null, query disabled and idle) → isLoading true, no entries', () => {
+    // The cold-start window: useConfig reports null with isLoading false, and the query is idle
+    const { result } = useMyRequestsWith(null, { isLoading: false }, { isRestoring: true });
+
+    expect(result.isLoading).toBe(true);
+    expect(result.entries).toEqual([]);
+  });
+
+  it('config still loading and no data yet → isLoading true (the query is disabled, so it is idle)', () => {
+    const { result } = useMyRequestsWith(null, { isLoading: false }, { configLoading: true });
+
+    expect(result.isLoading).toBe(true);
+    expect(result.entries).toEqual([]);
+  });
+
+  it('config still loading but data present → isLoading false (only a never-loaded query holds the skeleton)', () => {
+    const { result } = useMyRequestsWith(null, { data: { entries: [TUE_REQ], error: null } }, { configLoading: true });
+
+    expect(result.isLoading).toBe(false);
+    expect(result.entries).toEqual([TUE_REQ]);
+  });
+
+  it.each([true, false])('neither restoring nor config loading → mirrors the query isLoading (%p)', (queryLoading) => {
+    const { result } = useMyRequestsWith(DD_CONFIG, { isLoading: queryLoading });
+
+    expect(result.isLoading).toBe(queryLoading);
   });
 });
 
@@ -1776,5 +1911,46 @@ describe('useMyRequests — DD2 forced refresh flag', () => {
     mockFetchWorkDiary.mockClear();
     await buildMyRequestsQueryFn(WED, () => local(`${WED}T08:10`))();
     expect(calledDates()).toEqual([WED]);
+  });
+
+  // DD4.16 (durable-data 04 FR3): the hook's refetch is the forced refresh. DD2.51's setup: the
+  // window fetched at 08:00, so an unforced run at 08:05 plans today only.
+
+  it('DD4.16 calling the hook without refetch() leaves the next run unforced', async () => {
+    signedIn();
+    mockFetchWorkDiary.mockResolvedValue([]);
+    await seedStore(windowRecords(WED, `${WED}T08:00`));
+
+    useMyRequestsWith(DD_CONFIG, { data: view([], PROD_KEY) });
+    await buildMyRequestsQueryFn(WED, () => local(`${WED}T08:05`))();
+
+    expect(calledDates()).toEqual([WED]);
+  });
+
+  it('DD4.16 refetch() → the next run plans every catchUpStart..today date once; the one after is normal', async () => {
+    signedIn();
+    mockFetchWorkDiary.mockResolvedValue([]);
+    await seedStore(windowRecords(WED, `${WED}T08:00`));
+    const { result } = useMyRequestsWith(DD_CONFIG, { data: view([], PROD_KEY) });
+
+    result.refetch();
+    await buildMyRequestsQueryFn(WED, () => local(`${WED}T08:05`))();
+    expect(calledDates()).toEqual(desc(CATCH_UP, WED));
+
+    mockFetchWorkDiary.mockClear();
+    await buildMyRequestsQueryFn(WED, () => local(`${WED}T08:10`))();
+    expect(calledDates()).toEqual([WED]);
+  });
+
+  // Last in the file: it runs no queryFn after refetch(), so it leaves the flag set.
+  it('DD4.16 refetch() calls the query refetch exactly once and returns its promise (the same object)', () => {
+    const sentinel = Promise.resolve('refetched');
+    const { result, refetch } = useMyRequestsWith(DD_CONFIG, { refetchResult: sentinel });
+    expect(refetch).not.toHaveBeenCalled();
+
+    const returned = result.refetch();
+
+    expect(returned).toBe(sentinel);
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 });
