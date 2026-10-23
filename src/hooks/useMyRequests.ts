@@ -26,6 +26,7 @@ import {
   NetworkError,
   AUTH_HTML_500,
   NO_CREDENTIALS,
+  MAX_QUERY_RETRIES,
   shouldRetryQuery,
 } from '../api/errors';
 import { groupSlotsIntoEntries } from '../lib/requestsUtils';
@@ -33,6 +34,7 @@ import { isDaySettled, planRequestRefresh, todayLocal } from '../lib/requestsPla
 import {
   buildRequestsView,
   composeRequestsView,
+  isOwnerConfigured,
   readRequestsStore,
   updateRequestsStore,
   type RequestsStoreOwner,
@@ -51,20 +53,28 @@ export function toOwnerKey(assignmentId: string, useQA: boolean): string {
   return `${assignmentId}|${useQA ? 'qa' : 'prod'}`;
 }
 
-// ─── Forced refresh (one-shot) ───────────────────────────────────────────────
+// ─── Forced refresh ──────────────────────────────────────────────────────────
 
-let forcedRefresh = false;
+// Every run that starts while a mark is set plans the whole 3-week window. The mark is
+// cleared by the first such run that fetches at least one day, or after
+// 1 + MAX_QUERY_RETRIES totally failed forced runs. So neither a TanStack retry nor an
+// earlier run that refetch() cancelled (its body keeps running) can use it up before the
+// visible run plans, and an outage does not force every later wake.
+let forcedRefresh: { failuresLeft: number } | null = null;
 
-/** The next queryFn run re-fetches the whole 3-week window (pull-to-refresh / Retry). */
+/** The next queryFn runs re-fetch the whole 3-week window (pull-to-refresh / Retry). */
 export function markMyRequestsForcedRefresh(): void {
-  forcedRefresh = true;
+  forcedRefresh = { failuresLeft: MAX_QUERY_RETRIES + 1 };
 }
 
-/** Reads and resets the one-shot flag. */
-function consumeForcedRefresh(): boolean {
-  const force = forcedRefresh;
-  forcedRefresh = false;
-  return force;
+/** A forced run fetched at least one day: the mark it read is done. */
+function settleForcedRefresh(mark: typeof forcedRefresh): void {
+  if (mark && forcedRefresh === mark) forcedRefresh = null;
+}
+
+/** A forced run failed totally: the mark it read has one attempt fewer left. */
+function failForcedRefresh(mark: typeof forcedRefresh): void {
+  if (mark && forcedRefresh === mark && --mark.failuresLeft <= 0) forcedRefresh = null;
 }
 
 // ─── Error mapping ───────────────────────────────────────────────────────────
@@ -172,9 +182,16 @@ export function buildMyRequestsQueryFn(
         ? rawPrior
         : undefined;
 
-    // Cold cache: show the stored view before throwing, so the error keeps data on screen
-    const seedAndThrow = (err: unknown, staleDates: string[]): never => {
-      if (ctx && prior === undefined && Object.keys(baseDays).length > 0) {
+    // Cold cache: show the stored view before throwing, so the error keeps data on screen.
+    // Never after a sign-out or account/env change mid-run: setQueryData on a cleared
+    // client would re-create the view and the persister would write it back.
+    const seedAndThrow = async (err: unknown, staleDates: string[]): Promise<never> => {
+      if (
+        ctx &&
+        prior === undefined &&
+        Object.keys(baseDays).length > 0 &&
+        (await isOwnerConfigured(owner))
+      ) {
         const view = buildRequestsView(baseDays, today);
         ctx.client.setQueryData<MyRequestsData>(
           ctx.queryKey,
@@ -199,7 +216,8 @@ export function buildMyRequestsQueryFn(
       );
     }
 
-    const plan = planRequestRefresh({ today, nowMs, days: baseDays, force: consumeForcedRefresh() });
+    const forceMark = forcedRefresh;
+    const plan = planRequestRefresh({ today, nowMs, days: baseDays, force: forceMark !== null });
 
     // Fetch the planned days in parallel, tolerating individual failures
     const settled = await Promise.allSettled(
@@ -229,6 +247,7 @@ export function buildMyRequestsQueryFn(
         reasons.find((r) => r instanceof AuthError && r.errorCode !== AUTH_HTML_500) ??
         reasons[0] ??
         new NetworkError('Empty work diary response');
+      failForcedRefresh(forceMark);
       log.warn('requests.refresh_failed', {
         plannedDays: plan.dates.length,
         failedDays: failedDates.length,
@@ -236,6 +255,8 @@ export function buildMyRequestsQueryFn(
       });
       return seedAndThrow(err, plan.dates);
     }
+
+    settleForcedRefresh(forceMark);
 
     // An unreadable store is never written this run; the view still uses what was fetched
     const stored =
