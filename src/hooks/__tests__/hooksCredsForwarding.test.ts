@@ -52,6 +52,8 @@ jest.mock('../../api/payments', () => ({
 
 jest.mock('../../lib/weeklyHistory', () => ({
   loadWeeklyHistory: jest.fn(),
+  // durable-data 03 FR4: runBackfill reads through the strict reader before its first apiGet.
+  readWeeklyHistoryForWrite: jest.fn(),
   mergeWeeklySnapshot: jest.fn((h: unknown) => h),
   saveWeeklyHistory: jest.fn(),
 }));
@@ -68,7 +70,7 @@ import { loadCredentials } from '../../store/config';
 import { getAuthToken, apiGet } from '../../api/client';
 import { fetchTimesheet } from '../../api/timesheet';
 import { fetchPayments } from '../../api/payments';
-import { loadWeeklyHistory } from '../../lib/weeklyHistory';
+import { loadWeeklyHistory, readWeeklyHistoryForWrite } from '../../lib/weeklyHistory';
 import { useTimesheet } from '../useTimesheet';
 import { usePayments } from '../usePayments';
 import { useEarningsHistory } from '../useEarningsHistory';
@@ -83,6 +85,7 @@ const mockApiGet = apiGet as jest.Mock;
 const mockFetchTimesheet = fetchTimesheet as jest.Mock;
 const mockFetchPayments = fetchPayments as jest.Mock;
 const mockLoadWeeklyHistory = loadWeeklyHistory as jest.Mock;
+const mockReadWeeklyHistoryForWrite = readWeeklyHistoryForWrite as jest.Mock;
 
 const CREDENTIALS = { username: 'worker@example.com', password: 's3cret' };
 const TOKEN = 'token-abc';
@@ -164,6 +167,7 @@ describe.each([false, true])('FR4.h: hooks forward toAuthCreds(credentials, conf
     beforeEach(() => {
       jest.useFakeTimers();
       mockLoadWeeklyHistory.mockResolvedValue([]);
+      mockReadWeeklyHistoryForWrite.mockResolvedValue([]);
     });
 
     afterEach(() => {

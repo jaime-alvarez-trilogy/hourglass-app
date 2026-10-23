@@ -421,3 +421,90 @@ describe('FR7+FR8: useAIData', () => {
     expect(increment).toBeLessThan(7);
   });
 });
+
+// ── FR4 (03-keep-last-good): the week-transition flush never saves over an unreadable
+// weekly_history_v2. ai_cache still holds a day from the week just ended, so the flush runs;
+// when the history store cannot be read it must skip the write (writing would replace every
+// stored week with that one week), and the AI tab itself is unaffected.
+
+describe('FR4 (03-keep-last-good): week-transition flush with an unreadable weekly_history_v2', () => {
+  const HISTORY_KEY = 'weekly_history_v2';
+  // Thursday 2026-10-22, midday UTC: today, the current Monday (2026-10-19) and the
+  // previous week (Mon 2026-10-12 to Sun 2026-10-18) are the same in every host time zone.
+  // Not a Monday, so only the week-transition flush writes weekly history.
+  const NOW = new Date('2026-10-22T12:00:00.000Z');
+  const PREV_WEEK_MONDAY = '2026-10-12';
+  const PREV_WEEK_DAY = '2026-10-15';
+  const CURRENT_WEEK_DAYS = 4; // Mon 19 .. Thu 22, each fetched (nothing cached for them)
+  // Tagged 24 of 30 → aiPct 50; 6 second-brain slots → 1 h BrainLift.
+  const PREV_WEEK_TAGS: TagData = { total: 30, aiUsage: 12, secondBrain: 6, noTags: 6 };
+  const STORED_HISTORY = [
+    { weekStart: '2026-09-28', hours: 40, earnings: 2000, aiPct: 72, brainliftHours: 5 },
+    { weekStart: '2026-10-05', hours: 38, earnings: 1900, aiPct: 78, brainliftHours: 4.5 },
+  ];
+
+  const storage = AsyncStorage as unknown as { getItem: jest.Mock; setItem: jest.Mock };
+  const historyWrites = () => storage.setItem.mock.calls.filter(([k]) => k === HISTORY_KEY);
+
+  /** Seeds the last good weekly history and an ai_cache holding only last week's day. */
+  async function seed(): Promise<string> {
+    const historyRaw = JSON.stringify(STORED_HISTORY);
+    await AsyncStorage.setItem(HISTORY_KEY, historyRaw);
+    await AsyncStorage.setItem('ai_cache', JSON.stringify({ [PREV_WEEK_DAY]: PREV_WEEK_TAGS }));
+    storage.setItem.mockClear();
+    return historyRaw;
+  }
+
+  beforeEach(() => {
+    // Only Date is faked; timers stay real for flushAsync, AsyncStorage and TanStack.
+    jest.useFakeTimers({
+      now: NOW,
+      doNotFake: [
+        'hrtime', 'nextTick', 'performance', 'queueMicrotask', 'requestAnimationFrame',
+        'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback', 'setImmediate',
+        'clearImmediate', 'setInterval', 'clearInterval', 'setTimeout', 'clearTimeout',
+      ],
+    });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('DD3.30: getItem rejects for weekly_history_v2 → no weekly_history_v2 write, and the hook still returns data', async () => {
+    const historyRaw = await seed();
+    const readStore = storage.getItem.getMockImplementation()!;
+    storage.getItem.mockImplementation((key: string) =>
+      key === HISTORY_KEY ? Promise.reject(new Error('SQLITE_IOERR')) : readStore(key),
+    );
+
+    const { get } = setupHook();
+    await flushAsync();
+
+    // The flush did run (it tried to read the history) and then wrote nothing
+    expect(storage.getItem).toHaveBeenCalledWith(HISTORY_KEY);
+    expect(historyWrites()).toEqual([]);
+
+    // The AI tab is unaffected: the current week was fetched and is shown
+    expect(get().data).not.toBeNull();
+    expect(get().data?.totalSlots).toBe(CURRENT_WEEK_DAYS * makeSlots(20, 3, 5).length);
+    expect(get().error).toBeNull();
+
+    // The stored weeks are still on disk, byte for byte
+    storage.getItem.mockImplementation(readStore);
+    expect(await AsyncStorage.getItem(HISTORY_KEY)).toBe(historyRaw);
+  });
+
+  it('DD3.30 (preserved): a readable history → the flush saves the week just ended once, merged into the stored weeks', async () => {
+    await seed();
+
+    setupHook();
+    await flushAsync();
+
+    expect(historyWrites()).toHaveLength(1);
+    expect(JSON.parse(historyWrites()[0][1])).toEqual([
+      ...STORED_HISTORY,
+      { weekStart: PREV_WEEK_MONDAY, hours: 0, earnings: 0, aiPct: 50, brainliftHours: 1 },
+    ]);
+  });
+});
