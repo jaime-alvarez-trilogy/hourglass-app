@@ -16,7 +16,7 @@ import { loadCredentials } from '../store/config';
 import { getAuthToken, apiGet } from '../api/client';
 import { toAuthCreds } from '../api/authCreds';
 import type { Payment } from '../lib/payments';
-import { loadWeeklyHistory, mergeWeeklySnapshot, saveWeeklyHistory } from '../lib/weeklyHistory';
+import { readWeeklyHistoryForWrite, mergeWeeklySnapshot, saveWeeklyHistory } from '../lib/weeklyHistory';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -155,8 +155,10 @@ export function useEarningsHistory(
 
     // FR3 (06-overview-history): also write earnings + hours + overtime to weekly_history_v2.
     // Additive write — failure is silent and does not affect the trend return value.
-    loadWeeklyHistory()
+    // Strict read: an unreadable history (null) skips the save (durable-data 03 FR4).
+    readWeeklyHistoryForWrite()
       .then(history => {
+        if (!history) return;
         let updated = history;
         for (const weekStart of Object.keys(weeks)) {
           updated = mergeWeeklySnapshot(updated, {

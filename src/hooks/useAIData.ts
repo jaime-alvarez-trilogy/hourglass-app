@@ -27,7 +27,7 @@ import {
 import type { AppBreakdownEntry } from '../lib/aiAppBreakdown';
 import { AuthError, NetworkError } from '../api/errors';
 import type { TagData, AIWeekData } from '../lib/ai';
-import { loadWeeklyHistory, mergeWeeklySnapshot, saveWeeklyHistory } from '../lib/weeklyHistory';
+import { readWeeklyHistoryForWrite, mergeWeeklySnapshot, saveWeeklyHistory } from '../lib/weeklyHistory';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -177,7 +177,9 @@ export function useAIData(): UseAIDataResult {
           const tagged = totalSlots - noTagSlots;
           const aiPct = tagged > 0 ? Math.round((aiSlots / tagged) * 100) : 0;
           const brainliftHours = sbSlots * 10 / 60;
-          loadWeeklyHistory().then(history => {
+          // Strict read: an unreadable history (null) skips the save (durable-data 03 FR4)
+          readWeeklyHistoryForWrite().then(history => {
+            if (!history) return;
             const existing = history.find(s => s.weekStart === prevWeekMonday);
             if (!existing || existing.aiPct === 0) {
               return saveWeeklyHistory(
@@ -317,8 +319,10 @@ export function useAIData(): UseAIDataResult {
           const dd = String(d.getDate()).padStart(2, '0');
           const prevWeekStart = `${y}-${m}-${dd}`;
 
-          loadWeeklyHistory()
+          // Strict read: an unreadable history (null) skips the save (durable-data 03 FR4)
+          readWeeklyHistoryForWrite()
             .then(history => {
+              if (!history) return;
               const updated = mergeWeeklySnapshot(history, {
                 weekStart: prevWeekStart,
                 aiPct: midpoint,

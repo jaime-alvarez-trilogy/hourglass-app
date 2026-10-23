@@ -28,7 +28,12 @@ import {
   saveAppHistory,
 } from '../lib/aiAppBreakdown';
 import type { AppBreakdownEntry } from '../lib/aiAppBreakdown';
-import { loadWeeklyHistory, mergeWeeklySnapshot, saveWeeklyHistory } from '../lib/weeklyHistory';
+import {
+  loadWeeklyHistory,
+  readWeeklyHistoryForWrite,
+  mergeWeeklySnapshot,
+  saveWeeklyHistory,
+} from '../lib/weeklyHistory';
 import type { WeeklySnapshot } from '../lib/weeklyHistory';
 import type { TagData } from '../lib/ai';
 import type { WorkDiarySlot } from '../types/api';
@@ -141,14 +146,23 @@ function computeWeekAI(dayData: Record<string, TagData>): { aiPct: number; brain
 
 // ─── Backfill runner ──────────────────────────────────────────────────────────
 
-/** Returns the full updated history after filling AI gaps, or null if nothing to fill. */
-async function runBackfill(
+/**
+ * Fills AI gaps in past weeks of weekly_history_v2. Exported for testing.
+ *
+ * Resolves:
+ *   - null when weekly_history_v2 cannot be read: nothing is fetched or written
+ *     (durable-data 03 FR4 — never save over an unreadable store);
+ *   - the stored history unchanged when there is nothing to fill, or the token fails;
+ *   - otherwise the updated history, saved after each filled week.
+ */
+export async function runBackfill(
   assignmentId: string,
   useQA: boolean,
   username: string,
   password: string,
-): Promise<WeeklySnapshot[]> {
-  const history = await loadWeeklyHistory();
+): Promise<WeeklySnapshot[] | null> {
+  const history = await readWeeklyHistoryForWrite();
+  if (!history) return null;
   const historyMap = new Map(history.map(s => [s.weekStart, s]));
 
   // Collect past week Mondays that need AI backfill (aiPct === 0)
@@ -280,7 +294,10 @@ export function useHistoryBackfill(): WeeklySnapshot[] | null {
       loadCredentials().then(creds => {
         if (!creds) { refreshFromStorage(); return; }
         return runBackfill(config.assignmentId, config.useQA, creds.username, creds.password)
-          .then(updated => { setSnapshots(updated); });
+          .then(updated => {
+            // null: the store was unreadable — keep snapshots as they are
+            if (updated) setSnapshots(updated);
+          });
       }).catch(() => {
         refreshFromStorage(); // ensure overview always gets fresh storage state
       });
