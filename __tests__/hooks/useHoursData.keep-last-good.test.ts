@@ -290,3 +290,21 @@ describe('durable-data 03 FR1: useHoursData keeps the last good hours and earnin
     expect(get().error).toBeNull();
   });
 });
+
+// ─── durable-data cross-spec review: a payments-only failure ──────────────────
+
+describe('cross-spec review: a payments-only failure still shows fresh timesheet hours', () => {
+  it('timesheet succeeds, payments fails (no payments data yet) → live hours from the timesheet, not the stale cache', async () => {
+    await seedHoursCache(SEEDED_HOURS);
+    serve(() => Promise.resolve([TIMESHEET_ROW]), outage);
+
+    const { get, idle } = setupHook();
+    await settle(idle);
+
+    expect(get().data?.total).toBe(20);
+    // No payments row: earnings fall back to total × rate, as before spec 03
+    expect(get().data?.weeklyEarnings).toBe(20 * CONFIG.hourlyRate);
+    expect(get().isStale).toBe(false);
+    expect(get().error).toBeNull();
+  });
+});
