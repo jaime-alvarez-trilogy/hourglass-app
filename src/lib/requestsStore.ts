@@ -8,6 +8,8 @@
 // prune to REQUESTS_RETENTION_WEEKS, and check the configured owner before and after
 // setItem, so a write racing sign-out's clearAll() never survives it. updateRequestsStore
 // never rejects.
+// durable-data 05-requests-backfill FR2: isOwnerConfigured is exported, so the backfill
+// checks the owner before each week's fetch with the store's own rule (C3).
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loadConfig } from '../store/config';
@@ -129,7 +131,7 @@ function serialized<T>(task: () => Promise<T>): Promise<T> {
 }
 
 /** True when the configured account is still `owner`. A missing config or a throw counts as false (C7). */
-async function isOwnerConfigured(owner: RequestsStoreOwner): Promise<boolean> {
+export async function isOwnerConfigured(owner: RequestsStoreOwner): Promise<boolean> {
   try {
     const config = await loadConfig();
     return (
