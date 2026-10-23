@@ -2012,21 +2012,38 @@ describe('useMyRequests — cross-spec review: sign-out mid-run and the forced-r
 
   it('an earlier run still in flight cannot use up the flag meant for the visible (pull-to-refresh) run', async () => {
     signedIn();
-    mockFetchWorkDiary.mockResolvedValue([]);
     await seedStore(windowRecords(WED, `${WED}T08:00`));
+    // Diary requests hang until both runs have planned
+    let openGate!: () => void;
+    const gate = new Promise<void>((r) => (openGate = r));
+    mockFetchWorkDiary.mockImplementation(async () => {
+      await gate;
+      return [];
+    });
 
-    // R1 (a focus refetch) is parked in its config read when the user pulls
+    // R1 (a focus refetch) is parked in its config read when the user pulls; refetch()
+    // cancels it silently and starts R2, which is parked a little longer
     let releaseR1!: () => void;
-    const r1Config = new Promise<CrossoverConfig>((r) => (releaseR1 = () => r(DD_CONFIG)));
-    mockLoadConfig.mockReturnValueOnce(r1Config);
+    let releaseR2!: () => void;
+    mockLoadConfig
+      .mockReturnValueOnce(new Promise<CrossoverConfig>((r) => (releaseR1 = () => r(DD_CONFIG))))
+      .mockReturnValueOnce(new Promise<CrossoverConfig>((r) => (releaseR2 = () => r(DD_CONFIG))));
     const r1 = buildMyRequestsQueryFn(WED, () => local(`${WED}T08:05`))();
-
     markMyRequestsForcedRefresh();
-    releaseR1();
-    await r1; // the orphan reaches the planner first
-    mockFetchWorkDiary.mockClear();
+    const r2 = buildMyRequestsQueryFn(WED, () => local(`${WED}T08:05`))();
 
-    await buildMyRequestsQueryFn(WED, () => local(`${WED}T08:05`))(); // R2: the visible run
-    expect(calledDates()).toEqual(desc(CATCH_UP, WED));
+    releaseR1();
+    await new Promise((r) => setTimeout(r, 0)); // the orphan reaches the planner first
+    releaseR2();
+    await new Promise((r) => setTimeout(r, 0));
+    openGate();
+    await Promise.all([r1, r2]);
+
+    // Both runs planned the whole window, so the visible run re-checked it too
+    const window = desc(CATCH_UP, WED);
+    const counts = new Map<string, number>();
+    calledDates().forEach((d) => counts.set(d, (counts.get(d) ?? 0) + 1));
+    expect(window.every((d) => counts.get(d) === 2)).toBe(true);
   });
+
 });
