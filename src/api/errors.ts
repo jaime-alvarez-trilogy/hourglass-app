@@ -3,6 +3,7 @@
 // errorCode, type, and human-readable text from the server.
 // durable-data 01-auth-renewal FR3: synthetic error codes and the shared query
 // retry predicate.
+// durable-data 03-keep-last-good FR1: the one-retry form, shouldRetryOnce.
 
 // ---------------------------------------------------------------------------
 // Synthetic (client-side) error codes, carried in `errorCode`
@@ -113,4 +114,13 @@ export function isRetryableError(err: unknown): boolean {
  */
 export function shouldRetryQuery(failureCount: number, error: unknown): boolean {
   return failureCount < MAX_QUERY_RETRIES && isRetryableError(error);
+}
+
+/**
+ * TanStack `retry` option: one retry (today's `retry: 1`), and only for retryable
+ * errors. Used by the hours, payments, earnings-trend and team hooks
+ * (durable-data 03-keep-last-good).
+ */
+export function shouldRetryOnce(failureCount: number, error: unknown): boolean {
+  return failureCount < 1 && isRetryableError(error);
 }

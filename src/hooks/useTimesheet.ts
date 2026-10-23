@@ -10,6 +10,7 @@ import { loadCredentials, getApiBase } from '../store/config';
 import type { CrossoverConfig } from '../types/config';
 import type { TimesheetResponse } from '../lib/hours';
 import { getAuthToken } from '../api/client';
+import { shouldRetryOnce } from '../api/errors';
 import { toAuthCreds } from '../api/authCreds';
 
 /**
@@ -32,6 +33,6 @@ export function useTimesheet(config: CrossoverConfig | null) {
     },
     enabled: !!config,
     staleTime: 15 * 60 * 1000, // 15 minutes
-    retry: 1,
+    retry: shouldRetryOnce, // one retry, outages only (never a credential failure)
   });
 }

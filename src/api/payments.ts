@@ -4,10 +4,13 @@
 //
 // CRITICAL: Uses Mon–Sun UTC weeks.
 // Dates MUST be formatted with Date.UTC() arithmetic — never toISOString() on local dates.
+//
+// durable-data 03-keep-last-good FR1: every request failure is rethrown, so a failed
+// refresh errors the query instead of reading as $0. `null` means the server answered
+// with no row.
 
 import { apiGet } from './client';
 import type { AuthCreds } from './authCreds';
-import { AuthError } from './errors';
 import type { PaymentsResponse } from '../lib/hours';
 import type { CrossoverConfig } from '../types/config';
 
@@ -39,8 +42,9 @@ function getUTCWeekBoundaries(): { from: string; to: string } {
 
 /**
  * Fetches the current Mon-Sun UTC week's payment record (earnings ledger row).
- * Returns null if the API yields no row or fails non-fatally; rethrows AuthError so the
- * caller can re-onboard. Week boundaries are UTC-aligned — see header comment for why.
+ * Returns null only when the API answers with no row (`[]` or an empty body). Every
+ * request failure (AuthError, NetworkError, ApiError) is rethrown, so the caller keeps
+ * its last good row. Week boundaries are UTC-aligned — see header comment for why.
  * `creds` lets the client renew an expired token and retry once.
  */
 export async function fetchPayments(
@@ -50,19 +54,14 @@ export async function fetchPayments(
 ): Promise<PaymentsResponse | null> {
   const { from, to } = getUTCWeekBoundaries();
 
-  try {
-    const result = await apiGet<PaymentsResponse[]>(
-      '/api/v3/users/current/payments',
-      { from, to },
-      token,
-      config.useQA,
-      creds
-    );
-    if (Array.isArray(result) && result.length > 0) return result[0];
-  } catch (e) {
-    if (e instanceof AuthError) throw e;
-    /* non-fatal — dashboard shows without payment data */
-  }
+  const result = await apiGet<PaymentsResponse[]>(
+    '/api/v3/users/current/payments',
+    { from, to },
+    token,
+    config.useQA,
+    creds
+  );
+  if (Array.isArray(result) && result.length > 0) return result[0];
 
   return null;
 }
