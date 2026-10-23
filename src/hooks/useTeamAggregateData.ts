@@ -6,6 +6,11 @@
 // isolating per-report failures so one bad report never fails the whole
 // query. AI% is slot-weighted: raw TagData counts are summed across
 // successful reports BEFORE the percentage is computed — never averaged.
+//
+// durable-data 03-keep-last-good FR3: when the roster is non-empty and EVERY
+// report failed, the queryFn throws (the first failed member's error, in
+// roster order) instead of resolving zeros, so TanStack keeps the last good
+// totals. An empty roster still resolves zeros; a partial failure is unchanged.
 
 import { useQuery } from '@tanstack/react-query';
 import { useConfig } from './useConfig';
@@ -13,6 +18,7 @@ import { useTeamRoster } from './useTeamRoster';
 import { loadCredentials } from '../store/config';
 import { getAuthToken } from '../api/client';
 import { toAuthCreds } from '../api/authCreds';
+import { NetworkError, shouldRetryOnce } from '../api/errors';
 import { fetchWorkDiary } from '../api/workDiary';
 import { fetchReportTimesheet } from '../api/team';
 import { countDiaryTags, aggregateAICache } from '../lib/ai';
@@ -123,12 +129,17 @@ function sumTagData(a: TagData, b: TagData): TagData {
 interface MemberFetchResult {
   breakdown: TeamMemberBreakdown;
   cache: Record<string, TagData> | null; // null when the member's fetch failed
+  error?: unknown; // the caught error, only when the member's fetch failed
 }
 
 /**
  * Returns the TanStack Query queryFn for useTeamAggregateData. Exported
  * separately so it can be tested in isolation without renderHook, matching
  * the useMyRequests.ts convention.
+ *
+ * Rejects when the roster is non-empty and no report succeeded, with the first
+ * failed member's error in roster order (or a NetworkError when that error is
+ * undefined/null), so a total failure never resolves as zero-valued totals.
  *
  * @param todayOverride  Inject today's date (YYYY-MM-DD) for testing.
  */
@@ -201,6 +212,7 @@ export function buildTeamAggregateQueryFn(
               fetchFailed: true,
             },
             cache: null,
+            error: err,
           };
         }
       }),
@@ -217,6 +229,15 @@ export function buildTeamAggregateQueryFn(
       for (const [date, tagData] of Object.entries(cache)) {
         teamCache[date] = sumTagData(teamCache[date] ?? zeroTagData(), tagData);
       }
+    }
+
+    // Every report failed: throw so TanStack keeps the last good totals. The real
+    // error (e.g. an AuthError) is rethrown unwrapped so the retry rule sees it.
+    if (roster.length > 0 && reportCount === 0) {
+      throw (
+        memberResults.find((r) => r.breakdown.fetchFailed)?.error ??
+        new NetworkError('All team member fetches failed')
+      );
     }
 
     const teamAggregate = aggregateAICache(teamCache, today);
@@ -270,8 +291,10 @@ export function mapTeamAggregateState(
  * hours, successful report count) plus an ordered per-person breakdown, for
  * the authenticated manager's direct reports. Per-report failures (either
  * work-diary or timesheet) are isolated: excluded from all totals, retained
- * in `breakdown` with `fetchFailed: true`. Query key is scoped by team and
- * the current UTC Monday with a 24h staleTime — no custom refresh timers.
+ * in `breakdown` with `fetchFailed: true`. When every report fails the query
+ * errors and keeps the last good `data` (durable-data 03 FR3). Query key is
+ * scoped by team and the current UTC Monday with a 24h staleTime — no custom
+ * refresh timers.
  */
 export function useTeamAggregateData(): UseTeamAggregateDataResult {
   const { config } = useConfig();
@@ -283,7 +306,7 @@ export function useTeamAggregateData(): UseTeamAggregateDataResult {
     queryFn: buildTeamAggregateQueryFn(config, roster),
     enabled: !!config && !rosterLoading && !rosterError,
     staleTime: 24 * 60 * 60 * 1000,
-    retry: 1,
+    retry: shouldRetryOnce, // one retry, outages only (never a credential failure)
   });
 
   return mapTeamAggregateState(

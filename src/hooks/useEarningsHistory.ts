@@ -12,9 +12,8 @@ import { useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQuery } from '@tanstack/react-query';
 import { useConfig } from './useConfig';
-import { loadCredentials } from '../store/config';
-import { getAuthToken, apiGet } from '../api/client';
-import { toAuthCreds } from '../api/authCreds';
+import { buildPaymentHistoryQueryFn } from './usePaymentHistory';
+import { shouldRetryOnce } from '../api/errors';
 import type { Payment } from '../lib/payments';
 import { readWeeklyHistoryForWrite, mergeWeeklySnapshot, saveWeeklyHistory } from '../lib/weeklyHistory';
 
@@ -96,31 +95,15 @@ export function useEarningsHistory(
   const from = getUTCMondayNWeeksAgo(numWeeks - 1);
   const to = getCurrentUTCSunday();
 
-  // TanStack Query — same proven pattern as usePaymentHistory
+  // TanStack Query — the queryFn shared with usePaymentHistory. A failed refresh
+  // rejects, so `payments` stays the last good array (durable-data 03 FR3): the merge
+  // effect does not re-run and the trend keeps persistedTrend.
   const { data: payments, isLoading } = useQuery<Payment[] | null, Error>({
     queryKey: ['earningsHistory', from, to, config?.userId],
-    queryFn: async () => {
-      if (!config) return null;
-      const creds = await loadCredentials();
-      if (!creds) throw new Error('No credentials');
-      const token = await getAuthToken(creds.username, creds.password, config.useQA);
-      try {
-        const result = await apiGet<Payment[]>(
-          '/api/v3/users/current/payments',
-          { from, to },
-          token,
-          config.useQA,
-          toAuthCreds(creds, config.useQA),
-        );
-        if (Array.isArray(result)) return result;
-      } catch {
-        // Non-fatal — use persisted cache
-      }
-      return null;
-    },
+    queryFn: buildPaymentHistoryQueryFn(config, from, to),
     enabled: !!config,
     staleTime: 60 * 60 * 1000, // 1 hour
-    retry: 1,
+    retry: shouldRetryOnce, // one retry, outages only (never a credential failure)
   });
 
   // Merge API response into persistent cache and save

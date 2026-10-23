@@ -6,14 +6,19 @@
 //
 // Unlike usePayments (current week only, aggregated), this hook returns all
 // individual payment records for the requested range — one per week typically.
+//
+// durable-data 03-keep-last-good FR3: the queryFn (buildPaymentHistoryQueryFn, shared
+// with useEarningsHistory) rethrows every failure, so TanStack keeps the last good data.
 
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../api/client';
 import { getAuthToken } from '../api/client';
 import { toAuthCreds } from '../api/authCreds';
+import { shouldRetryOnce } from '../api/errors';
 import { loadCredentials } from '../store/config';
 import { useConfig } from './useConfig';
 import type { Payment } from '../lib/payments';
+import type { CrossoverConfig } from '../types/config';
 
 /**
  * Returns UTC Monday date string N weeks before the current week's Monday.
@@ -47,10 +52,41 @@ function getCurrentUTCSunday(): string {
 }
 
 /**
+ * Returns the TanStack Query queryFn for one payments-range call
+ * (GET /api/v3/users/current/payments?from&to). Shared by usePaymentHistory and
+ * useEarningsHistory so the two range calls cannot drift apart. Exported for testing.
+ *
+ * Resolves the Payment[] the API sent, or `null` when there is no config or the body
+ * is not an array. Every rejection propagates (no try/catch): a failed refresh errors
+ * the query, so TanStack keeps the previous `data` instead of storing `null`.
+ */
+export function buildPaymentHistoryQueryFn(
+  config: CrossoverConfig | null,
+  from: string,
+  to: string,
+): () => Promise<Payment[] | null> {
+  return async () => {
+    if (!config) return null;
+    const creds = await loadCredentials();
+    if (!creds) throw new Error('No credentials');
+    const token = await getAuthToken(creds.username, creds.password, config.useQA);
+
+    const result = await apiGet<Payment[]>(
+      '/api/v3/users/current/payments',
+      { from, to },
+      token,
+      config.useQA,
+      toAuthCreds(creds, config.useQA),
+    );
+    return Array.isArray(result) ? result : null;
+  };
+}
+
+/**
  * Returns raw Payment[] records spanning the last numWeeks weeks via a single
  * payments-API call with a wide date range. Unlike usePayments (current week,
  * aggregated), callers receive individual records for trend aggregation.
- * 1-hour staleTime; no AsyncStorage cache — falls back to null on error.
+ * 1-hour staleTime; no AsyncStorage cache — keeps the last good data on error.
  */
 export function usePaymentHistory(numWeeks: number = 4): {
   data: Payment[] | null;
@@ -63,29 +99,10 @@ export function usePaymentHistory(numWeeks: number = 4): {
 
   const { data, isLoading } = useQuery<Payment[] | null, Error>({
     queryKey: ['paymentHistory', from, to, config?.userId],
-    queryFn: async () => {
-      if (!config) return null;
-      const creds = await loadCredentials();
-      if (!creds) throw new Error('No credentials');
-      const token = await getAuthToken(creds.username, creds.password, config.useQA);
-
-      try {
-        const result = await apiGet<Payment[]>(
-          '/api/v3/users/current/payments',
-          { from, to },
-          token,
-          config.useQA,
-          toAuthCreds(creds, config.useQA),
-        );
-        if (Array.isArray(result)) return result;
-      } catch {
-        // Non-fatal — sparkline falls back to flat line
-      }
-      return null;
-    },
+    queryFn: buildPaymentHistoryQueryFn(config, from, to),
     enabled: !!config,
     staleTime: 60 * 60 * 1000, // 1 hour — historical data changes rarely
-    retry: 1,
+    retry: shouldRetryOnce, // one retry, outages only (never a credential failure)
   });
 
   return {
