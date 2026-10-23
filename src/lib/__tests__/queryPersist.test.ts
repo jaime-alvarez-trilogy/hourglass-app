@@ -17,6 +17,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { QueryClient, dehydrate, hydrate } from '@tanstack/react-query';
 import type { Query, QueryKey } from '@tanstack/react-query';
+import { stripComments } from '../../../__tests__/helpers/stripComments';
 import { DEV_MOCK_OWNER_KEY, shouldDehydrateQuery } from '../queryPersist';
 import { MOCK_MY_REQUESTS } from '../devMock';
 import { NetworkError } from '../../api/errors';
@@ -42,6 +43,9 @@ const ROOT = path.resolve(__dirname, '../../..');
 const PERSIST_FILE = path.join(ROOT, 'src', 'lib', 'queryPersist.ts');
 const MY_REQUESTS_FILE = path.join(ROOT, 'src', 'hooks', 'useMyRequests.ts');
 const LAYOUT_FILE = path.join(ROOT, 'app', '_layout.tsx');
+
+/** Source with comments removed, so a pattern named in prose never satisfies a static check. */
+const codeOf = (file: string) => stripComments(fs.readFileSync(file, 'utf8'));
 
 // ─── Keys and fixtures ───────────────────────────────────────────────────────
 
@@ -282,7 +286,6 @@ describe('shouldDehydrateQuery — the dev-mock view is never kept (DD3.33)', ()
     const query = seedSuccess(client, ['nonObject', String(data)], data);
     expect(query.state.data).toEqual(data);
 
-    expect(() => shouldDehydrateQuery(query)).not.toThrow();
     expect(shouldDehydrateQuery(query)).toBe(true);
   });
 });
@@ -346,9 +349,8 @@ describe("cross-spec contract: spec 02's real dev-mock view is not persisted (DD
 
 // ─── DD3.36: static and module-shape checks ──────────────────────────────────
 
-/** Module specifiers of every import / re-export / require in `source`, comments ignored. */
-function moduleSpecifiers(source: string): string[] {
-  const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+/** Module specifiers of every import / re-export / require in `code` (comments already stripped). */
+function moduleSpecifiers(code: string): string[] {
   const patterns = [
     /\bfrom\s*['"]([^'"]+)['"]/g,
     /\bimport\s*['"]([^'"]+)['"]/g,
@@ -372,13 +374,13 @@ function persistOptionsOf(source: string): string {
 describe('queryPersist wiring and the shared literal (DD3.36)', () => {
   it("DD3.36 — DEV_MOCK_OWNER_KEY is 'dev-mock', the same literal useMyRequests.ts stamps", () => {
     expect(DEV_MOCK_OWNER_KEY).toBe('dev-mock');
-    expect(fs.readFileSync(MY_REQUESTS_FILE, 'utf8')).toMatch(
+    expect(codeOf(MY_REQUESTS_FILE)).toMatch(
       /\bDEV_MOCK_OWNER_KEY\s*=\s*'dev-mock'/,
     );
   });
 
   it('DD3.36 — queryPersist.ts imports nothing but @tanstack/react-query', () => {
-    const specifiers = moduleSpecifiers(fs.readFileSync(PERSIST_FILE, 'utf8'));
+    const specifiers = moduleSpecifiers(codeOf(PERSIST_FILE));
     expect(Array.from(new Set(specifiers))).toEqual(['@tanstack/react-query']);
   });
 
@@ -403,16 +405,15 @@ describe('queryPersist wiring and the shared literal (DD3.36)', () => {
   });
 
   it("DD3.36 — app/_layout.tsx imports shouldDehydrateQuery from '@/src/lib/queryPersist' and passes it as persistOptions.dehydrateOptions", () => {
-    const layout = fs.readFileSync(LAYOUT_FILE, 'utf8');
+    const layout = codeOf(LAYOUT_FILE);
     expect(layout).toMatch(
       /import\s*\{[^}]*\bshouldDehydrateQuery\b[^}]*\}\s*from\s*'@\/src\/lib\/queryPersist'/,
     );
-    expect(layout).toContain('dehydrateOptions: { shouldDehydrateQuery }');
     expect(persistOptionsOf(layout)).toMatch(/\bdehydrateOptions:\s*\{\s*shouldDehydrateQuery\s*\}/);
   });
 
   it('DD3.36 — the persister, its key and the 24 h maxAge are unchanged, and there is no buster', () => {
-    const layout = fs.readFileSync(LAYOUT_FILE, 'utf8');
+    const layout = codeOf(LAYOUT_FILE);
     const options = persistOptionsOf(layout);
     expect(options).toMatch(/\bpersister:\s*asyncStoragePersister\b/);
     expect(options).toMatch(/\bmaxAge:\s*1000\s*\*\s*60\s*\*\s*60\s*\*\s*24\b/);

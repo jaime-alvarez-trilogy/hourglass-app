@@ -89,6 +89,18 @@ function makeSlots(aiCount: number, sbCount: number, emptyCount: number) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Fakes only Date: timers and microtasks stay real for flushAsync, AsyncStorage and TanStack. */
+function fakeDateOnly(now: Date) {
+  jest.useFakeTimers({
+    now,
+    doNotFake: [
+      'hrtime', 'nextTick', 'performance', 'queueMicrotask', 'requestAnimationFrame',
+      'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback', 'setImmediate',
+      'clearImmediate', 'setInterval', 'clearInterval', 'setTimeout', 'clearTimeout',
+    ],
+  });
+}
+
 async function flushAsync() {
   await act(async () => { await new Promise<void>((res) => setTimeout(res, 0)); });
   await act(async () => { await new Promise<void>((res) => setTimeout(res, 0)); });
@@ -181,15 +193,20 @@ describe('FR7+FR8: useAIData', () => {
   // the auth state is reported through `error` alone, as the NetworkError branch does.
 
   describe('FR2 (03-keep-last-good): AuthError keeps data', () => {
+    // Thursday 2026-10-22, midday UTC: not a Monday (no Monday flush), and the same UTC day
+    // in every host time zone, so the seeded day is always "today" for the hook.
+    const TODAY = '2026-10-22';
     const SEEDED_TODAY: TagData = { total: 12, aiUsage: 4, secondBrain: 1, noTags: 2 };
 
-    /** Seeds ai_cache with today's (UTC) day and returns the raw stored string.
+    beforeEach(() => fakeDateOnly(new Date(`${TODAY}T12:00:00.000Z`)));
+    afterEach(() => jest.useRealTimers());
+
+    /** Seeds ai_cache with today's day and returns the raw stored string.
      *  No _lastFetchedAt, and today is always refetched, so fetchWorkDiary runs. */
     async function seedTodayCache(): Promise<{ today: string; raw: string }> {
-      const today = new Date().toISOString().slice(0, 10);
-      const raw = JSON.stringify({ [today]: SEEDED_TODAY });
+      const raw = JSON.stringify({ [TODAY]: SEEDED_TODAY });
       await AsyncStorage.setItem('ai_cache', raw);
-      return { today, raw };
+      return { today: TODAY, raw };
     }
 
     it.each([
@@ -227,7 +244,7 @@ describe('FR7+FR8: useAIData', () => {
       const { get } = setupHook();
       await flushAsync();
       const shownTotal = get().data?.totalSlots;
-      expect(shownTotal).toBeGreaterThan(0);
+      expect(shownTotal).toBe(4 * makeSlots(20, 3, 5).length); // Mon 19 .. Thu 22
       const rawBefore = await AsyncStorage.getItem('ai_cache');
 
       // The token goes bad, then the app comes back to the foreground (refetch)
@@ -455,21 +472,8 @@ describe('FR4 (03-keep-last-good): week-transition flush with an unreadable week
     return historyRaw;
   }
 
-  beforeEach(() => {
-    // Only Date is faked; timers stay real for flushAsync, AsyncStorage and TanStack.
-    jest.useFakeTimers({
-      now: NOW,
-      doNotFake: [
-        'hrtime', 'nextTick', 'performance', 'queueMicrotask', 'requestAnimationFrame',
-        'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback', 'setImmediate',
-        'clearImmediate', 'setInterval', 'clearInterval', 'setTimeout', 'clearTimeout',
-      ],
-    });
-  });
-
-  afterEach(() => {
-    jest.useRealTimers();
-  });
+  beforeEach(() => fakeDateOnly(NOW));
+  afterEach(() => jest.useRealTimers());
 
   it('DD3.30: getItem rejects for weekly_history_v2 → no weekly_history_v2 write, and the hook still returns data', async () => {
     const historyRaw = await seed();

@@ -19,6 +19,7 @@ import * as path from 'path';
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { stripComments } from '../../../__tests__/helpers/stripComments';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -218,7 +219,6 @@ describe('durable-data 03 FR4: runBackfill never saves over an unreadable weekly
     expect(storage.getItem).toHaveBeenCalledWith(WEEKLY_HISTORY_KEY);
     expect(mockGetAuthToken).not.toHaveBeenCalled();
     expect(mockApiGet).not.toHaveBeenCalled();
-    expect(historyWrites()).toEqual([]);
     expect(storage.setItem).not.toHaveBeenCalled();
 
     restoreReads();
@@ -311,12 +311,7 @@ describe('durable-data 03 FR4: DD3.31 — the writers use readWeeklyHistoryForWr
   const HOOKS_DIR = path.resolve(__dirname, '..');
 
   /** Source with comments removed, so prose about the calls cannot satisfy or trip a check. */
-  function code(file: string): string {
-    return fs
-      .readFileSync(path.join(HOOKS_DIR, file), 'utf8')
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/(^|[^:])\/\/.*$/gm, '$1');
-  }
+  const code = (file: string) => stripComments(fs.readFileSync(path.join(HOOKS_DIR, file), 'utf8'));
 
   /** The name the strict read's result is bound to: `const x = await read…()` or `.then(x =>`. */
   function boundName(src: string, readAt: number): string | null {

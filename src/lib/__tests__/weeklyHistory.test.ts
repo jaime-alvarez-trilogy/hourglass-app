@@ -335,14 +335,9 @@ describe('durable-data 03 FR4: readWeeklyHistoryForWrite and the strict-read wri
   });
 
   describe('DD3.26 — loadWeeklyHistory keeps its never-throws contract', () => {
-    it('DD3.26 — getItem rejects → [] (readers still render an empty history)', async () => {
+    it('DD3.26 — getItem rejects → [] (readers still render an empty history), with the strict reader\'s single trace', async () => {
       MockAsyncStorage.getItem.mockRejectedValueOnce(new Error('SQLITE_IOERR'));
       await expect(loadWeeklyHistory()).resolves.toEqual([]);
-    });
-
-    it('DD3.26 — it delegates to the strict reader: the same single history.read_failed trace', async () => {
-      MockAsyncStorage.getItem.mockRejectedValueOnce(new Error('SQLITE_IOERR'));
-      await loadWeeklyHistory();
       expect(mockWarn).toHaveBeenCalledTimes(1);
       expect(mockWarn).toHaveBeenCalledWith('history.read_failed', {});
     });

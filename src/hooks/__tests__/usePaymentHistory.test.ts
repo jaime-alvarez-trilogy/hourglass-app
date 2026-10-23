@@ -195,17 +195,14 @@ describe('buildPaymentHistoryQueryFn — resolved values (DD3.14)', () => {
 
 describe('buildPaymentHistoryQueryFn — every failure rejects (DD3.15)', () => {
   it.each([
-    ['NetworkError', () => new NetworkError('Network request failed'), NetworkError],
-    ['AuthError(401)', () => new AuthError(401), AuthError],
-    ['ApiError(500)', () => new ApiError(500), ApiError],
-  ])('DD3.15 — apiGet rejects %s → the queryFn rejects with that same error', async (_label, makeErr, type) => {
-    const err = makeErr();
+    ['NetworkError', new NetworkError('Network request failed')],
+    ['AuthError(401)', new AuthError(401)],
+    ['ApiError(500)', new ApiError(500)],
+  ])('DD3.15 — apiGet rejects %s → the queryFn rejects with that same error', async (_label, err) => {
     mockApiGet.mockRejectedValue(err);
 
-    const run = buildPaymentHistoryQueryFn(CONFIG, FROM, TO)();
-
-    await expect(run).rejects.toBe(err);
-    await expect(run).rejects.toBeInstanceOf(type);
+    // The very instance, unwrapped: the hook's retry rule must see the real error type.
+    await expect(buildPaymentHistoryQueryFn(CONFIG, FROM, TO)()).rejects.toBe(err);
     // The builder never retries by itself: retries are the hook's `retry` rule.
     expect(mockApiGet).toHaveBeenCalledTimes(1);
   });
@@ -322,9 +319,10 @@ describe('useEarningsHistory, rendered — the earnings trend keeps the last goo
     return { ...hook, written: written! };
   }
 
-  it('DD3.16 — an outage refetch keeps the last Payment[] in the query as status error, after one retry', async () => {
-    const { queryClient, refetch } = await mountWithGoodRun();
+  it('DD3.16 — an outage refetch (retried once) keeps the last Payment[], the trend and earnings_history_v1', async () => {
+    const { get, queryClient, refetch, written } = await mountWithGoodRun();
     const callsAfterGoodRun = paymentsCalls();
+    const writesAfterGoodRun = earningsCacheWrites().length;
 
     mockApiGet.mockImplementation(outage);
     await refetch('earningsHistory');
@@ -335,6 +333,11 @@ describe('useEarningsHistory, rendered — the earnings trend keeps the last goo
     expect(state?.error).toBeInstanceOf(NetworkError);
     // shouldRetryOnce: an outage is retried once.
     expect(paymentsCalls() - callsAfterGoodRun).toBe(2);
+
+    expect(get().trend).toEqual(LAST_GOOD_TREND);
+    expect(get().isLoading).toBe(false);
+    expect(await AsyncStorage.getItem(EARNINGS_CACHE_KEY)).toBe(written);
+    expect(earningsCacheWrites()).toHaveLength(writesAfterGoodRun);
   });
 
   it('DD3.16 — a credential failure (AuthError 401) keeps the last Payment[] too, and is not retried', async () => {
@@ -351,19 +354,6 @@ describe('useEarningsHistory, rendered — the earnings trend keeps the last goo
     expect(paymentsCalls() - callsAfterGoodRun).toBe(1);
   });
 
-  it('DD3.16 — after a failed refetch the trend and earnings_history_v1 are unchanged', async () => {
-    const { get, refetch, written } = await mountWithGoodRun();
-    const writesAfterGoodRun = earningsCacheWrites().length;
-
-    mockApiGet.mockImplementation(outage);
-    await refetch('earningsHistory');
-
-    expect(get().trend).toEqual(LAST_GOOD_TREND);
-    expect(get().isLoading).toBe(false);
-    expect(await AsyncStorage.getItem(EARNINGS_CACHE_KEY)).toBe(written);
-    expect(earningsCacheWrites()).toHaveLength(writesAfterGoodRun);
-  });
-
   it('DD3.16 — a failed first fetch serves the persisted earnings_history_v1 trend and writes nothing', async () => {
     const persisted = JSON.stringify({ '2026-10-05': 1950, '2026-10-12': 2000, '2026-10-19': 1250 });
     await AsyncStorage.setItem(EARNINGS_CACHE_KEY, persisted);
@@ -377,6 +367,65 @@ describe('useEarningsHistory, rendered — the earnings trend keeps the last goo
     expect(get().isLoading).toBe(false);
     expect(await AsyncStorage.getItem(EARNINGS_CACHE_KEY)).toBe(persisted);
     expect(earningsCacheWrites()).toEqual([]);
+  });
+});
+
+// ─── FR4, rendered: the earnings trend never saves over an unreadable history ──
+// useEarningsHistory also writes earnings + hours into weekly_history_v2 after each good
+// fetch. DD3.31 pins its strict read statically; this drives it. An unreadable store must
+// skip that write (saving would replace every stored week with this range) and leave the
+// independent earnings_history_v1 write and the trend alone.
+
+describe('useEarningsHistory, rendered — the weekly_history_v2 write reads strictly (FR4)', () => {
+  const HISTORY_KEY = 'weekly_history_v2';
+  /** The last good weeks on disk: an older week, and 2026-10-05 with AI% already backfilled. */
+  const STORED_HISTORY = [
+    { weekStart: '2026-09-21', hours: 40, earnings: 2000, aiPct: 70, brainliftHours: 5 },
+    { weekStart: '2026-10-05', hours: 0, earnings: 0, aiPct: 72, brainliftHours: 4 },
+  ];
+
+  const historyWrites = () => mockStorage.setItem.mock.calls.filter(([k]) => k === HISTORY_KEY);
+
+  async function seedHistory(): Promise<string> {
+    const raw = JSON.stringify(STORED_HISTORY);
+    await AsyncStorage.setItem(HISTORY_KEY, raw);
+    mockStorage.setItem.mockClear();
+    return raw;
+  }
+
+  it('an unreadable weekly_history_v2 → no history write; earnings_history_v1 and the trend still update', async () => {
+    const raw = await seedHistory();
+    const readStore = mockStorage.getItem.getMockImplementation()!;
+    mockStorage.getItem.mockImplementation((key: string) =>
+      key === HISTORY_KEY ? Promise.reject(new Error('SQLITE_IOERR')) : readStore(key),
+    );
+
+    const { get, idle } = setupHook(() => useEarningsHistory(4));
+    await settle(() => idle() && earningsCacheWrites().length > 0);
+
+    expect(mockStorage.getItem).toHaveBeenCalledWith(HISTORY_KEY); // the strict read ran
+    expect(historyWrites()).toEqual([]);
+    expect(earningsCacheWrites()).toHaveLength(1);
+    expect(get().trend).toEqual(LAST_GOOD_TREND);
+
+    mockStorage.getItem.mockImplementation(readStore);
+    expect(await AsyncStorage.getItem(HISTORY_KEY)).toBe(raw);
+  });
+
+  it('(preserved) a readable weekly_history_v2 → one write merging each paid week into the stored weeks', async () => {
+    await seedHistory();
+
+    const { idle } = setupHook(() => useEarningsHistory(4));
+    await settle(() => idle() && historyWrites().length > 0);
+
+    expect(historyWrites()).toHaveLength(1);
+    expect(JSON.parse(historyWrites()[0][1])).toEqual([
+      STORED_HISTORY[0],
+      // Merged: AI% and BrainLift from the stored week are kept.
+      { weekStart: '2026-10-05', hours: 39, earnings: 1950, aiPct: 72, brainliftHours: 4, overtime: 0 },
+      { weekStart: '2026-10-12', hours: 40, earnings: 2000, aiPct: 0, brainliftHours: 0, overtime: 0 },
+      { weekStart: '2026-10-19', hours: 25, earnings: 1250, aiPct: 0, brainliftHours: 0, overtime: 0 },
+    ]);
   });
 });
 
