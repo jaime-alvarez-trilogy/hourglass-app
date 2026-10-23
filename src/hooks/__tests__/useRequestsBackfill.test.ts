@@ -59,6 +59,7 @@ import { fetchWorkDiary } from '../../api/workDiary';
 import { ApiError, AuthError, NetworkError, AUTH_HTML_500, AUTH_LOGIN_LATCHED } from '../../api/errors';
 import { log } from '../../lib/log';
 import * as planner from '../../lib/requestsPlanner';
+import { invalidateAuthToken } from '../../api/client';
 import {
   BACKFILL_START_DELAY_MS,
   BACKFILL_WEEK_PAUSE_MS,
@@ -996,6 +997,20 @@ describe('FR3: startRequestsBackfillOnce', () => {
       expect(storeReads()).toBe(0);
       expect(mockInfo).not.toHaveBeenCalled();
       expect(mockError).not.toHaveBeenCalled();
+    });
+
+    // Cross-spec review: an env switch (or sign-out) can overwrite / wipe my_requests_v1,
+    // so a hard reset (invalidateAuthToken) re-opens the gate for every owner.
+    it('after a hard reset (env switch and back, or sign-out and in) the same owner can run again', async () => {
+      const client = newClient();
+      await expect(start(client)).resolves.toEqual(ONE_WEEK_FAILED);
+      await expect(start(client)).resolves.toBeNull();
+      jest.clearAllMocks();
+
+      invalidateAuthToken();
+
+      await expect(start(client)).resolves.toEqual(ONE_WEEK_FAILED);
+      expect(mockFetchWorkDiary).toHaveBeenCalledTimes(7);
     });
   });
 
