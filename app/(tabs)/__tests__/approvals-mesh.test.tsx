@@ -10,6 +10,7 @@
 //   - @shopify/react-native-skia — project-level __mocks__ auto-applied (RadialGradient, etc.)
 //   - AnimatedMeshBackground — stubbed as identifiable View (testID) to verify rendering
 //   - useConfig, useMyRequests, useApprovalItems — jest automocks
+//   - useRequestsBackfill — factory mock (durable-data 05 C16)
 //   - Other components (FadeInScreen, SkeletonLoader, etc.) — lightweight stubs
 
 import React from 'react';
@@ -37,6 +38,10 @@ jest.mock('@/src/components/AnimatedMeshBackground', () => {
 jest.mock('@/src/hooks/useConfig');
 jest.mock('@/src/hooks/useMyRequests');
 jest.mock('@/src/hooks/useApprovalItems');
+
+// durable-data 05 C16: factory form, so the real hook never loads (it needs a
+// QueryClientProvider these renders do not have, and would start the backfill's timer).
+jest.mock('@/src/hooks/useRequestsBackfill', () => ({ useRequestsBackfill: jest.fn() }));
 
 jest.mock('@/src/hooks/useStaggeredEntry', () => ({
   useStaggeredEntry: () => ({

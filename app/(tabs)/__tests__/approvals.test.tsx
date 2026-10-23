@@ -8,9 +8,12 @@
 //   - durable-data 04: the Older toggle, the quiet note vs the no-data banner, the
 //     'incomplete' empty state, the pull spinner and the copy guard, all driven through
 //     a mocked useMyRequests (fixtures relative to the current week, C9)
+//   - durable-data 05 FR4 (DD5.36): the screen imports useRequestsBackfill and calls it,
+//     with no arguments, on every render (static check + the mocked hook's calls)
 //
 // Mocks:
 //   - useConfig, useMyRequests, useApprovalItems (hooks)
+//   - useRequestsBackfill (factory form, durable-data 05 C16)
 //   - expo-router (no redirect tests)
 //   - react-native-safe-area-context
 
@@ -24,6 +27,11 @@ import * as path from 'path';
 jest.mock('@/src/hooks/useConfig');
 jest.mock('@/src/hooks/useMyRequests');
 jest.mock('@/src/hooks/useApprovalItems');
+
+// durable-data 05 C16: factory form, so the real hook never loads. It needs a
+// QueryClientProvider (useQueryClient) these renders do not have, and would start its
+// 5 s timer and the backfill's AsyncStorage reads inside render tests.
+jest.mock('@/src/hooks/useRequestsBackfill', () => ({ useRequestsBackfill: jest.fn() }));
 
 // useStaggeredEntry — return plain styles (no Reanimated shared values in tests)
 jest.mock('@/src/hooks/useStaggeredEntry', () => ({
@@ -102,6 +110,7 @@ import { useConfig } from '@/src/hooks/useConfig';
 import { useIsManager as useIsManagerMock } from '@/src/hooks/useIsManager';
 import { useMyRequests } from '@/src/hooks/useMyRequests';
 import { useApprovalItems } from '@/src/hooks/useApprovalItems';
+import { useRequestsBackfill } from '@/src/hooks/useRequestsBackfill';
 import { AUTH_LOGIN_LATCHED, NO_CREDENTIALS } from '@/src/api/errors';
 import SectionLabel from '@/src/components/SectionLabel';
 import { stripComments } from '../../../__tests__/helpers/stripComments';
@@ -1173,5 +1182,47 @@ describe('ApprovalsScreen — durable-data 04 FR4 DD4.24: rows come from src/lib
     expect(code).toMatch(
       /import\s*\{[^}]*\bbuildMyRequestRows\b[^}]*\}\s*from\s*['"]@\/src\/lib\/requestRows['"]/,
     );
+  });
+});
+
+// ─── durable-data 05 FR4 (DD5.36): the screen mounts the requests backfill ──────
+//
+// The hook schedules its own delayed, once-per-session run and reads config itself (C10),
+// so the screen only has to call it on every render. The "does not import useConfig" case
+// above (04-team-view-content FR1) stays green: approvals.tsx gains no config read.
+
+describe('ApprovalsScreen — durable-data 05 FR4 DD5.36: the screen mounts the requests backfill', () => {
+  const mockUseRequestsBackfill = useRequestsBackfill as jest.Mock;
+
+  beforeEach(() => {
+    mockUseRequestsBackfill.mockClear();
+  });
+
+  it('approvals.tsx (comments stripped) imports useRequestsBackfill from @/src/hooks/useRequestsBackfill', () => {
+    const code = stripComments(fs.readFileSync(APPROVALS_FILE, 'utf8'));
+    expect(code).toMatch(
+      /import\s*\{\s*useRequestsBackfill\s*\}\s*from\s*['"]@\/src\/hooks\/useRequestsBackfill['"]/,
+    );
+  });
+
+  it('approvals.tsx (comments stripped) calls useRequestsBackfill() right after useMyRequests()', () => {
+    const code = stripComments(fs.readFileSync(APPROVALS_FILE, 'utf8'));
+    expect(code).toMatch(/=\s*useMyRequests\(\s*\)\s*;?\s*useRequestsBackfill\(\s*\)/);
+    expect(code.match(/\buseRequestsBackfill\(/g)).toHaveLength(1);
+  });
+
+  it.each<[string, Parameters<typeof setupMocks>[0]]>([
+    ['a contributor with requests', { isManager: false, entries: [MOCK_ENTRY_PENDING] }],
+    ['a manager with a team queue', { isManager: true, items: [MOCK_APPROVAL_ITEM] }],
+    ['config not loaded yet', { configNull: true }],
+    ['My Requests still loading', { myLoading: true }],
+    ['My Requests failed with nothing to show', { entries: [], myError: 'network', errorCode: null }],
+  ])('%s: rendering the screen calls useRequestsBackfill(), with no arguments', (_label, opts) => {
+    setupMocks(opts);
+
+    renderScreen();
+
+    expect(mockUseRequestsBackfill).toHaveBeenCalled();
+    expect(mockUseRequestsBackfill.mock.calls.every((args) => args.length === 0)).toBe(true);
   });
 });

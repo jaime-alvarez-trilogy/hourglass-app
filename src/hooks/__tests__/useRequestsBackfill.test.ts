@@ -9,6 +9,9 @@
 // manager preview or a missing keychain entry, and it never rejects. After each stored
 // week it rebuilds the visible ['myRequests', assignmentId] view, but only a successful
 // same-owner (or legacy) one, keeping its error state and dataUpdatedAt.
+// FR4 (DD5.35): useRequestsBackfill, the Requests screen's hook. It schedules the gate
+// BACKFILL_START_DELAY_MS after mount, or after the owner changes while mounted, never for a
+// signed-out user or the preview; unmounting clears a pending timer, a started run continues.
 //
 // The runner is driven against the real planner and the real my_requests_v1 store on the
 // in-memory AsyncStorage __mocks__ (reset before every case), with `fetchWorkDiary`,
@@ -18,9 +21,16 @@
 // waits, reads the system clock or depends on the host time zone (expected dates come from
 // the UTC calendar helpers below, independent of the module under test). The gate cases use
 // a real QueryClient (no retries, no GC timers) and clear the session flag before each case.
+// The hook cases render a probe component under a QueryClientProvider with
+// react-test-renderer, with `useConfig` mocked and fake timers whose clock is local noon of
+// TODAY (the hook passes the gate no deps, so it plans from the system clock and pauses with
+// the default setTimeout-based sleep).
 
+import React from 'react';
+import { act, create } from 'react-test-renderer';
+import type { ReactTestRenderer } from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { QueryClient } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -37,9 +47,14 @@ jest.mock('../../lib/log', () => ({
   log: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
 
+jest.mock('../useConfig', () => ({
+  useConfig: jest.fn(),
+}));
+
 // ─── Imports ──────────────────────────────────────────────────────────────────
 
 import { loadConfig, loadCredentials } from '../../store/config';
+import { useConfig } from '../useConfig';
 import { fetchWorkDiary } from '../../api/workDiary';
 import { ApiError, AuthError, NetworkError, AUTH_HTML_500, AUTH_LOGIN_LATCHED } from '../../api/errors';
 import { log } from '../../lib/log';
@@ -50,6 +65,7 @@ import {
   __resetBackfillSessionForTests,
   runRequestsBackfill,
   startRequestsBackfillOnce,
+  useRequestsBackfill,
 } from '../useRequestsBackfill';
 import type { BackfillDeps, BackfillResult } from '../useRequestsBackfill';
 import type { MyRequestsStore, RequestsStoreOwner, StoredRequestDay } from '../../lib/requestsStore';
@@ -59,6 +75,7 @@ import type { ManualRequestEntry, ManualRequestStatus, MyRequestsData } from '..
 
 const mockLoadConfig = loadConfig as jest.MockedFunction<typeof loadConfig>;
 const mockLoadCredentials = loadCredentials as jest.MockedFunction<typeof loadCredentials>;
+const mockUseConfig = useConfig as jest.MockedFunction<typeof useConfig>;
 const mockFetchWorkDiary = fetchWorkDiary as jest.MockedFunction<typeof fetchWorkDiary>;
 const mockAsyncStorage = AsyncStorage as jest.Mocked<typeof AsyncStorage> & { _reset: () => void };
 const mockInfo = log.info as jest.Mock;
@@ -1338,6 +1355,275 @@ describe('FR3: startRequestsBackfillOnce', () => {
 
       foreground.resolve({ entries: [], error: null, ownerKey: PROD_KEY });
       await loading;
+    });
+  });
+});
+
+// ─── FR4 ─────────────────────────────────────────────────────────────────────
+
+describe('FR4: useRequestsBackfill schedules the gate from the Requests screen', () => {
+  const QUERY_KEY = ['myRequests', '79996'] as const;
+  /** The fake system clock: local noon of TODAY. The hook injects nothing, so the gate plans from it. */
+  const SYSTEM_NOW = new Date(2026, 9, 21, 12, 0);
+  /** dataUpdatedAt of a seeded view (the foreground refresh's, not the backfill's). */
+  const VIEW_UPDATED_MS = Date.parse('2026-10-21T08:00:00');
+  /** One gated run: the newest week answers with empty bodies, so it stops after 7 requests. */
+  const ONE_WEEK_FAILED = result(0, 0, 7, 'week-failed');
+  /** Week 1 answers, week 2 answers with empty bodies. */
+  const ONE_WEEK_STORED = result(1, 7, 7, 'week-failed');
+  const PREVIEW_CONFIG: CrossoverConfig = { ...CONFIG, devManagerView: true };
+
+  let clients: QueryClient[] = [];
+  let trees: { renderer: ReactTestRenderer; mounted: boolean }[] = [];
+
+  function newClient(): QueryClient {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+    clients.push(client);
+    return client;
+  }
+
+  /** What useConfig returns to the hook on its next render. */
+  function configIs(config: CrossoverConfig | null, isLoading = false): void {
+    mockUseConfig.mockReturnValue({ config, isLoading, refetch: jest.fn() });
+  }
+
+  /** useConfig and the stored config (the gate's loadConfig) agree, as after a real save. */
+  function signIn(config: CrossoverConfig | null, isLoading = false): void {
+    configIs(config, isLoading);
+    mockLoadConfig.mockResolvedValue(config);
+  }
+
+  function Probe(): null {
+    useRequestsBackfill();
+    return null;
+  }
+
+  const screen = (client: QueryClient): React.ReactElement =>
+    React.createElement(QueryClientProvider, { client }, React.createElement(Probe));
+
+  /** Mounts the probe; `rerender` renders it again with whatever useConfig returns now. */
+  function mount(client: QueryClient = newClient()): { rerender: () => void; unmount: () => void } {
+    const tree = { renderer: undefined as unknown as ReactTestRenderer, mounted: true };
+    act(() => {
+      tree.renderer = create(screen(client));
+    });
+    trees.push(tree);
+    return {
+      rerender: () => act(() => tree.renderer.update(screen(client))),
+      unmount: () => {
+        tree.mounted = false;
+        act(() => tree.renderer.unmount());
+      },
+    };
+  }
+
+  /** Lets pending work settle, moves the fake clock by `ms`, then lets the woken work run. */
+  async function advance(ms: number): Promise<void> {
+    await act(async () => {
+      await flush();
+      jest.advanceTimersByTime(ms);
+      await flush();
+    });
+  }
+
+  /** fetchWorkDiary calls sorted by date: [assignmentId, date, credentials, useQA]. */
+  function sortedCalls(): unknown[][] {
+    return [...mockFetchWorkDiary.mock.calls].sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
+  }
+
+  /** The calls one week of `owner` makes with the keychain credentials. */
+  const weekCalls = (monday: string, owner: RequestsStoreOwner = OWNER): unknown[][] =>
+    weekOf(monday).map((d) => [owner.assignmentId, d, CREDS, owner.useQA]);
+
+  beforeEach(() => {
+    jest.useFakeTimers({ now: SYSTEM_NOW, doNotFake: ['nextTick', 'queueMicrotask', 'setImmediate'] });
+    __resetBackfillSessionForTests();
+    signIn(CONFIG);
+    mockLoadCredentials.mockReset();
+    mockLoadCredentials.mockResolvedValue(CREDS);
+    mockFetchWorkDiary.mockResolvedValue(undefined as unknown as WorkDiarySlot[]);
+  });
+
+  afterEach(() => {
+    for (const tree of trees) if (tree.mounted) act(() => tree.renderer.unmount());
+    trees = [];
+    clients.forEach((c) => c.clear());
+    clients = [];
+    jest.useRealTimers();
+  });
+
+  describe('DD5.35 — the gate starts BACKFILL_START_DELAY_MS after mount', () => {
+    it('signed in: nothing at 4 999 ms; at 5 000 ms one gated run for the configured owner, and no other', async () => {
+      mount();
+
+      await advance(BACKFILL_START_DELAY_MS - 1);
+      expect(mockLoadConfig).not.toHaveBeenCalled();
+      expect(mockLoadCredentials).not.toHaveBeenCalled();
+      expect(mockFetchWorkDiary).not.toHaveBeenCalled();
+
+      await advance(1);
+      expect(mockLoadConfig).toHaveBeenCalled();
+      expect(sortedCalls()).toEqual(weekCalls(NEWEST_MONDAY));
+      expect(doneLogs()).toEqual([ONE_WEEK_FAILED]);
+
+      // Scheduled once: the mounted screen never calls the gate again
+      const configReads = mockLoadConfig.mock.calls.length;
+      await advance(60_000);
+      expect(mockLoadConfig).toHaveBeenCalledTimes(configReads);
+      expect(mockFetchWorkDiary).toHaveBeenCalledTimes(7);
+      expect(doneLogs()).toHaveLength(1);
+    });
+
+    it.each<[string, CrossoverConfig]>([
+      ['other config fields changed', { ...CONFIG, fullName: 'Renamed User', hourlyRate: 35 }],
+      ['useQA missing (an older install is the same prod owner)', { ...CONFIG, useQA: undefined as unknown as boolean }],
+    ])('a re-render for the same owner (%s) does not restart the delay', async (_label, sameOwner) => {
+      const { rerender } = mount();
+      await advance(3_000);
+
+      configIs(sameOwner);
+      rerender();
+      await advance(BACKFILL_START_DELAY_MS - 3_000);
+
+      expect(sortedCalls()).toEqual(weekCalls(NEWEST_MONDAY));
+      expect(doneLogs()).toEqual([ONE_WEEK_FAILED]);
+    });
+
+    it("the run updates the provider's QueryClient: a stored week shows in its successful view", async () => {
+      const client = newClient();
+      const prev: MyRequestsData = { entries: [], error: null, ownerKey: '79996|prod' };
+      client.setQueryData<MyRequestsData>(QUERY_KEY, prev, { updatedAt: VIEW_UPDATED_MS });
+      serveDiary({ '2026-09-30': [manual('Server request', 'APPROVED')], ...each(weekOf(SECOND_MONDAY), undefined) });
+
+      mount(client);
+      await advance(BACKFILL_START_DELAY_MS);
+      await advance(BACKFILL_WEEK_PAUSE_MS);
+
+      expect(doneLogs()).toEqual([ONE_WEEK_STORED]);
+      expect(client.getQueryData(QUERY_KEY)).toEqual({
+        ...prev,
+        entries: [entry('2026-09-30', 'Server request', 'APPROVED')],
+      });
+      expect(client.getQueryState(QUERY_KEY)!.dataUpdatedAt).toBe(VIEW_UPDATED_MS);
+    });
+  });
+
+  describe('DD5.35 — unmounting clears a pending timer; a started run continues', () => {
+    it('unmounting at 4 000 ms → the gate never runs', async () => {
+      const { unmount } = mount();
+      await advance(4_000);
+
+      unmount();
+      await advance(10_000);
+
+      expect(mockLoadConfig).not.toHaveBeenCalled();
+      expect(mockLoadCredentials).not.toHaveBeenCalled();
+      expect(mockFetchWorkDiary).not.toHaveBeenCalled();
+      expect(doneLogs()).toEqual([]);
+    });
+
+    it('unmounting while the first week is in flight → that week is still stored and the run ends normally', async () => {
+      const week1: Deferred<WorkDiarySlot[] | undefined>[] = [];
+      mockFetchWorkDiary.mockImplementation((_id, date) => {
+        if (mondayOf(date) !== NEWEST_MONDAY) return Promise.resolve(undefined as unknown as WorkDiarySlot[]);
+        const d = deferred<WorkDiarySlot[] | undefined>();
+        week1.push(d);
+        return d.promise as Promise<WorkDiarySlot[]>;
+      });
+      const { unmount } = mount();
+      await advance(BACKFILL_START_DELAY_MS);
+      expect(week1).toHaveLength(7);
+
+      unmount();
+      week1.forEach((d) => d.resolve([]));
+      await advance(BACKFILL_WEEK_PAUSE_MS);
+
+      expect(await storedDates()).toEqual(weekOf(NEWEST_MONDAY));
+      expect(sortedCalls()).toEqual([...weekCalls(SECOND_MONDAY), ...weekCalls(NEWEST_MONDAY)]);
+      expect(doneLogs()).toEqual([ONE_WEEK_STORED]);
+    });
+  });
+
+  describe('DD5.35 — no timer without a real, signed-in owner', () => {
+    it.each<[string, CrossoverConfig | null, boolean]>([
+      ['the dev-mock manager preview (devManagerView: true)', PREVIEW_CONFIG, false],
+      ['a config without assignmentId', { ...CONFIG, assignmentId: undefined as unknown as string }, false],
+      ['a config with an empty assignmentId', { ...CONFIG, assignmentId: '' }, false],
+      ['signed out (no config)', null, false],
+      ['config still loading', null, true],
+    ])('%s → no gate call after 10 000 ms; once a real owner is configured (same mount) it runs 5 000 ms later', async (_label, config, isLoading) => {
+      signIn(config, isLoading);
+      const { rerender } = mount();
+
+      await advance(10_000);
+      expect(mockLoadConfig).not.toHaveBeenCalled();
+      expect(mockLoadCredentials).not.toHaveBeenCalled();
+      expect(mockFetchWorkDiary).not.toHaveBeenCalled();
+
+      signIn(CONFIG);
+      rerender();
+      await advance(BACKFILL_START_DELAY_MS - 1);
+      expect(mockLoadConfig).not.toHaveBeenCalled();
+
+      await advance(1);
+      expect(sortedCalls()).toEqual(weekCalls(NEWEST_MONDAY));
+      expect(doneLogs()).toEqual([ONE_WEEK_FAILED]);
+    });
+
+    it.each<[string, CrossoverConfig | null]>([
+      ['the preview switched on', PREVIEW_CONFIG],
+      ['a sign-out', null],
+    ])('%s before the timer fires cancels it: no gate call', async (_label, next) => {
+      const { rerender } = mount();
+      await advance(3_000);
+
+      signIn(next);
+      rerender();
+      await advance(10_000);
+
+      expect(mockLoadConfig).not.toHaveBeenCalled();
+      expect(mockFetchWorkDiary).not.toHaveBeenCalled();
+      expect(doneLogs()).toEqual([]);
+    });
+  });
+
+  describe('DD5.35 — an owner change on the same mount schedules a run for the new owner (C10)', () => {
+    it.each<[string, CrossoverConfig, RequestsStoreOwner]>([
+      ['useQA flipped (environment switch)', QA_CONFIG, QA_OWNER],
+      ['another assignmentId (account switch)', OTHER_CONFIG, { assignmentId: '80001', useQA: false }],
+    ])('%s after the first run → a second gated run, for the new owner, 5 000 ms after the change', async (_label, next, owner) => {
+      const { rerender } = mount();
+      await advance(BACKFILL_START_DELAY_MS);
+      expect(sortedCalls()).toEqual(weekCalls(NEWEST_MONDAY, OWNER));
+      mockFetchWorkDiary.mockClear();
+      mockLoadConfig.mockClear();
+
+      signIn(next);
+      rerender();
+
+      await advance(BACKFILL_START_DELAY_MS - 1);
+      expect(mockLoadConfig).not.toHaveBeenCalled();
+      expect(mockFetchWorkDiary).not.toHaveBeenCalled();
+
+      await advance(1);
+      expect(sortedCalls()).toEqual(weekCalls(NEWEST_MONDAY, owner));
+      expect(doneLogs()).toEqual([ONE_WEEK_FAILED, ONE_WEEK_FAILED]);
+    });
+
+    it('an owner change before the timer fires replaces it: only the new owner runs, 5 000 ms after the change', async () => {
+      const { rerender } = mount();
+      await advance(3_000);
+
+      signIn(QA_CONFIG);
+      rerender();
+
+      await advance(2_000); // 5 000 ms after mount: the prod timer is gone
+      expect(mockLoadConfig).not.toHaveBeenCalled();
+      expect(mockFetchWorkDiary).not.toHaveBeenCalled();
+
+      await advance(3_000); // 5 000 ms after the change
+      expect(sortedCalls()).toEqual(weekCalls(NEWEST_MONDAY, QA_OWNER));
+      expect(doneLogs()).toEqual([ONE_WEEK_FAILED]);
     });
   });
 });
