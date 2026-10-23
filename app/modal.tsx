@@ -167,6 +167,8 @@ export default function ModalScreen() {
       startTransition(() => {
         queryClient.setQueryData(['config'], updated);
         queryClient.setQueryData(['approvals'], value ? [...MOCK_TEAM_ITEMS] : []);
+        // The 'dev-mock' view is hidden once the preview is off: rebuild it from the store
+        queryClient.invalidateQueries({ queryKey: ['myRequests'] });
       });
     } catch (e) {
       console.error('[settings] toggleDevManagerView failed:', e);
