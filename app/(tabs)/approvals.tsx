@@ -1,6 +1,8 @@
 // FR3 (02-approvals-tab-redesign): Role-aware Requests screen
 // FR4: Empty states — "All caught up" (team), "No requests this week" (own)
 // FR5: Loading skeletons — independent per section
+// durable-data 04 FR1: My Requests rows come from src/lib/requestRows — bounded
+//   week buckets, then a collapsed "Show older requests (N)" toggle (month-grouped)
 //
 // Layout:
 //   Manager: TEAM REQUESTS section (swipeable ApprovalCards) + MY REQUESTS section
@@ -36,7 +38,8 @@ import AnimatedMeshBackground from '@/src/components/AnimatedMeshBackground'
 import { colors } from '@/src/lib/colors'
 import { getWeekStartDate } from '@/src/lib/approvals'
 import type { ApprovalItem } from '@/src/lib/approvals'
-import type { ManualRequestEntry } from '@/src/types/requests'
+import { buildMyRequestRows } from '@/src/lib/requestRows'
+import type { MyRequestRow } from '@/src/lib/requestRows'
 import type { PanelState } from '@/src/lib/panelState'
 
 // ─── Team Queue row type (FR1: 01-manager-history) ───────────────────────────
@@ -81,39 +84,6 @@ export function buildTeamQueueRows(
   return rows
 }
 
-// ─── My Requests section helpers ─────────────────────────────────────────────
-
-type MyRequestRow =
-  | { type: 'header'; label: 'This Week' | 'Last Week' | '2 Weeks Ago' }
-  | { type: 'entry'; entry: ManualRequestEntry }
-
-function buildMyRequestRows(
-  entries: ManualRequestEntry[],
-  currentMonday: string,
-  prevMonday1: string,
-): MyRequestRow[] {
-  const rows: MyRequestRow[] = []
-
-  const thisWeek = entries.filter((e) => e.date >= currentMonday)
-  const lastWeek = entries.filter((e) => e.date >= prevMonday1 && e.date < currentMonday)
-  const twoWeeksAgo = entries.filter((e) => e.date < prevMonday1)
-
-  if (thisWeek.length > 0) {
-    rows.push({ type: 'header', label: 'This Week' })
-    thisWeek.forEach((entry) => rows.push({ type: 'entry', entry }))
-  }
-  if (lastWeek.length > 0) {
-    rows.push({ type: 'header', label: 'Last Week' })
-    lastWeek.forEach((entry) => rows.push({ type: 'entry', entry }))
-  }
-  if (twoWeeksAgo.length > 0) {
-    rows.push({ type: 'header', label: '2 Weeks Ago' })
-    twoWeeksAgo.forEach((entry) => rows.push({ type: 'entry', entry }))
-  }
-
-  return rows
-}
-
 export default function ApprovalsScreen() {
   const isManager = useIsManager()
 
@@ -134,6 +104,8 @@ export default function ApprovalsScreen() {
   const [rejectTarget, setRejectTarget] = useState<ApprovalItem | null>(null)
   const [isApprovingAll, setIsApprovingAll] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  // My Requests "Older" section: collapsed on every mount, never persisted
+  const [olderExpanded, setOlderExpanded] = useState(false)
 
   const { getEntryStyle } = useStaggeredEntry({ count: 2 })
   const { getItemStyle } = useListCascade({ count: items.length }, [items.length])
@@ -208,6 +180,32 @@ export default function ApprovalsScreen() {
     )
   }
 
+  function renderMyRequestRow(row: MyRequestRow, index: number) {
+    if (row.type === 'header') {
+      return (
+        <SectionLabel key={`header-${row.label}-${index}`} className="px-4 mt-3 mb-1">
+          {row.label}
+        </SectionLabel>
+      )
+    }
+    if (row.type === 'older-toggle') {
+      const label = row.expanded ? 'Hide older requests' : `Show older requests (${row.count})`
+      return (
+        <AnimatedPressable
+          key="older-toggle"
+          testID="older-toggle"
+          className="mx-4 my-2 py-2"
+          onPress={() => setOlderExpanded((expanded) => !expanded)}
+          accessibilityRole="button"
+          accessibilityLabel={label}
+        >
+          <Text className="text-textSecondary text-sm font-sans-semibold text-center">{label}</Text>
+        </AnimatedPressable>
+      )
+    }
+    return <MyRequestCard key={row.entry.id} entry={row.entry} />
+  }
+
   // ─── Skeleton helpers ───────────────────────────────────────────────────────
 
   const showTeamSkeletons = isManager && teamLoading && items.length === 0
@@ -228,7 +226,11 @@ export default function ApprovalsScreen() {
   const isUrgencyWindow = _now.getUTCDay() === 1 && _now.getUTCHours() < 15
 
   const teamQueueRows = buildTeamQueueRows(items, currentMonday, prevMonday1, prevMonday2, isUrgencyWindow)
-  const myRequestRows = buildMyRequestRows(entries, currentMonday, prevMonday1)
+  const myRequestRows = buildMyRequestRows(
+    entries,
+    { currentMonday, prevMonday1, prevMonday2 },
+    olderExpanded,
+  )
 
   // ─── Mesh background signal ─────────────────────────────────────────────────
   // critical (coral glow) when manager has pending approvals; null (idle) otherwise.
@@ -370,15 +372,7 @@ export default function ApprovalsScreen() {
                 </Card>
               </View>
             ) : (
-              myRequestRows.map((row, index) =>
-                row.type === 'header' ? (
-                  <SectionLabel key={`header-${row.label}-${index}`} className="px-4 mt-3 mb-1">
-                    {row.label}
-                  </SectionLabel>
-                ) : (
-                  <MyRequestCard key={row.entry.id} entry={row.entry} />
-                )
-              )
+              myRequestRows.map(renderMyRequestRow)
             )}
           </Animated.View>
         </ScrollView>
