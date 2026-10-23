@@ -11,11 +11,19 @@
 // or owner change, an unreadable store or the session cap, and logs one
 // requests.backfill_done event per run.
 //
+// FR3: startRequestsBackfillOnce, the session gate. At most one run per JS session per
+// owner (assignmentId|env), never for a signed-out user, the dev-mock manager preview or a
+// missing keychain entry, and it never rejects. After each stored week it rebuilds the
+// ['myRequests', assignmentId] view in place (composeRequestsView), but only a successful
+// same-owner or legacy view, keeping its error state and dataUpdatedAt (C8).
+//
 // Strategy (shaped like useHistoryBackfill's runBackfill):
 //   - Weeks run sequentially, newest first; a week's dates are fetched together
 //   - Only days that came back as a slot array are merged (a resolved [] is an empty day)
 //   - BACKFILL_WEEK_PAUSE_MS between weeks keeps the one-time traffic gentle
 
+import type { QueryClient } from '@tanstack/react-query';
+import { loadConfig, loadCredentials } from '../store/config';
 import { fetchWorkDiary } from '../api/workDiary';
 import { ApiError, AuthError, isRetryableError } from '../api/errors';
 import { groupSlotsIntoEntries } from '../lib/requestsUtils';
@@ -23,8 +31,10 @@ import {
   BACKFILL_MAX_WEEKS_PER_SESSION,
   isDaySettled,
   planBackfillWeek,
+  todayLocal,
 } from '../lib/requestsPlanner';
 import {
+  composeRequestsView,
   isOwnerConfigured,
   readRequestsStore,
   updateRequestsStore,
@@ -33,7 +43,9 @@ import {
   type StoredRequestDay,
 } from '../lib/requestsStore';
 import { log } from '../lib/log';
+import { toOwnerKey } from './useMyRequests';
 import type { Credentials } from '../types/config';
+import type { MyRequestsData } from '../types/requests';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -162,5 +174,73 @@ export async function runRequestsBackfill(
 
     skip.add(week.monday);
     await deps.sleep(BACKFILL_WEEK_PAUSE_MS);
+  }
+}
+
+// ─── Session gate ─────────────────────────────────────────────────────────────
+
+/** ownerKeys (toOwnerKey) whose backfill has started in this JS session. */
+const backfillStartedFor = new Set<string>();
+
+/** Test-only: forgets which owners have run, so the same owner can run again. */
+export function __resetBackfillSessionForTests(): void {
+  backfillStartedFor.clear();
+}
+
+/** Looks up setTimeout at call time, so fake timers drive it in tests. */
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Runs the backfill at most once per JS session per owner, and resolves `null` when it
+ * does not run: signed out, the dev-mock manager preview, no keychain entry, or this owner
+ * already started. Those guards never mark the owner (C9), so a later call can still run.
+ * After each stored week, the visible view grows in place. Never rejects (C13).
+ */
+export async function startRequestsBackfillOnce(
+  queryClient: QueryClient,
+  deps?: Partial<Omit<BackfillDeps, 'onWeekStored'>>,
+): Promise<BackfillResult | null> {
+  try {
+    const config = await loadConfig();
+    if (!config?.assignmentId || config.devManagerView === true) return null;
+    const credentials = await loadCredentials();
+    if (!credentials) return null;
+
+    const owner: RequestsStoreOwner = { assignmentId: config.assignmentId, useQA: config.useQA === true };
+    const ownerKey = toOwnerKey(owner.assignmentId, owner.useQA);
+    // No await between the check and the mark: two quick calls start one run (C9)
+    if (backfillStartedFor.has(ownerKey)) return null;
+    backfillStartedFor.add(ownerKey);
+
+    const today = deps?.today ?? todayLocal();
+    const queryKey = ['myRequests', owner.assignmentId];
+
+    // setQueryData dispatches a success: over an errored view it would clear the error,
+    // and without updatedAt it would make the view look fresh. So only a successful
+    // same-owner (or legacy) view is updated, keeping its dataUpdatedAt (C8).
+    const onWeekStored = (store: MyRequestsStore): void => {
+      const state = queryClient.getQueryState<MyRequestsData>(queryKey);
+      const prev = state?.data;
+      if (state?.status !== 'success' || !prev) return;
+      if (prev.ownerKey !== undefined && prev.ownerKey !== ownerKey) return;
+      queryClient.setQueryData<MyRequestsData>(
+        queryKey,
+        { ...prev, ownerKey, entries: composeRequestsView(store.days, today, prev) },
+        { updatedAt: state.dataUpdatedAt },
+      );
+    };
+
+    return await runRequestsBackfill(owner, credentials, {
+      today,
+      nowMs: deps?.nowMs ?? (() => Date.now()),
+      sleep: deps?.sleep ?? defaultSleep,
+      onWeekStored,
+    });
+  } catch (err) {
+    // Fired from a timer with void: a rejection here would go unhandled
+    log.error('requests.backfill_failed', err instanceof Error ? err : 'UnknownError');
+    return null;
   }
 }

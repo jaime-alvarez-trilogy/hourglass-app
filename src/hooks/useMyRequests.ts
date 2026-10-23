@@ -13,6 +13,9 @@
 // errorCode, the returned refetch is the forced refresh, and isLoading holds while the
 // persister restores the cache (or config loads with no data), so a cold start never
 // flashes an empty list.
+//
+// durable-data 05-requests-backfill FR3: toOwnerKey is exported, so the backfill's live
+// view update guards with the same owner stamp as selectMyRequests (C2).
 
 import { useIsRestoring, useQuery, type QueryClient } from '@tanstack/react-query';
 import { useConfig } from './useConfig';
@@ -44,7 +47,7 @@ import type { MyRequestsData, UseMyRequestsResult } from '../types/requests';
 const DEV_MOCK_OWNER_KEY = 'dev-mock';
 
 /** The view's owner stamp: `${assignmentId}|qa` or `${assignmentId}|prod`. */
-function toOwnerKey(assignmentId: string, useQA: boolean): string {
+export function toOwnerKey(assignmentId: string, useQA: boolean): string {
   return `${assignmentId}|${useQA ? 'qa' : 'prod'}`;
 }
 
