@@ -6,6 +6,8 @@
 // durable-data 04 FR4: honest freshness — a quiet note over visible entries, the red
 //   banner only when nothing is visible (neutral auth copy, no Retry for NO_CREDENTIALS),
 //   an "incomplete" empty state, and a pull spinner that waits for the forced refetch
+// durable-data 05 FR4: useRequestsBackfill() schedules the once-per-session backfill of
+//   older My Requests weeks, 5 s after mount, so the foreground refresh goes first
 //
 // Layout:
 //   Manager: TEAM REQUESTS section (swipeable ApprovalCards) + MY REQUESTS section
@@ -27,6 +29,7 @@ import Animated from 'react-native-reanimated'
 import { useIsManager } from '@/src/hooks/useIsManager'
 import { useApprovalItems } from '@/src/hooks/useApprovalItems'
 import { useMyRequests } from '@/src/hooks/useMyRequests'
+import { useRequestsBackfill } from '@/src/hooks/useRequestsBackfill'
 import { ApprovalCard } from '@/src/components/ApprovalCard'
 import MyRequestCard from '@/src/components/MyRequestCard'
 import { RejectionSheet } from '@/src/components/RejectionSheet'
@@ -100,6 +103,8 @@ export default function ApprovalsScreen() {
   // My requests — all users. errorCode / staleDates / updatedAt are optional on the
   // result (hand-built hook mocks lack them), so they are defaulted here.
   const myRequests = useMyRequests()
+  // Older weeks fill in the background (durable-data 05); unconditional (rules of hooks)
+  useRequestsBackfill()
   const { entries, isLoading: myLoading, error: myError, refetch: myRefetch } = myRequests
   const myErrorCode = myRequests.errorCode ?? null
   const staleDates = myRequests.staleDates ?? []

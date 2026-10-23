@@ -17,12 +17,17 @@
 // ['myRequests', assignmentId] view in place (composeRequestsView), but only a successful
 // same-owner or legacy view, keeping its error state and dataUpdatedAt (C8).
 //
+// FR4: useRequestsBackfill, the Requests screen's hook. It schedules the gate
+// BACKFILL_START_DELAY_MS after mount, or after the owner changes while mounted (C10), so
+// the foreground refresh goes first. Unmounting clears a pending timer; a started run continues.
+//
 // Strategy (shaped like useHistoryBackfill's runBackfill):
 //   - Weeks run sequentially, newest first; a week's dates are fetched together
 //   - Only days that came back as a slot array are merged (a resolved [] is an empty day)
 //   - BACKFILL_WEEK_PAUSE_MS between weeks keeps the one-time traffic gentle
 
-import type { QueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { loadConfig, loadCredentials } from '../store/config';
 import { fetchWorkDiary } from '../api/workDiary';
 import { ApiError, AuthError, isRetryableError } from '../api/errors';
@@ -43,6 +48,7 @@ import {
   type StoredRequestDay,
 } from '../lib/requestsStore';
 import { log } from '../lib/log';
+import { useConfig } from './useConfig';
 import { toOwnerKey } from './useMyRequests';
 import type { Credentials } from '../types/config';
 import type { MyRequestsData } from '../types/requests';
@@ -243,4 +249,30 @@ export async function startRequestsBackfillOnce(
     log.error('requests.backfill_failed', err instanceof Error ? err : 'UnknownError');
     return null;
   }
+}
+
+// ─── Hook ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Schedules startRequestsBackfillOnce BACKFILL_START_DELAY_MS after the Requests screen
+ * mounts, or after the owner changes while it is mounted (env switch, another account).
+ * No timer while signed out or in the dev-mock preview. Unmounting clears a pending
+ * timer; a started run continues. The gate re-reads config itself and allows one run per
+ * owner per session, so re-renders and remounts cost nothing.
+ */
+export function useRequestsBackfill(): void {
+  const queryClient = useQueryClient();
+  const { config } = useConfig();
+  const ownerKey =
+    config?.assignmentId && config.devManagerView !== true
+      ? toOwnerKey(config.assignmentId, config.useQA === true)
+      : null;
+
+  useEffect(() => {
+    if (!ownerKey) return;
+    const timer = setTimeout(() => {
+      void startRequestsBackfillOnce(queryClient);
+    }, BACKFILL_START_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [queryClient, ownerKey]);
 }
