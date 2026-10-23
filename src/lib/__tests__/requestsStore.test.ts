@@ -508,8 +508,43 @@ describe('DD2.35 — sign-out race: write, then verify the owner', () => {
     expect(await AsyncStorage.getItem(KEY)).toBeNull();
   });
 
-  it('the verify throws → null, the write is removed (fail closed, C7)', async () => {
-    mockLoadConfig.mockResolvedValueOnce(CONFIG).mockRejectedValueOnce(new Error('config read failed'));
+  it('the verify throws twice → null, the write is removed (fail closed, C7)', async () => {
+    mockLoadConfig
+      .mockResolvedValueOnce(CONFIG)
+      .mockRejectedValueOnce(new Error('config read failed'))
+      .mockRejectedValueOnce(new Error('config read failed'));
+
+    await expect(updateRequestsStore(OWNER, [wed], TODAY)).resolves.toBeNull();
+
+    expect(mockAsyncStorage.removeItem).toHaveBeenCalledWith('my_requests_v1');
+    expect(await AsyncStorage.getItem(KEY)).toBeNull();
+  });
+
+  // Cross-spec review: one transient config-read failure must not delete 24 weeks of
+  // stored days for a user who is still signed in. The verify is re-read once.
+  it('the verify throws once, then confirms the owner → the store (with every earlier day) is kept', async () => {
+    const older = day('2026-01-14', '2026-01-20T10:00:00.000Z', [entry('2026-01-14', 'Old fix')]);
+    await updateRequestsStore(OWNER, [older], TODAY);
+    mockAsyncStorage.removeItem.mockClear();
+    mockLoadConfig
+      .mockResolvedValueOnce(CONFIG)
+      .mockRejectedValueOnce(new Error('config read failed'))
+      .mockResolvedValueOnce(CONFIG);
+
+    const result = await updateRequestsStore(OWNER, [wed], TODAY);
+
+    expect(result).not.toBeNull();
+    expect(mockAsyncStorage.removeItem).not.toHaveBeenCalled();
+    const read = await readRequestsStore(OWNER);
+    expect(read.status).toBe('ok');
+    expect(read.status === 'ok' && Object.keys(read.store.days).sort()).toEqual(['2026-01-14', TODAY]);
+  });
+
+  it('the verify throws once, then reads signed out → null, the write is removed', async () => {
+    mockLoadConfig
+      .mockResolvedValueOnce(CONFIG)
+      .mockRejectedValueOnce(new Error('config read failed'))
+      .mockResolvedValueOnce(null);
 
     await expect(updateRequestsStore(OWNER, [wed], TODAY)).resolves.toBeNull();
 
