@@ -1,10 +1,11 @@
 // Tests: requestsPlanner — features/app/durable-data spec 02-requests-store FR2 (DD2.12-DD2.25)
+// and spec 05-requests-backfill FR1 (DD5.1-DD5.8)
 // Pure refresh planner: TTL constants, date helpers, requestWindows, tuesdayAfter,
-// isDaySettled and planRequestRefresh. No mocks.
+// isDaySettled and planRequestRefresh; the backfill week planner planBackfillWeek. No mocks.
 //
 // Every fixture time is a local wall-clock time and every expected date comes from the
 // UTC calendar helpers below (independent of the module under test), so the cases hold
-// in any host time zone. The DST cases (DD2.22) only cross a transition when run in a
+// in any host time zone. The DST cases (DD2.22, DD5.6) only cross a transition when run in a
 // DST zone, e.g. `TZ=America/New_York npx jest src/lib/__tests__/requestsPlanner.test.ts`.
 
 import * as fs from 'fs';
@@ -23,8 +24,10 @@ import {
   tuesdayAfter,
   isDaySettled,
   planRequestRefresh,
+  BACKFILL_MAX_WEEKS_PER_SESSION,
+  planBackfillWeek,
 } from '../requestsPlanner';
-import type { RefreshPlan, RefreshPlanInput, RefreshReason } from '../requestsPlanner';
+import type { BackfillWeek, RefreshPlan, RefreshPlanInput, RefreshReason } from '../requestsPlanner';
 import { WEEKLY_HISTORY_MAX } from '../weeklyHistory';
 import type { ManualRequestEntry, ManualRequestStatus } from '../../types/requests';
 
@@ -718,5 +721,246 @@ describe('DD2.25 — source checks', () => {
     expect(source).not.toMatch(/require\(\s*['"]\.\/requestsStore['"]/);
     expect(source).not.toMatch(/@react-native-async-storage/);
     expect(source).not.toMatch(/from\s+['"]\.\.\/api\//);
+  });
+});
+
+// ─── planBackfillWeek (spec 05-requests-backfill FR1) ────────────────────────
+
+const BF_TODAY = '2026-10-21'; // Wednesday: catchUpStart 2026-10-05, retentionStart 2026-05-11
+const BF_FETCHED = local('2026-10-21T08:00');
+
+/** Inclusive `from..to`, oldest first (the order of BackfillWeek.dates). */
+function asc(from: string, to: string): string[] {
+  return desc(from, to).reverse();
+}
+
+/** The Mon-Sun week starting at `monday`, ascending. */
+const weekOf = (monday: string): string[] => asc(monday, shift(monday, 6));
+
+/** The Mondays in `from..to`, newest first. */
+const mondaysIn = (from: string, to: string): string[] => desc(from, to).filter((d) => mondayOf(d) === d);
+
+/** Every date in `from..to` stored except `missing`. The backfill only looks for a key. */
+function storedExcept(from: string, to: string, ...missing: string[]): Days {
+  const days = recordAll(from, to, BF_FETCHED, true);
+  for (const d of missing) delete days[d];
+  return days;
+}
+
+/** Plans the way the runner does: plan, add the Monday to `skip`, repeat until null. */
+function walk(days: Days, today: string): { weeks: BackfillWeek[]; skip: Set<string> } {
+  const skip = new Set<string>();
+  const weeks: BackfillWeek[] = [];
+  // Bounded at twice the range, so a planner that ignores `skip` fails instead of spinning.
+  while (weeks.length < 42) {
+    const week = planBackfillWeek(days, today, skip);
+    if (!week) break;
+    weeks.push(week);
+    skip.add(week.monday);
+  }
+  return { weeks, skip };
+}
+
+describe('DD5.1 — an empty store plans the newest week before the 3-week window', () => {
+  it('today 2026-10-21 (Wednesday) → the 2026-09-28 week, all 7 dates ascending', () => {
+    expect(catchUpOf(BF_TODAY)).toBe('2026-10-05');
+    expect(planBackfillWeek({}, BF_TODAY)).toEqual({
+      monday: '2026-09-28',
+      dates: ['2026-09-28', '2026-09-29', '2026-09-30', '2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04'],
+    });
+  });
+
+  it.each([
+    ['Monday', '2026-10-19', '2026-09-28'],
+    ['Sunday', '2026-10-25', '2026-09-28'],
+    ['the next Monday', '2026-10-26', '2026-10-05'],
+  ])('%s %s → monday %s (catchUpStart − 7 days)', (_dow, today, monday) => {
+    expect(monday).toBe(shift(catchUpOf(today), -7));
+    expect(planBackfillWeek({}, today)).toEqual({ monday, dates: weekOf(monday) });
+  });
+});
+
+describe('DD5.2 — recorded dates are never planned', () => {
+  it('the 2026-09-28 week fully stored → the 2026-09-21 week', () => {
+    expect(planBackfillWeek(storedExcept('2026-09-28', '2026-10-04'), BF_TODAY)).toEqual({
+      monday: '2026-09-21',
+      dates: weekOf('2026-09-21'),
+    });
+  });
+
+  it('every date 2026-05-11..2026-10-04 stored → null, though catchUpStart..today has no record', () => {
+    expect(retentionOf(BF_TODAY)).toBe('2026-05-11');
+    expect(planBackfillWeek(storedExcept('2026-05-11', '2026-10-04'), BF_TODAY)).toBeNull();
+  });
+
+  it('any record counts: unsettled, PENDING or with an unparseable fetchedAt', () => {
+    // Re-checking a recorded older day is planRequestRefresh's unsettled-old rule (Out Of Scope #2).
+    const days: Days = {
+      ...storedExcept('2026-09-28', '2026-10-04'),
+      ...store(
+        rec('2026-09-28', BF_FETCHED, { statuses: ['PENDING'] }),
+        rec('2026-09-29', BF_FETCHED - 30 * 24 * HOUR),
+        rec('2026-09-30', 'garbage'),
+      ),
+    };
+    expect(planBackfillWeek(days, BF_TODAY)).toEqual({ monday: '2026-09-21', dates: weekOf('2026-09-21') });
+  });
+
+  it('is disjoint from planRequestRefresh on the same store, even forced', () => {
+    const now = local('2026-10-21T12:00');
+    const days = recordAll('2026-09-28', '2026-10-02', now - 7 * HOUR); // unsettled, stale
+    const refresh = plan(BF_TODAY, now, days, true);
+    expect(refresh.dates).toEqual(expect.arrayContaining(desc('2026-09-28', '2026-10-02')));
+
+    const week = planBackfillWeek(days, BF_TODAY);
+    expect(week).toEqual({ monday: '2026-09-28', dates: ['2026-10-03', '2026-10-04'] });
+    for (const d of week?.dates ?? []) expect(refresh.dates).not.toContain(d);
+  });
+});
+
+describe('DD5.3 — only the dates with no record are planned, ascending', () => {
+  it('the 2026-09-28 week missing only Tue and Thu → exactly those 2 dates', () => {
+    const days = storedExcept('2026-09-28', '2026-10-04', '2026-10-01', '2026-09-29');
+    expect(planBackfillWeek(days, BF_TODAY)).toEqual({ monday: '2026-09-28', dates: ['2026-09-29', '2026-10-01'] });
+  });
+
+  it('a mid-range week missing Tue and Thu → that week, past the full weeks above it', () => {
+    const days = storedExcept('2026-05-11', '2026-10-04', '2026-07-16', '2026-07-14');
+    expect(planBackfillWeek(days, BF_TODAY)).toEqual({ monday: '2026-07-13', dates: ['2026-07-14', '2026-07-16'] });
+  });
+
+  it('only the Sunday before catchUpStart missing → that one date', () => {
+    const days = storedExcept('2026-05-11', '2026-10-04', '2026-10-04');
+    expect(planBackfillWeek(days, BF_TODAY)).toEqual({ monday: '2026-09-28', dates: ['2026-10-04'] });
+  });
+});
+
+describe('DD5.4 — skip passes over the Mondays already attempted this session', () => {
+  it("skip holding '2026-09-28' (empty store) → the 2026-09-21 week", () => {
+    expect(planBackfillWeek({}, BF_TODAY, new Set(['2026-09-28']))).toEqual({
+      monday: '2026-09-21',
+      dates: weekOf('2026-09-21'),
+    });
+  });
+
+  it('an empty skip is the same as none', () => {
+    expect(planBackfillWeek({}, BF_TODAY, new Set())).toEqual({ monday: '2026-09-28', dates: weekOf('2026-09-28') });
+  });
+
+  it('a skipped week that still has gaps (a partial week) is passed over', () => {
+    const days = storedExcept('2026-09-28', '2026-10-04', '2026-10-02', '2026-10-03');
+    expect(planBackfillWeek(days, BF_TODAY, new Set(['2026-09-28']))).toEqual({
+      monday: '2026-09-21',
+      dates: weekOf('2026-09-21'),
+    });
+  });
+
+  it('walking an empty store with a growing skip → exactly 21 distinct Mondays, newest first, then null', () => {
+    const { weeks, skip } = walk({}, BF_TODAY);
+    const mondays = weeks.map((w) => w.monday);
+    expect(mondays).toEqual(mondaysIn('2026-05-11', '2026-09-28'));
+    expect(new Set(mondays).size).toBe(21);
+    expect(mondays[0]).toBe('2026-09-28');
+    expect(mondays[mondays.length - 1]).toBe('2026-05-11');
+    for (const w of weeks) expect(w.dates).toEqual(weekOf(w.monday));
+    expect(weeks.flatMap((w) => w.dates).sort()).toEqual(asc('2026-05-11', '2026-10-04'));
+    expect(weeks.flatMap((w) => w.dates)).toHaveLength(147);
+    expect(planBackfillWeek({}, BF_TODAY, skip)).toBeNull();
+  });
+});
+
+describe('DD5.5 — retentionStart is the oldest week ever planned', () => {
+  it('only the 2026-05-11 week has gaps → it is returned', () => {
+    expect(planBackfillWeek(storedExcept('2026-05-18', '2026-10-04'), BF_TODAY)).toEqual({
+      monday: '2026-05-11',
+      dates: weekOf('2026-05-11'),
+    });
+  });
+
+  it('only retentionStart itself missing → [2026-05-11]', () => {
+    const days = storedExcept('2026-05-11', '2026-10-04', '2026-05-11');
+    expect(planBackfillWeek(days, BF_TODAY)).toEqual({ monday: '2026-05-11', dates: ['2026-05-11'] });
+  });
+
+  it('the 2026-05-04 week is never returned, even with no records: 2026-05-11 skipped → null', () => {
+    const days = storedExcept('2026-05-18', '2026-10-04');
+    expect(Object.keys(days).filter((d) => d < '2026-05-18')).toEqual([]);
+    expect(planBackfillWeek(days, BF_TODAY, new Set(['2026-05-11']))).toBeNull();
+  });
+});
+
+// The fall-back (2026-11-01) and spring-forward (2026-03-08) weeks only cross a transition when
+// run in a DST zone, e.g. `TZ=America/New_York npx jest src/lib/__tests__/requestsPlanner.test.ts`.
+describe('DD5.6 — Mondays and dates stay exact across DST', () => {
+  it.each([
+    ['fall-back', '2026-11-25', '2026-11-02', '2026-10-26', '2026-11-01'],
+    ['spring-forward', '2026-04-01', '2026-03-09', '2026-03-02', '2026-03-08'],
+  ])('%s: today %s, the %s week stored → monday %s, 7 dates through %s', (_label, today, storedMonday, monday, sunday) => {
+    const week = planBackfillWeek(storedExcept(storedMonday, shift(storedMonday, 6)), today);
+    expect(week).toEqual({ monday, dates: asc(monday, sunday) });
+    expect(week?.dates).toHaveLength(7);
+  });
+
+  it.each([
+    ['2026-11-25', '2026-06-15', '2026-11-02'], // crosses 2026-11-01
+    ['2026-04-01', '2025-10-20', '2026-03-09'], // crosses 2025-11-02 and 2026-03-08
+  ])('walking an empty store, today %s → the 21 Mondays %s..%s, with no gap or duplicate date', (today, oldest, newest) => {
+    const { weeks } = walk({}, today);
+    expect(weeks.map((w) => w.monday)).toEqual(mondaysIn(oldest, newest));
+    expect(weeks.flatMap((w) => w.dates).sort()).toEqual(asc(oldest, shift(newest, 6)));
+  });
+});
+
+describe('DD5.7 — store keys outside the range are ignored, and the planner is pure', () => {
+  it("a 'garbage' key plus every real date stored → null, no throw", () => {
+    const days: Days = { ...storedExcept('2026-05-11', '2026-10-04'), garbage: rec('garbage', BF_FETCHED) };
+    expect(() => planBackfillWeek(days, BF_TODAY)).not.toThrow();
+    expect(planBackfillWeek(days, BF_TODAY)).toBeNull();
+  });
+
+  it("a 'garbage' key does not stand in for a missing date", () => {
+    expect(planBackfillWeek({ garbage: rec('garbage', BF_FETCHED) }, BF_TODAY)).toEqual({
+      monday: '2026-09-28',
+      dates: weekOf('2026-09-28'),
+    });
+  });
+
+  it('records before retentionStart, in the window or after today do not change the plan', () => {
+    const days: Days = {
+      ...storedExcept('2026-05-11', '2026-10-04', '2026-09-30'),
+      ...recordAll('2026-05-04', '2026-05-10', BF_FETCHED, true),
+      ...recordAll('2026-10-05', '2026-10-21', BF_FETCHED),
+      '2026-10-30': rec('2026-10-30', BF_FETCHED),
+    };
+    expect(planBackfillWeek(days, BF_TODAY)).toEqual({ monday: '2026-09-28', dates: ['2026-09-30'] });
+  });
+
+  it('does not mutate days or skip, and ignores the system clock', () => {
+    const days: Days = { ...storedExcept('2026-09-21', '2026-10-04'), garbage: rec('garbage', 'garbage') };
+    const skip = new Set(['2026-09-14']);
+    const snapshot = JSON.stringify(days);
+
+    const first = planBackfillWeek(days, BF_TODAY, skip);
+    expect(first).toEqual({ monday: '2026-09-07', dates: weekOf('2026-09-07') });
+    expect(JSON.stringify(days)).toBe(snapshot);
+    expect([...skip]).toEqual(['2026-09-14']);
+
+    jest.useFakeTimers({ now: new Date(2031, 0, 1, 12, 0) });
+    try {
+      expect(planBackfillWeek(days, BF_TODAY, skip)).toEqual(first);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+describe('DD5.8 — the session cap', () => {
+  it('BACKFILL_MAX_WEEKS_PER_SESSION is REQUESTS_RETENTION_WEEKS − the 3 catch-up weeks (21)', () => {
+    expect(BACKFILL_MAX_WEEKS_PER_SESSION).toBe(REQUESTS_RETENTION_WEEKS - 3);
+    expect(BACKFILL_MAX_WEEKS_PER_SESSION).toBe(21);
+  });
+
+  it('equals the number of weeks an empty store plans in one session', () => {
+    expect(walk({}, BF_TODAY).weeks).toHaveLength(BACKFILL_MAX_WEEKS_PER_SESSION);
   });
 });
