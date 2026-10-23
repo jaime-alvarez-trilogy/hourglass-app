@@ -3,7 +3,7 @@ import '../global.css';
 import { useEffect, useRef } from 'react';
 import { ActivityIndicator, AppState, View } from 'react-native';
 import * as Notifications from 'expo-notifications';
-import { focusManager, QueryClient } from '@tanstack/react-query';
+import { focusManager, QueryClient, useIsRestoring } from '@tanstack/react-query';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -89,6 +89,10 @@ const asyncStoragePersister = createAsyncStoragePersister({
 function RootLayout() {
   const colorScheme = useColorScheme();
   const { config, isLoading } = useConfig();
+  // durable-data 04 FR5: while PersistQueryClientProvider restores, queries neither subscribe
+  // nor fetch, so useConfig reports config: null with isLoading: false. The splash, the auth
+  // gate and the overlay all wait for the restore so a signed-in cold start never sees welcome.
+  const isRestoring = useIsRestoring();
   const router = useRouter();
   const segments = useSegments();
   useRoleRefresh();
@@ -128,26 +132,26 @@ function RootLayout() {
     SpaceMono_700Bold,
   });
 
-  // SC1.3: hide native splash once config resolves
+  // SC1.3: hide native splash once config resolves and the cache restore is done
   useEffect(() => {
-    if (!isLoading) {
+    if (!isLoading && !isRestoring) {
       SplashScreen.hideAsync();
     }
-  }, [isLoading]);
+  }, [isLoading, isRestoring]);
 
-  // SC1.1 + SC1.2: auth gate — redirect after config resolves
+  // SC1.1 + SC1.2: auth gate — redirect after config resolves and the cache restore is done
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoading || isRestoring) return;
     const inAuthGroup = segments[0] === '(auth)';
     if (!config?.setupComplete && !inAuthGroup) {
       router.replace('/(auth)/welcome');
     } else if (config?.setupComplete && inAuthGroup) {
       router.replace('/(tabs)');
     }
-  }, [isLoading, config, segments, router]);
+  }, [isLoading, isRestoring, config, segments, router]);
 
-  // SC1.3: overlay while config or fonts load
-  if (isLoading || !fontsLoaded) {
+  // SC1.3: overlay while config or fonts load, or the cache restores
+  if (isLoading || !fontsLoaded || isRestoring) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
         <ActivityIndicator size="large" color={colors.violet} />
