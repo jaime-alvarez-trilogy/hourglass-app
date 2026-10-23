@@ -3,6 +3,9 @@
 // FR5: Loading skeletons — independent per section
 // durable-data 04 FR1: My Requests rows come from src/lib/requestRows — bounded
 //   week buckets, then a collapsed "Show older requests (N)" toggle (month-grouped)
+// durable-data 04 FR4: honest freshness — a quiet note over visible entries, the red
+//   banner only when nothing is visible (neutral auth copy, no Retry for NO_CREDENTIALS),
+//   an "incomplete" empty state, and a pull spinner that waits for the forced refetch
 //
 // Layout:
 //   Manager: TEAM REQUESTS section (swipeable ApprovalCards) + MY REQUESTS section
@@ -38,7 +41,14 @@ import AnimatedMeshBackground from '@/src/components/AnimatedMeshBackground'
 import { colors } from '@/src/lib/colors'
 import { getWeekStartDate } from '@/src/lib/approvals'
 import type { ApprovalItem } from '@/src/lib/approvals'
-import { buildMyRequestRows } from '@/src/lib/requestRows'
+import {
+  buildMyRequestRows,
+  freshnessNote,
+  INCOMPLETE_EMPTY_TEXT,
+  myRequestsEmptyState,
+  requestsBannerText,
+  requestsErrorRetryable,
+} from '@/src/lib/requestRows'
 import type { MyRequestRow } from '@/src/lib/requestRows'
 import type { PanelState } from '@/src/lib/panelState'
 
@@ -87,8 +97,13 @@ export function buildTeamQueueRows(
 export default function ApprovalsScreen() {
   const isManager = useIsManager()
 
-  // My requests — all users
-  const { entries, isLoading: myLoading, error: myError, refetch: myRefetch } = useMyRequests()
+  // My requests — all users. errorCode / staleDates / updatedAt are optional on the
+  // result (hand-built hook mocks lack them), so they are defaulted here.
+  const myRequests = useMyRequests()
+  const { entries, isLoading: myLoading, error: myError, refetch: myRefetch } = myRequests
+  const myErrorCode = myRequests.errorCode ?? null
+  const staleDates = myRequests.staleDates ?? []
+  const updatedAt = myRequests.updatedAt ?? null
 
   // Team queue — called unconditionally; returns [] for non-managers
   const {
@@ -106,19 +121,23 @@ export default function ApprovalsScreen() {
   const [actionError, setActionError] = useState<string | null>(null)
   // My Requests "Older" section: collapsed on every mount, never persisted
   const [olderExpanded, setOlderExpanded] = useState(false)
+  // True only for a user pull, so background focus refetches never show the spinner
+  const [pulling, setPulling] = useState(false)
 
   const { getEntryStyle } = useStaggeredEntry({ count: 2 })
   const { getItemStyle } = useListCascade({ count: items.length }, [items.length])
 
   // ─── Pull-to-refresh ────────────────────────────────────────────────────────
-
-  const isRefreshing = myLoading || (isManager && teamLoading)
+  // Both refetches start now. The spinner holds until the My Requests forced refetch
+  // settles (resolved or rejected); the team refetch returns void, so its slot settles
+  // at once.
 
   function handleRefresh() {
-    myRefetch()
-    if (isManager) {
-      teamRefetch()
-    }
+    setPulling(true)
+    Promise.allSettled([
+      Promise.resolve(myRefetch()),
+      isManager ? Promise.resolve(teamRefetch()) : null,
+    ]).finally(() => setPulling(false))
   }
 
   // ─── Manager actions ────────────────────────────────────────────────────────
@@ -232,6 +251,24 @@ export default function ApprovalsScreen() {
     olderExpanded,
   )
 
+  // ─── My Requests freshness ──────────────────────────────────────────────────
+  // With entries on screen, a failed or partial refresh is one quiet note (stored data is
+  // the truth). With none, the empty state picks the red banner, the honest "incomplete"
+  // card or "No requests yet". Retry is offered only where it can help. The "updated … ago"
+  // text uses this render's clock read (_now); there is no timer, so it refreshes on the
+  // next render or refetch.
+
+  const myNote = freshnessNote({
+    hasEntries: entries.length > 0,
+    error: myError,
+    errorCode: myErrorCode,
+    staleDates,
+    updatedAt,
+    nowMs: _now.getTime(),
+  })
+  const myRetryable = requestsErrorRetryable(myError, myErrorCode)
+  const myEmptyState = myRequestsEmptyState(myError, staleDates)
+
   // ─── Mesh background signal ─────────────────────────────────────────────────
   // critical (coral glow) when manager has pending approvals; null (idle) otherwise.
 
@@ -296,7 +333,7 @@ export default function ApprovalsScreen() {
           contentContainerStyle={{ paddingBottom: 100 }}
           refreshControl={
             <RefreshControl
-              refreshing={isRefreshing}
+              refreshing={pulling}
               onRefresh={handleRefresh}
               tintColor={colors.success}
             />
@@ -343,17 +380,15 @@ export default function ApprovalsScreen() {
           <Animated.View style={getEntryStyle(isManager ? 1 : 0)} className="pt-4">
             <SectionLabel className="px-4 mb-2">My Requests</SectionLabel>
 
-            {/* My requests error banner */}
-            {myError && (
-              <View className="flex-row items-center bg-critical/10 mx-4 mb-3 px-4 py-2.5 rounded-xl gap-3">
-                <Text className="text-critical text-sm flex-1">
-                  {myError === 'auth'
-                    ? 'Authentication error. Please re-open the app.'
-                    : 'Could not load requests.'}
-                </Text>
-                <AnimatedPressable onPress={myRefetch}>
-                  <Text className="text-violet font-sans-semibold text-sm">Retry</Text>
-                </AnimatedPressable>
+            {/* Quiet freshness note — only while entries are visible */}
+            {myNote !== null && (
+              <View testID="my-requests-note" className="flex-row items-center mx-4 mb-2 gap-3">
+                <Text className="text-textSecondary text-xs flex-1">{myNote}</Text>
+                {myRetryable && (
+                  <AnimatedPressable onPress={myRefetch}>
+                    <Text className="text-violet font-sans-semibold text-sm">Retry</Text>
+                  </AnimatedPressable>
+                )}
               </View>
             )}
 
@@ -363,14 +398,43 @@ export default function ApprovalsScreen() {
                 <SkeletonLoader className="h-16 rounded-2xl" />
               </View>
             ) : entries.length === 0 ? (
-              /* FR4: Empty own requests — spans 3 weeks now */
-              <View className="px-4">
-                <Card>
-                  <Text className="text-textSecondary text-sm text-center">
-                    No requests yet
+              myEmptyState === 'error' && myError ? (
+                /* Nothing visible and the refresh failed: the banner alone, no empty card */
+                <View
+                  testID="my-requests-banner"
+                  className="flex-row items-center bg-critical/10 mx-4 mb-3 px-4 py-2.5 rounded-xl gap-3"
+                >
+                  <Text className="text-critical text-sm flex-1">
+                    {requestsBannerText(myError, myErrorCode)}
                   </Text>
-                </Card>
-              </View>
+                  {myRetryable && (
+                    <AnimatedPressable onPress={myRefetch}>
+                      <Text className="text-violet font-sans-semibold text-sm">Retry</Text>
+                    </AnimatedPressable>
+                  )}
+                </View>
+              ) : myEmptyState === 'incomplete' ? (
+                /* Some days never refreshed: not a confirmed empty window, so offer Retry */
+                <View className="px-4">
+                  <Card>
+                    <Text className="text-textSecondary text-sm text-center">
+                      {INCOMPLETE_EMPTY_TEXT}
+                    </Text>
+                    <AnimatedPressable onPress={myRefetch} className="self-center mt-2">
+                      <Text className="text-violet font-sans-semibold text-sm">Retry</Text>
+                    </AnimatedPressable>
+                  </Card>
+                </View>
+              ) : (
+                /* FR4: Empty own requests — the whole window refreshed with none */
+                <View className="px-4">
+                  <Card>
+                    <Text className="text-textSecondary text-sm text-center">
+                      No requests yet
+                    </Text>
+                  </Card>
+                </View>
+              )
             ) : (
               myRequestRows.map(renderMyRequestRow)
             )}
