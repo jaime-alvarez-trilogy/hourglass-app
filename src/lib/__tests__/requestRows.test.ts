@@ -4,8 +4,7 @@
 // Week", "2 Weeks Ago" = prevMonday2 <= date < prevMonday1), then one older-toggle row for
 // everything earlier. Expanded, the toggle is followed by month groups ("September 2026"),
 // newest month first, with malformed dates under "Other dates" last (C11, C12). Plus
-// monthLabel, and the FR1 static check that approvals.tsx imports the builder instead of
-// defining its own.
+// monthLabel. (The FR1 static check on approvals.tsx is DD4.24, in approvals.test.tsx.)
 // FR2, the pure copy: formatUpdatedAgo, the quiet freshnessNote shown over visible entries,
 // the no-data requestsBannerText, requestsErrorRetryable (no Retry for NO_CREDENTIALS) and
 // myRequestsEmptyState (an honest 'incomplete' state, C3/C4). No message says "re-open" or
@@ -16,8 +15,8 @@
 // first-of-month cases only catch a `new Date('YYYY-MM-DD')` (UTC) month read when run west
 // of UTC, e.g. `TZ=America/Los_Angeles npx jest src/lib/__tests__/requestRows.test.ts`.
 // FR2's NOW and every timestamp it is compared with are local wall-clock times, so the
-// calendar-day cases hold in any host time zone. The DST case only discriminates in a zone
-// that springs forward in March (e.g. `TZ=America/New_York` or `TZ=Europe/Berlin`).
+// calendar-day cases hold in any host time zone. The DST cases only discriminate in a zone
+// that observes DST (e.g. `TZ=America/New_York` or `TZ=Europe/Berlin`).
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -36,9 +35,7 @@ import {
 import type { MyRequestRow, MyRequestsEmptyState, RequestRowBounds } from '../requestRows';
 import type { ManualRequestEntry } from '../../types/requests';
 
-const ROOT = path.resolve(__dirname, '../../..');
 const ROWS_FILE = path.resolve(__dirname, '../requestRows.ts');
-const APPROVALS_FILE = path.join(ROOT, 'app', '(tabs)', 'approvals.tsx');
 
 /** Source with comments removed, so a pattern named in prose never satisfies a static check. */
 const codeOf = (file: string) => stripComments(fs.readFileSync(file, 'utf8'));
@@ -386,24 +383,6 @@ describe('DD4.6 — monthLabel', () => {
   });
 });
 
-// ─── FR1 static check: approvals.tsx uses the extracted builder ──────────────
-
-describe('FR1 — approvals.tsx imports buildMyRequestRows instead of defining it', () => {
-  const code = () => codeOf(APPROVALS_FILE);
-
-  it('has no local buildMyRequestRows or MyRequestRow', () => {
-    expect(code()).not.toMatch(/\bfunction\s+buildMyRequestRows\b/);
-    expect(code()).not.toMatch(/\b(?:const|let|var)\s+buildMyRequestRows\b/);
-    expect(code()).not.toMatch(/\b(?:type|interface)\s+MyRequestRow\b/);
-  });
-
-  it('imports buildMyRequestRows from @/src/lib/requestRows', () => {
-    expect(code()).toMatch(
-      /import\s*\{[^}]*\bbuildMyRequestRows\b[^}]*\}\s*from\s*['"]@\/src\/lib\/requestRows['"]/,
-    );
-  });
-});
-
 // ─── FR2 fixtures ────────────────────────────────────────────────────────────
 
 const SEC = 1_000;
@@ -480,6 +459,16 @@ describe('DD4.7 — formatUpdatedAgo', () => {
     ['a month back, across a March DST change', at(2026, 4, 2, 15), at(2026, 3, 2, 15), '31 days ago'],
   ])('from 24 h on it counts calendar days between the local dates, not 24 h blocks: %s → %j', (_label, nowMs, then, expected) => {
     expect(formatUpdatedAgo(iso(then), nowMs)).toBe(expected);
+  });
+
+  // 00:30 → 23:45 on a fall-back day is 24 h 15 min in a zone that leaves DST that night
+  // (Europe on 2026-10-25, the US on 2026-11-01), 23 h 15 min elsewhere. Either way the local
+  // date is the same, so the text stays in hours: never '0 days ago'.
+  it.each([
+    ['2026-10-25', at(2026, 10, 25, 23, 45), at(2026, 10, 25, 0, 30)],
+    ['2026-11-01', at(2026, 11, 1, 23, 45), at(2026, 11, 1, 0, 30)],
+  ])('the same local date stays in hours, even past 24 h on a fall-back day (%s)', (_label, nowMs, then) => {
+    expect(formatUpdatedAgo(iso(then), nowMs)).toBe(`${Math.floor((nowMs - then) / HOUR)} h ago`);
   });
 
   it.each([

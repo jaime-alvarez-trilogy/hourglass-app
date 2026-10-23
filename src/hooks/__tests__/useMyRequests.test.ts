@@ -1927,30 +1927,28 @@ describe('useMyRequests — DD2 forced refresh flag', () => {
     expect(calledDates()).toEqual([WED]);
   });
 
-  it('DD4.16 refetch() → the next run plans every catchUpStart..today date once; the one after is normal', async () => {
+  it('DD4.16 refetch() returns the query refetch promise (called once); the next run plans every catchUpStart..today date once, the one after is normal', async () => {
     signedIn();
     mockFetchWorkDiary.mockResolvedValue([]);
     await seedStore(windowRecords(WED, `${WED}T08:00`));
-    const { result } = useMyRequestsWith(DD_CONFIG, { data: view([], PROD_KEY) });
+    const sentinel = Promise.resolve('refetched');
+    const { result, refetch } = useMyRequestsWith(DD_CONFIG, {
+      data: view([], PROD_KEY),
+      refetchResult: sentinel,
+    });
+    expect(refetch).not.toHaveBeenCalled();
 
-    result.refetch();
+    const returned = result.refetch();
+    // Run the queryFn before any assertion on the call, so a failure cannot leave the
+    // one-shot flag set for a later case.
     await buildMyRequestsQueryFn(WED, () => local(`${WED}T08:05`))();
+
+    expect(returned).toBe(sentinel);
+    expect(refetch).toHaveBeenCalledTimes(1);
     expect(calledDates()).toEqual(desc(CATCH_UP, WED));
 
     mockFetchWorkDiary.mockClear();
     await buildMyRequestsQueryFn(WED, () => local(`${WED}T08:10`))();
     expect(calledDates()).toEqual([WED]);
-  });
-
-  // Last in the file: it runs no queryFn after refetch(), so it leaves the flag set.
-  it('DD4.16 refetch() calls the query refetch exactly once and returns its promise (the same object)', () => {
-    const sentinel = Promise.resolve('refetched');
-    const { result, refetch } = useMyRequestsWith(DD_CONFIG, { refetchResult: sentinel });
-    expect(refetch).not.toHaveBeenCalled();
-
-    const returned = result.refetch();
-
-    expect(returned).toBe(sentinel);
-    expect(refetch).toHaveBeenCalledTimes(1);
   });
 });

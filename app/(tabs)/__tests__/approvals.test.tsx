@@ -15,7 +15,7 @@
 //   - react-native-safe-area-context
 
 import React from 'react';
-import { create, act } from 'react-test-renderer';
+import { create as createRenderer, act } from 'react-test-renderer';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -229,6 +229,25 @@ function setupMocks(opts: {
 
   return { myRefetch, teamRefetch };
 }
+
+// ─── Tree isolation ───────────────────────────────────────────────────────────
+// Every tree is unmounted after its test. A screen left mounted keeps scheduling timer
+// updates, and an async act (DD4.22's settle) waits for its queue to drain, so a leaked
+// tree from an earlier test could hold that act open until the test times out.
+
+const mountedTrees: any[] = [];
+
+function create(element: React.ReactElement): any {
+  const tree = createRenderer(element);
+  mountedTrees.push(tree);
+  return tree;
+}
+
+afterEach(() => {
+  act(() => {
+    for (const tree of mountedTrees.splice(0)) tree.unmount();
+  });
+});
 
 // ─── File path ────────────────────────────────────────────────────────────────
 
@@ -1146,9 +1165,11 @@ describe('ApprovalsScreen — durable-data 04 FR4 DD4.23: no "re-open" or "passw
 });
 
 describe('ApprovalsScreen — durable-data 04 FR4 DD4.24: rows come from src/lib/requestRows', () => {
-  it('approvals.tsx defines no buildMyRequestRows and imports it from @/src/lib/requestRows', () => {
+  it('approvals.tsx defines no buildMyRequestRows or MyRequestRow and imports the builder from @/src/lib/requestRows', () => {
     const code = stripComments(fs.readFileSync(APPROVALS_FILE, 'utf8'));
     expect(code).not.toMatch(/\bfunction\s+buildMyRequestRows\b/);
+    expect(code).not.toMatch(/\b(?:const|let|var)\s+buildMyRequestRows\b/);
+    expect(code).not.toMatch(/\b(?:type|interface)\s+MyRequestRow\b/);
     expect(code).toMatch(
       /import\s*\{[^}]*\bbuildMyRequestRows\b[^}]*\}\s*from\s*['"]@\/src\/lib\/requestRows['"]/,
     );
