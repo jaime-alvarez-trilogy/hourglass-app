@@ -361,26 +361,23 @@ describe('DD5.9 — an empty store is backfilled week by week, newest first, to 
   it('fetches each date once, one whole week at a time, from the 2026-09-28 week down to the 2026-05-11 week', async () => {
     await run();
 
-    expect(calledDates()).toHaveLength(147);
+    // Each date exactly once; a week's dates are contiguous (one collapsed Monday per week)
     expect([...calledDates()].sort()).toEqual(ALL_BACKFILL_DATES);
     expect(fetchedMondays()).toEqual(BACKFILL_MONDAYS);
-    expect(calledDates().slice(0, 7).sort()).toEqual(weekOf(NEWEST_MONDAY));
-    expect(calledDates().slice(-7).sort()).toEqual(weekOf(OLDEST_MONDAY));
   });
 
-  it("passes the owner's assignmentId, the credentials and the owner's environment to every fetch", async () => {
-    await run();
-    for (const [assignmentId, , credentials, useQA] of mockFetchWorkDiary.mock.calls) {
-      expect([assignmentId, credentials, useQA]).toEqual(['79996', CREDS, false]);
-    }
-
-    jest.clearAllMocks();
-    mockAsyncStorage._reset();
-    mockLoadConfig.mockResolvedValue(QA_CONFIG);
+  it.each<[string, RequestsStoreOwner, CrossoverConfig]>([
+    ['prod', OWNER, CONFIG],
+    ['QA', QA_OWNER, QA_CONFIG],
+  ])("%s: every fetch gets the owner's assignmentId, the credentials and the owner's environment", async (_label, owner, config) => {
+    mockLoadConfig.mockResolvedValue(config);
     serveDiary(each(weekOf(NEWEST_MONDAY), undefined)); // one week is enough here
 
-    await run({}, QA_OWNER);
-    expect(mockFetchWorkDiary.mock.calls).toEqual(weekOf(NEWEST_MONDAY).map((d) => ['79996', d, CREDS, true]));
+    await run({}, owner);
+
+    expect(mockFetchWorkDiary.mock.calls).toEqual(
+      weekOf(NEWEST_MONDAY).map((d) => [owner.assignmentId, d, CREDS, owner.useQA]),
+    );
   });
 
   it('pauses BACKFILL_WEEK_PAUSE_MS after each of the 21 weeks', async () => {
@@ -472,6 +469,20 @@ describe('DD5.11 — dates that already have a record are never requested', () =
     expect(await readRaw()).toBe(raw);
     expect(sleep).not.toHaveBeenCalled();
     expect(onWeekStored).not.toHaveBeenCalled();
+  });
+
+  it("another owner's records do not count (an environment switch, C10): every date is fetched for the new owner", async () => {
+    await seedStore(ALL_BACKFILL_DATES.map((d) => emptyDay(d, SEEDED_AT)), OWNER);
+    mockLoadConfig.mockResolvedValue(QA_CONFIG);
+
+    await expect(run({}, QA_OWNER)).resolves.toEqual(COMPLETE_RUN);
+
+    expect([...calledDates()].sort()).toEqual(ALL_BACKFILL_DATES);
+    expect(mockFetchWorkDiary.mock.calls.every(([, , , useQA]) => useQA === true)).toBe(true);
+    // The prod records were replaced, not merged: the store is now the QA owner's, stamped by this run
+    const stored = (await readStore())!;
+    expect(stored.owner).toEqual(QA_OWNER);
+    expect(stored.days).toEqual(byDate(ALL_BACKFILL_DATES.map((d) => emptyDay(d))));
   });
 });
 
@@ -834,12 +845,10 @@ describe('DD5.22 — one requests.backfill_done event per run, carrying the resu
   ])('%s → log.info once with { weeksStored, daysStored, daysFailed, stopReason }', async (_label, setup, expected) => {
     setup();
 
-    const outcome = await run();
+    await expect(run()).resolves.toEqual(expected);
 
-    expect(outcome).toEqual(expected);
     expect(mockInfo).toHaveBeenCalledTimes(1);
     expect(mockInfo).toHaveBeenCalledWith('requests.backfill_done', expected);
-    expect(doneLogs()).toEqual([outcome]);
   });
 });
 

@@ -1205,10 +1205,11 @@ describe('ApprovalsScreen — durable-data 05 FR4 DD5.36: the screen mounts the 
     );
   });
 
-  it('approvals.tsx (comments stripped) calls useRequestsBackfill() right after useMyRequests()', () => {
+  // Placement is not pinned: the render cases below show it runs on every render path.
+  it('approvals.tsx (comments stripped) calls useRequestsBackfill() exactly once, with no arguments', () => {
     const code = stripComments(fs.readFileSync(APPROVALS_FILE, 'utf8'));
-    expect(code).toMatch(/=\s*useMyRequests\(\s*\)\s*;?\s*useRequestsBackfill\(\s*\)/);
     expect(code.match(/\buseRequestsBackfill\(/g)).toHaveLength(1);
+    expect(code).toMatch(/\buseRequestsBackfill\(\s*\)/);
   });
 
   it.each<[string, Parameters<typeof setupMocks>[0]]>([

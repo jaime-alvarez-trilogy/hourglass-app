@@ -857,14 +857,9 @@ describe('DD5.4 — skip passes over the Mondays already attempted this session'
 
   it('walking an empty store with a growing skip → exactly 21 distinct Mondays, newest first, then null', () => {
     const { weeks, skip } = walk({}, BF_TODAY);
-    const mondays = weeks.map((w) => w.monday);
-    expect(mondays).toEqual(mondaysIn('2026-05-11', '2026-09-28'));
-    expect(new Set(mondays).size).toBe(21);
-    expect(mondays[0]).toBe('2026-09-28');
-    expect(mondays[mondays.length - 1]).toBe('2026-05-11');
+    expect(weeks.map((w) => w.monday)).toEqual(mondaysIn('2026-05-11', '2026-09-28'));
+    expect(weeks).toHaveLength(BACKFILL_MAX_WEEKS_PER_SESSION);
     for (const w of weeks) expect(w.dates).toEqual(weekOf(w.monday));
-    expect(weeks.flatMap((w) => w.dates).sort()).toEqual(asc('2026-05-11', '2026-10-04'));
-    expect(weeks.flatMap((w) => w.dates)).toHaveLength(147);
     expect(planBackfillWeek({}, BF_TODAY, skip)).toBeNull();
   });
 });
@@ -914,7 +909,6 @@ describe('DD5.6 — Mondays and dates stay exact across DST', () => {
 describe('DD5.7 — store keys outside the range are ignored, and the planner is pure', () => {
   it("a 'garbage' key plus every real date stored → null, no throw", () => {
     const days: Days = { ...storedExcept('2026-05-11', '2026-10-04'), garbage: rec('garbage', BF_FETCHED) };
-    expect(() => planBackfillWeek(days, BF_TODAY)).not.toThrow();
     expect(planBackfillWeek(days, BF_TODAY)).toBeNull();
   });
 
@@ -954,13 +948,10 @@ describe('DD5.7 — store keys outside the range are ignored, and the planner is
   });
 });
 
+// That the cap equals the weeks an empty store plans in one session is checked by DD5.4's walk.
 describe('DD5.8 — the session cap', () => {
   it('BACKFILL_MAX_WEEKS_PER_SESSION is REQUESTS_RETENTION_WEEKS − the 3 catch-up weeks (21)', () => {
     expect(BACKFILL_MAX_WEEKS_PER_SESSION).toBe(REQUESTS_RETENTION_WEEKS - 3);
     expect(BACKFILL_MAX_WEEKS_PER_SESSION).toBe(21);
-  });
-
-  it('equals the number of weeks an empty store plans in one session', () => {
-    expect(walk({}, BF_TODAY).weeks).toHaveLength(BACKFILL_MAX_WEEKS_PER_SESSION);
   });
 });
