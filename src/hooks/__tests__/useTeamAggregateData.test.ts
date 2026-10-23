@@ -5,9 +5,16 @@
 // useMyRequests.test.ts convention: static source analysis of the hook file
 // + testing the exported buildTeamAggregateQueryFn directly through mocked
 // dependencies, since renderHook is not viable under jest-expo/node.
+//
+// Extended by durable-data 03-keep-last-good FR3 (DD3.18-DD3.24): when the roster is
+// non-empty and every member failed, the queryFn rejects with the first failed member's
+// error in roster order (or a NetworkError when that error is undefined/null), so
+// TanStack keeps the last good team totals instead of storing zeros. An empty roster and a
+// partial failure still resolve as before. The hook retries through `shouldRetryOnce`.
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { QueryClient } from '@tanstack/react-query';
 
 jest.mock('../../store/config', () => ({
   loadCredentials: jest.fn(),
@@ -34,7 +41,9 @@ import { getAuthToken } from '../../api/client';
 import { fetchWorkDiary } from '../../api/workDiary';
 import { fetchReportTimesheet } from '../../api/team';
 import { log } from '../../lib/log';
+import { ApiError, AuthError, NetworkError } from '../../api/errors';
 import { buildTeamAggregateQueryFn, mapTeamAggregateState } from '../../hooks/useTeamAggregateData';
+import type { TeamAggregateData } from '../../hooks/useTeamAggregateData';
 import { getWeekStartDate } from '../../lib/hours';
 import type { TeamMember, WorkDiarySlot } from '../../types/api';
 import type { CrossoverConfig } from '../../types/config';
@@ -118,6 +127,10 @@ function makeTimesheet(totalHours: number): TimesheetResponse {
 
 const HOOK_PATH = path.resolve(__dirname, '../../..', 'src', 'hooks', 'useTeamAggregateData.ts');
 
+function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+}
+
 describe('useTeamAggregateData — static analysis of source contract', () => {
   let source: string;
 
@@ -166,6 +179,14 @@ describe('useTeamAggregateData — static analysis of source contract', () => {
   it('does not register an AppState listener or custom timer', () => {
     expect(source).not.toMatch(/AppState/);
     expect(source).not.toMatch(/setInterval/);
+  });
+
+  it('DD3.24 — retries through the shared shouldRetryOnce, not retry: 1', () => {
+    const code = stripComments(source);
+    expect(code).toMatch(/retry:\s*shouldRetryOnce\b/);
+    expect(code).not.toMatch(/retry:\s*1\b/);
+    // The shared predicate from src/api/errors, not a local copy of it.
+    expect(code).toMatch(/import\s*\{[^}]*\bshouldRetryOnce\b[^}]*\}\s*from\s*'\.\.\/api\/errors'/);
   });
 });
 
@@ -417,14 +438,14 @@ describe('useTeamAggregateData — buildTeamAggregateQueryFn (query logic)', () 
       await expect(queryFn()).resolves.toBeDefined();
     });
 
-    it('logs each per-report failure via the application error-logging convention, with distinguishing member context', async () => {
+    it('DD3.21 — logs each per-report failure via the application error-logging convention, with distinguishing member context (and rejects, since no report succeeded)', async () => {
       const badMemberA = makeMember({ assignmentId: 'bad-a' });
       const badMemberB = makeMember({ assignmentId: 'bad-b' });
       mockFetchWorkDiary.mockRejectedValue(new Error('boom'));
       mockFetchReportTimesheet.mockResolvedValue(null);
 
       const queryFn = buildTeamAggregateQueryFn(CONFIG, [badMemberA, badMemberB], '2026-07-27');
-      await queryFn();
+      await expect(queryFn()).rejects.toThrow('boom');
 
       expect(mockLogError).toHaveBeenCalledTimes(2);
       const loggedAssignmentIds = mockLogError.mock.calls.map(([, , meta]) => meta?.assignmentId);
@@ -450,21 +471,68 @@ describe('useTeamAggregateData — buildTeamAggregateQueryFn (query logic)', () 
       expect(mockFetchReportTimesheet).not.toHaveBeenCalled();
     });
 
-    it('when every report fails, returns zero-valued aggregate data with one failed row per report (not a thrown error)', async () => {
+    it('DD3.18 — when every report\'s work diary fails, the queryFn rejects with the member error (never zero-valued totals)', async () => {
       const memberA = makeMember({ assignmentId: 'a' });
       const memberB = makeMember({ assignmentId: 'b' });
       mockFetchWorkDiary.mockRejectedValue(new Error('all down'));
       mockFetchReportTimesheet.mockResolvedValue(null);
 
       const queryFn = buildTeamAggregateQueryFn(CONFIG, [memberA, memberB], '2026-07-27');
-      const result = await queryFn();
+      await expect(queryFn()).rejects.toThrow('all down');
+    });
 
-      expect(result.reportCount).toBe(0);
-      expect(result.weekHours).toBe(0);
-      expect(result.weekAiPct).toBe(0);
-      expect(result.weekBrainliftHours).toBe(0);
-      expect(result.breakdown.every((r) => r.fetchFailed)).toBe(true);
-      expect(result.breakdown).toHaveLength(2);
+    it('DD3.18 — the same when every report\'s timesheet fails instead: rejects with that ApiError', async () => {
+      const memberA = makeMember({ assignmentId: 'a' });
+      const memberB = makeMember({ assignmentId: 'b' });
+      mockFetchWorkDiary.mockResolvedValue(makeDaySlots(5, 2));
+      mockFetchReportTimesheet.mockRejectedValue(new ApiError(500));
+
+      const queryFn = buildTeamAggregateQueryFn(CONFIG, [memberA, memberB], '2026-07-27');
+      const run = queryFn();
+      await expect(run).rejects.toBeInstanceOf(ApiError);
+      await expect(run).rejects.toMatchObject({ statusCode: 500 });
+    });
+
+    it('DD3.19 — every report rejects AuthError(401) → rejects with that AuthError, unwrapped (so the retry rule sees a credential failure)', async () => {
+      const memberA = makeMember({ assignmentId: 'a' });
+      const memberB = makeMember({ assignmentId: 'b' });
+      mockFetchWorkDiary.mockRejectedValue(new AuthError(401));
+      mockFetchReportTimesheet.mockResolvedValue(null);
+
+      const run = buildTeamAggregateQueryFn(CONFIG, [memberA, memberB], '2026-07-27')();
+      await expect(run).rejects.toBeInstanceOf(AuthError);
+      await expect(run).rejects.toMatchObject({ statusCode: 401 });
+    });
+
+    it.each([
+      ['undefined', undefined],
+      ['null', null],
+    ])('DD3.19 — every report rejects with %s → rejects a NetworkError', async (_label, thrown) => {
+      const memberA = makeMember({ assignmentId: 'a' });
+      const memberB = makeMember({ assignmentId: 'b' });
+      mockFetchWorkDiary.mockRejectedValue(thrown);
+      mockFetchReportTimesheet.mockResolvedValue(null);
+
+      const run = buildTeamAggregateQueryFn(CONFIG, [memberA, memberB], '2026-07-27')();
+      await expect(run).rejects.toBeInstanceOf(NetworkError);
+      await expect(run).rejects.toThrow('All team member fetches failed');
+    });
+
+    it('DD3.20 — mixed failures: the first failed member in roster order decides the error, not the first to fail in time', async () => {
+      const memberA = makeMember({ assignmentId: 'a' });
+      const memberB = makeMember({ assignmentId: 'b' });
+      // A fails last in time, B fails at once.
+      mockFetchWorkDiary.mockImplementation(async (assignmentId) => {
+        if (assignmentId === 'a') {
+          await new Promise((r) => setTimeout(r, 10));
+          throw new Error('a');
+        }
+        throw new Error('b');
+      });
+      mockFetchReportTimesheet.mockResolvedValue(null);
+
+      await expect(buildTeamAggregateQueryFn(CONFIG, [memberA, memberB], '2026-07-27')()).rejects.toThrow(/^a$/);
+      await expect(buildTeamAggregateQueryFn(CONFIG, [memberB, memberA], '2026-07-27')()).rejects.toThrow(/^b$/);
     });
   });
 
@@ -493,7 +561,7 @@ describe('useTeamAggregateData — buildTeamAggregateQueryFn (query logic)', () 
       expect(result.breakdown[0].aiPct).toBe(0);
     });
 
-    it('fails the entire member row when one of several daily diary fetches fails (partial daily failure)', async () => {
+    it('DD3.22 — a one-member roster whose only member has one failed day rejects (no report succeeded)', async () => {
       const member = makeMember();
       mockFetchWorkDiary.mockImplementation(async (_id, date) => {
         if (date === '2026-07-28') throw new Error('one day failed');
@@ -503,11 +571,36 @@ describe('useTeamAggregateData — buildTeamAggregateQueryFn (query logic)', () 
 
       // Wednesday -> Mon/Tue/Wed fetched; Tue throws
       const queryFn = buildTeamAggregateQueryFn(CONFIG, [member], '2026-07-29');
+      await expect(queryFn()).rejects.toThrow('one day failed');
+    });
+
+    it('DD3.22 — fails the entire member row when one of several daily diary fetches fails (partial daily failure, two-member roster)', async () => {
+      const goodMember = makeMember({ assignmentId: 'good' });
+      const badMember = makeMember({ assignmentId: 'bad' });
+      mockFetchWorkDiary.mockImplementation(async (assignmentId, date) => {
+        if (assignmentId === 'bad' && date === '2026-07-28') throw new Error('one day failed');
+        return makeDaySlots(5, 5);
+      });
+      mockFetchReportTimesheet.mockResolvedValue(makeTimesheet(40));
+
+      // Wednesday -> Mon/Tue/Wed fetched; the bad member's Tue throws
+      const queryFn = buildTeamAggregateQueryFn(CONFIG, [goodMember, badMember], '2026-07-29');
       const result = await queryFn();
 
-      expect(result.reportCount).toBe(0);
-      expect(result.breakdown[0].fetchFailed).toBe(true);
-      expect(result.weekHours).toBe(0);
+      expect(result.reportCount).toBe(1);
+      expect(result.weekHours).toBe(40); // only goodMember's hours
+      // The failed row carries no error field: the breakdown shape is unchanged.
+      expect(result.breakdown.find((r) => r.member.assignmentId === 'bad')).toEqual({
+        member: badMember,
+        hours: 0,
+        aiPct: 0,
+        brainliftHours: 0,
+        fetchFailed: true,
+      });
+      expect(result.breakdown.find((r) => r.member.assignmentId === 'good')).toMatchObject({
+        hours: 40,
+        fetchFailed: false,
+      });
     });
   });
 
@@ -522,6 +615,56 @@ describe('useTeamAggregateData — buildTeamAggregateQueryFn (query logic)', () 
       const queryFn = buildTeamAggregateQueryFn(null, [makeMember()], '2026-07-27');
       await expect(queryFn()).rejects.toThrow(/config/i);
     });
+  });
+});
+
+// ─── durable-data 03 FR3: TanStack keeps the last good team totals ────────────
+
+describe('useTeamAggregateData — durable-data 03 FR3: a failed refresh keeps the last good totals (DD3.23)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockLoadCredentials.mockResolvedValue(CREDENTIALS);
+    mockGetAuthToken.mockResolvedValue(TOKEN);
+  });
+
+  it('DD3.23 — an all-fail refetch keeps weekHours 40 in the cache; mapTeamAggregateState shows that data with the error message', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+    const memberA = makeMember({ assignmentId: 'a', name: 'Report A' });
+    const memberB = makeMember({ assignmentId: 'b', name: 'Report B' });
+    const key = ['teamAggregate', CONFIG.primaryTeamId, '2026-07-27'];
+    const lastGood: TeamAggregateData = {
+      weekHours: 40,
+      weekAiPct: 35,
+      weekBrainliftHours: 2,
+      reportCount: 2,
+      breakdown: [
+        { member: memberA, hours: 22, aiPct: 40, brainliftHours: 1.5, fetchFailed: false },
+        { member: memberB, hours: 18, aiPct: 30, brainliftHours: 0.5, fetchFailed: false },
+      ],
+    };
+    client.setQueryData(key, lastGood);
+    mockFetchWorkDiary.mockRejectedValue(new Error('all down'));
+    mockFetchReportTimesheet.mockResolvedValue(null);
+
+    await expect(
+      client.fetchQuery({
+        queryKey: key,
+        queryFn: buildTeamAggregateQueryFn(CONFIG, [memberA, memberB], '2026-07-27'),
+      }),
+    ).rejects.toThrow('all down');
+
+    const state = client.getQueryState<TeamAggregateData, Error>(key)!;
+    expect(state.status).toBe('error');
+    expect(client.getQueryData<TeamAggregateData>(key)?.weekHours).toBe(40);
+    expect(client.getQueryData(key)).toBe(lastGood);
+
+    const result = mapTeamAggregateState(
+      { isLoading: false, error: null },
+      { data: client.getQueryData<TeamAggregateData>(key), isLoading: false, error: state.error },
+    );
+    expect(result).toEqual({ data: lastGood, isLoading: false, error: 'all down' });
+
+    client.clear();
   });
 });
 
