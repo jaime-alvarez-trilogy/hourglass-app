@@ -42,6 +42,7 @@ import { useRoleRefresh } from '@/src/hooks/useRoleRefresh';
 import { useScheduledNotifications } from '@/src/hooks/useScheduledNotifications';
 import { colors } from '@/src/lib/colors';
 import { registerPushToken } from '@/src/lib/pushToken';
+import { shouldDehydrateQuery } from '@/src/lib/queryPersist';
 import { registerBackgroundPushHandler } from '@/src/notifications/handler';
 
 // FR1: Configure foreground notification display before any component renders
@@ -78,6 +79,8 @@ const queryClient = new QueryClient({
 
 // Persist query cache to AsyncStorage so data survives app restarts.
 // Max age 24h — stale data is better than a blank screen on cold start.
+// durable-data 03 FR5: shouldDehydrateQuery also keeps errored queries that still hold
+// their last good data, and never keeps the 'dev-mock' manager-preview requests view.
 const asyncStoragePersister = createAsyncStoragePersister({
   storage: AsyncStorage,
   key: 'HOURGLASS_QUERY_CACHE',
@@ -170,7 +173,11 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <PersistQueryClientProvider
         client={queryClient}
-        persistOptions={{ persister: asyncStoragePersister, maxAge: 1000 * 60 * 60 * 24 }}
+        persistOptions={{
+          persister: asyncStoragePersister,
+          maxAge: 1000 * 60 * 60 * 24,
+          dehydrateOptions: { shouldDehydrateQuery },
+        }}
       >
         <RootLayout />
       </PersistQueryClientProvider>

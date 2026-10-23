@@ -1,6 +1,6 @@
 # Hourglass — Architecture Reference
 
-**Last mapped:** 2026-05-22. **Updated:** 2026-10-20 for Expo SDK 58 / iOS 27 (store-compliance spec 10): §5.2, §5.3, §5.7, §6.1, §7.1–7.3, §8.6. 2026-10-22 for durable-data 02-requests-store: §3.2, §3.3, §4.4, §6.3, §6.5, §8.5, §8.8.
+**Last mapped:** 2026-05-22. **Updated:** 2026-10-20 for Expo SDK 58 / iOS 27 (store-compliance spec 10): §5.2, §5.3, §5.7, §6.1, §7.1–7.3, §8.6. 2026-10-22 for durable-data 02-requests-store: §3.2, §3.3, §4.4, §6.3, §6.5, §8.5, §8.8. 2026-10-22 for durable-data 03-keep-last-good: §3.2, §6.5, §8.8.
 **Scope:** `hourglassws/` (Expo iOS app). Excludes deprecated Scriptable widgets at the repo root.
 
 A single document for understanding how the app fits together before touching any cross-cutting subsystem. Every section is keyed to file:line so claims are verifiable.
@@ -148,7 +148,7 @@ Four persistence layers. The same logical data sometimes appears in multiple lay
 | `push_token` | string | `src/lib/pushToken.ts:15` | sent to Railway server on register; cleared on logout |
 | `prev_approval_ids` | JSON `string[]` | `src/notifications/handler.ts` (`savePrevIds`) | set-difference dedup for instant approval notification. Legacy `prev_approval_count` is cleaned up on every write; both are in the `clearAll` wipe list. |
 | `my_requests_v1` | JSON `MyRequestsStore { version: 1, owner: { assignmentId, useQA }, days: { [YYYY-MM-DD]: { date, fetchedAt, entries, settled } } }` | `updateRequestsStore` (`src/lib/requestsStore.ts`), from the `useMyRequests` queryFn: serialized writes, per-date merge of successful fetches only, pruned to 24 weeks (`REQUESTS_RETENTION_WEEKS`), owner checked before and verified after `setItem` | `readRequestsStore` (same file) in the `useMyRequests` queryFn. Never throws: `ok` / `empty` (absent, corrupt, unknown version or another owner) / `unreadable` (`getItem` threw, so no write that run). Durable-data 02, §4.4. Wiped by `clearAll` (sign-out). |
-| `HOURGLASS_QUERY_CACHE` | TanStack Query persist payload | `PersistQueryClientProvider` (`app/_layout.tsx:80-83`) | full query cache, 24h max age |
+| `HOURGLASS_QUERY_CACHE` | TanStack Query persist payload | `PersistQueryClientProvider` (`app/_layout.tsx:84-87,174-183`), filtered by `dehydrateOptions.shouldDehydrateQuery` (`src/lib/queryPersist.ts`): `success` queries and errored queries that still hold data; never a query whose data is stamped `ownerKey: 'dev-mock'` (durable-data 03, §8.8) | full query cache, 24h max age |
 
 ### 3.3 TanStack Query
 
@@ -406,6 +406,7 @@ Notable:
 - `requestsPlanner.ts` — pure My Requests refresh planner (`planRequestRefresh`, `requestWindows`, `isDaySettled`, TTL constants, local date helpers). Durable-data 02, §4.4.
 - `requestsStore.ts` — the `my_requests_v1` store (`readRequestsStore`, serialized `updateRequestsStore`, `pruneDays`, `buildRequestsView`, `composeRequestsView`). Holds a module write chain, so not stateless.
 - `limit.ts` — `createLimiter(max)`, a FIFO concurrency limiter (used by `fetchWorkDiary`).
+- `queryPersist.ts` — `shouldDehydrateQuery`, the `HOURGLASS_QUERY_CACHE` persist predicate, and `DEV_MOCK_OWNER_KEY`. Imports only `@tanstack/react-query`. Durable-data 03, §8.8.
 - `pushToken.ts` — Expo push token registration with Railway server.
 - `approvalMeshSignal.ts`, `panelState.ts` — UI state machines.
 - `devMock.ts` — `MOCK_TEAM_ITEMS` for `devManagerView` toggle.
@@ -564,6 +565,8 @@ Root-level `components/` and `hooks/` are Expo Starter scaffold leftovers. Produ
 `hours_cache`, `ai_cache`, `widget_data`, `weekly_history`, and the `HOURGLASS_QUERY_CACHE` (full Query cache) all persist overlapping data. Manual AsyncStorage caches exist for instant-render on mount before queries resolve; Query persistence covers the rest. Clearing the Query cache does not clear the manual caches.
 
 **My Requests no longer depend on the persisted cache for history** (durable-data 02). Their history lives in `my_requests_v1` (§3.2), which only a successful per-day fetch writes, so a failed refresh, the persister's 24 h `maxAge` or a cleared Query cache cannot lose it. The persisted `['myRequests', assignmentId]` value is a view rebuilt from the store on every successful run, and seeded from it on a cold cache (§4.4). A legacy 1.1/1.2.0 blob is never imported into the store: its entries are carried forward in the view only, until the server gives each date a record.
+
+**Keep last good** (durable-data 03). A failed refresh never replaces stored data: it throws, or it skips the write. `fetchTimesheet` rejects when all three strategies threw (one that responded with no row still resolves `null`, a truthful zero), `fetchPayments` rethrows every error, `buildPaymentHistoryQueryFn` (shared by `usePaymentHistory` and `useEarningsHistory`) rethrows, and `buildTeamAggregateQueryFn` throws when the roster is non-empty and every member failed. TanStack then keeps the last good `data`, and `useHoursData`'s `isError` guard leaves `hours_cache` (and so `widget_data`) untouched. These queries retry through `shouldRetryOnce` (`src/api/errors.ts`): one retry, outages only. `useAIData` keeps `data` on an `AuthError`. The weekly-history writers (`useAIData`, `useEarningsHistory`, `runBackfill`, `wipeAIHistory`) read through `readWeeklyHistoryForWrite()`, which returns `null` only when `getItem` threw (logged as `history.read_failed`), and skip `saveWeeklyHistory` on `null`; readers keep `loadWeeklyHistory`. The persister's predicate, `shouldDehydrateQuery` (`src/lib/queryPersist.ts`), keeps `success` queries and errored queries that still hold data, so the last good values survive a restart: they come back as stored (`status: 'error'`, `error: {}`, `fetchStatus: 'idle'`) and refetch on mount. It never keeps a query whose data is stamped `ownerKey: 'dev-mock'` (the manager-preview My Requests view, §4.4); the literal is shared with `useMyRequests.ts`, not imported, and a test pins both.
 
 ### 8.9 Observability: local error log only (no automatic phone-home)
 
