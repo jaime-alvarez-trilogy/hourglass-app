@@ -8,8 +8,13 @@
 // on a cold cache it first seeds the cache from the store ("seed-then-throw").
 // FR5: the hook retries through shouldRetryQuery and shows the view only to its owner
 // (selectMyRequests).
+//
+// durable-data 04-requests-history-ui FR3: selectMyRequests also returns the auth
+// errorCode, the returned refetch is the forced refresh, and isLoading holds while the
+// persister restores the cache (or config loads with no data), so a cold start never
+// flashes an empty list.
 
-import { useQuery, type QueryClient } from '@tanstack/react-query';
+import { useIsRestoring, useQuery, type QueryClient } from '@tanstack/react-query';
 import { useConfig } from './useConfig';
 import { loadConfig, loadCredentials } from '../store/config';
 import { fetchWorkDiary } from '../api/workDiary';
@@ -77,13 +82,14 @@ export function toRequestsError(err: unknown): 'auth' | 'network' | null {
  * What the screen shows from the cached view. The TanStack key carries no environment,
  * so a view is shown only to its owner: a legacy (unstamped) blob or the current
  * `assignmentId|env`, and the 'dev-mock' view only while the manager preview is on.
- * A thrown query error wins over the view's own (legacy) error.
+ * A thrown query error wins over the view's own (legacy) error. `errorCode` is the
+ * AuthError's own code, and only when the error maps to 'auth'.
  */
 export function selectMyRequests(
   data: MyRequestsData | undefined,
   config: CrossoverConfig | null | undefined,
   queryError: unknown,
-): Required<Pick<UseMyRequestsResult, 'entries' | 'error' | 'staleDates' | 'updatedAt'>> {
+): Required<Pick<UseMyRequestsResult, 'entries' | 'error' | 'errorCode' | 'staleDates' | 'updatedAt'>> {
   const ownerKey = config?.assignmentId
     ? toOwnerKey(config.assignmentId, config.useQA === true)
     : undefined;
@@ -94,9 +100,13 @@ export function selectMyRequests(
       data.ownerKey === ownerKey ||
       (data.ownerKey === DEV_MOCK_OWNER_KEY && config?.devManagerView === true));
 
+  const thrown = toRequestsError(queryError);
+
   return {
     entries: visible ? data.entries : [],
-    error: toRequestsError(queryError) ?? data?.error ?? null,
+    error: thrown ?? data?.error ?? null,
+    errorCode:
+      thrown === 'auth' && queryError instanceof AuthError ? queryError.errorCode ?? null : null,
     staleDates: data?.staleDates ?? [],
     updatedAt: data?.updatedAt ?? null,
   };
@@ -248,18 +258,32 @@ export function buildMyRequestsQueryFn(
  * (pending/approved/rejected) from the my_requests_v1 store view. A failed refresh
  * keeps the previous view on screen and reports its error ('auth' | 'network');
  * outages are retried through shouldRetryQuery. Works for contributors and managers alike.
+ *
+ * `refetch` is a plain closure, not a useCallback: the hook is also called outside a render
+ * in tests, and no consumer relies on its identity.
  */
 export function useMyRequests(): UseMyRequestsResult {
-  const { config } = useConfig();
+  const isRestoring = useIsRestoring();
+  const { config, isLoading: configLoading } = useConfig();
   const assignmentId = config?.assignmentId ?? null;
 
-  const { data, isLoading, error: queryError, refetch } = useQuery({
+  const query = useQuery({
     queryKey: ['myRequests', assignmentId],
     queryFn: buildMyRequestsQueryFn(),
     staleTime: 60_000,
     enabled: !!assignmentId,
     retry: shouldRetryQuery,
   });
+  const { data } = query;
 
-  return { ...selectMyRequests(data, config, queryError), isLoading, refetch };
+  return {
+    ...selectMyRequests(data, config, query.error),
+    // While restoring, or while config loads, the query is disabled and idle, so its own
+    // isLoading is false; hold the skeleton until there is a view to show
+    isLoading: query.isLoading || isRestoring || (configLoading && data === undefined),
+    refetch: () => {
+      markMyRequestsForcedRefresh();
+      return query.refetch();
+    },
+  };
 }

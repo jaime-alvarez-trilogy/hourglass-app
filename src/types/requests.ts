@@ -48,13 +48,19 @@ export interface MyRequestsData {
  * Return type of the useMyRequests hook.
  */
 export interface UseMyRequestsResult {
-  /** Manual time request entries for the current and 2 prior weeks, sorted by date descending */
+  /** Stored manual time request entries (up to the retention window), sorted by date descending */
   entries: ManualRequestEntry[];
+  /** True until there is something to show: the query's first load, the persister's cache
+   *  restore, or config still loading with no data yet */
   isLoading: boolean;
   /** 'auth' for 401/403 errors, 'network' for connectivity errors, null if ok */
   error: 'auth' | 'network' | null;
-  /** Triggers a fresh fetch */
-  refetch: () => void;
+  /** The thrown AuthError's errorCode (e.g. 'NO_CREDENTIALS') when `error` is 'auth', else null.
+   *  Optional, so hand-built hook mocks still type-check */
+  errorCode?: string | null;
+  /** Forced refresh (pull-to-refresh / Retry): re-fetches the whole 3-week window. Returns the
+   *  query's refetch promise; mocks may return nothing */
+  refetch: () => Promise<unknown> | void;
   /** Dates whose last refresh failed (their stored record is shown) */
   staleDates?: string[];
   /** Latest successful fetch within the 3-week window, or null */
