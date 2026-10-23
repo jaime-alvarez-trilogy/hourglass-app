@@ -12,7 +12,8 @@
 // requests.backfill_done event per run.
 //
 // FR3: startRequestsBackfillOnce, the session gate. At most one run per JS session per
-// owner (assignmentId|env), never for a signed-out user, the dev-mock manager preview or a
+// owner (assignmentId|env) and auth generation (cross-spec review: a sign-out or env
+// switch can wipe or overwrite the store, so it re-opens the gate), never for a signed-out user, the dev-mock manager preview or a
 // missing keychain entry, and it never rejects. After each stored week it rebuilds the
 // ['myRequests', assignmentId] view in place (composeRequestsView), but only a successful
 // same-owner or legacy view, keeping its error state and dataUpdatedAt (C8).
@@ -30,6 +31,7 @@ import { useEffect } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { loadConfig, loadCredentials } from '../store/config';
 import { fetchWorkDiary } from '../api/workDiary';
+import { getAuthGeneration } from '../api/client';
 import { ApiError, AuthError, isRetryableError } from '../api/errors';
 import { groupSlotsIntoEntries } from '../lib/requestsUtils';
 import {
@@ -192,7 +194,11 @@ export async function runRequestsBackfill(
 
 // ─── Session gate ─────────────────────────────────────────────────────────────
 
-/** ownerKeys (toOwnerKey) whose backfill has started in this JS session. */
+/**
+ * `${ownerKey}|${authGeneration}` of every backfill started in this JS session. The auth
+ * generation goes up on every hard reset (sign-out, env switch, not-contributor), each of
+ * which can wipe or overwrite my_requests_v1, so the gate re-opens for every owner then.
+ */
 const backfillStartedFor = new Set<string>();
 
 /** Test-only: forgets which owners have run, so the same owner can run again. */
@@ -224,8 +230,9 @@ export async function startRequestsBackfillOnce(
     const owner: RequestsStoreOwner = { assignmentId: config.assignmentId, useQA: config.useQA === true };
     const ownerKey = toOwnerKey(owner.assignmentId, owner.useQA);
     // No await between the check and the mark: two quick calls start one run (C9)
-    if (backfillStartedFor.has(ownerKey)) return null;
-    backfillStartedFor.add(ownerKey);
+    const gateKey = `${ownerKey}|${getAuthGeneration()}`;
+    if (backfillStartedFor.has(gateKey)) return null;
+    backfillStartedFor.add(gateKey);
 
     const today = deps?.today ?? todayLocal();
     const queryKey = ['myRequests', owner.assignmentId];
