@@ -12,6 +12,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useConfig } from './useConfig';
 import { loadCredentials } from '../store/config';
 import { fetchWorkDiary } from '../api/workDiary';
+import { getAuthGeneration } from '../api/client';
 import {
   countDiaryTags,
   aggregateAICache,
@@ -138,6 +139,10 @@ export function useAIData(): UseAIDataResult {
     setError(null);
 
     const today = todayUTC();
+    // A sign-out / env switch (invalidateAuthToken) while this run is in flight makes its
+    // results belong to the previous owner: they are dropped, and nothing is written.
+    const authGen = getAuthGeneration();
+    const superseded = () => getAuthGeneration() !== authGen;
 
     try {
       // Load existing cache first — AsyncStorage works on locked device.
@@ -238,6 +243,11 @@ export function useAIData(): UseAIDataResult {
         }),
       );
 
+      if (superseded()) {
+        setIsLoading(false);
+        return;
+      }
+
       // Merge fresh data into week cache
       for (const { date, tagData } of results) {
         weekCache[date] = tagData;
@@ -281,6 +291,7 @@ export function useAIData(): UseAIDataResult {
               .catch(() => null),
           ),
         ).then(results => {
+          if (superseded()) return;
           let totalSlots = 0, aiSlots = 0, noTagSlots = 0;
           for (const td of results) {
             if (!td) continue;
@@ -339,6 +350,7 @@ export function useAIData(): UseAIDataResult {
       }
     } catch (err) {
       setIsLoading(false);
+      if (superseded()) return;
       if (err instanceof AuthError) {
         setError('auth');
         // Keep existing data — ai_cache is untouched by an auth failure; re-onboarding is useRoleRefresh's job
