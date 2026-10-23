@@ -126,11 +126,12 @@ function sumTagData(a: TagData, b: TagData): TagData {
 
 // ─── Query function (exported for testing) ───────────────────────────────────
 
-interface MemberFetchResult {
-  breakdown: TeamMemberBreakdown;
-  cache: Record<string, TagData> | null; // null when the member's fetch failed
-  error?: unknown; // the caught error, only when the member's fetch failed
-}
+// Discriminated on `failed` so a failed member can never carry a cache and a
+// successful one can never carry an error. `error` is whatever was caught, which
+// may itself be undefined/null (hence the NetworkError fallback at the throw site).
+type MemberFetchResult =
+  | { failed: false; breakdown: TeamMemberBreakdown; cache: Record<string, TagData> }
+  | { failed: true; breakdown: TeamMemberBreakdown; error: unknown };
 
 /**
  * Returns the TanStack Query queryFn for useTeamAggregateData. Exported
@@ -188,6 +189,7 @@ export function buildTeamAggregateQueryFn(
           const aiPct = Math.round((aiData.aiPctLow + aiData.aiPctHigh) / 2);
 
           return {
+            failed: false,
             breakdown: {
               member,
               hours,
@@ -204,6 +206,7 @@ export function buildTeamAggregateQueryFn(
             { assignmentId: member.assignmentId },
           );
           return {
+            failed: true,
             breakdown: {
               member,
               hours: 0,
@@ -211,7 +214,6 @@ export function buildTeamAggregateQueryFn(
               brainliftHours: 0,
               fetchFailed: true,
             },
-            cache: null,
             error: err,
           };
         }
@@ -222,11 +224,11 @@ export function buildTeamAggregateQueryFn(
     let reportCount = 0;
     const teamCache: Record<string, TagData> = {};
 
-    for (const { breakdown, cache } of memberResults) {
-      if (breakdown.fetchFailed || !cache) continue;
-      weekHours += breakdown.hours;
+    for (const result of memberResults) {
+      if (result.failed) continue;
+      weekHours += result.breakdown.hours;
       reportCount++;
-      for (const [date, tagData] of Object.entries(cache)) {
+      for (const [date, tagData] of Object.entries(result.cache)) {
         teamCache[date] = sumTagData(teamCache[date] ?? zeroTagData(), tagData);
       }
     }
@@ -235,7 +237,7 @@ export function buildTeamAggregateQueryFn(
     // error (e.g. an AuthError) is rethrown unwrapped so the retry rule sees it.
     if (roster.length > 0 && reportCount === 0) {
       throw (
-        memberResults.find((r) => r.breakdown.fetchFailed)?.error ??
+        memberResults.find((r) => r.failed)?.error ??
         new NetworkError('All team member fetches failed')
       );
     }

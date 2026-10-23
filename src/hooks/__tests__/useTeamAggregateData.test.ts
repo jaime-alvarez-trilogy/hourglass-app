@@ -14,6 +14,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { stripComments } from '../../../__tests__/helpers/stripComments';
 import { QueryClient } from '@tanstack/react-query';
 
 jest.mock('../../store/config', () => ({
@@ -126,10 +127,6 @@ function makeTimesheet(totalHours: number): TimesheetResponse {
 // ─── Static analysis ──────────────────────────────────────────────────────────
 
 const HOOK_PATH = path.resolve(__dirname, '../../..', 'src', 'hooks', 'useTeamAggregateData.ts');
-
-function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-}
 
 describe('useTeamAggregateData — static analysis of source contract', () => {
   let source: string;

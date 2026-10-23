@@ -20,6 +20,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { stripComments } from '../../../__tests__/helpers/stripComments';
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -383,10 +384,6 @@ describe('useEarningsHistory, rendered — the earnings trend keeps the last goo
 
 const PAYMENT_HISTORY_FILE = path.resolve(__dirname, '..', 'usePaymentHistory.ts');
 const EARNINGS_HISTORY_FILE = path.resolve(__dirname, '..', 'useEarningsHistory.ts');
-
-function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-}
 
 const codeOf = (file: string) => stripComments(fs.readFileSync(file, 'utf8'));
 

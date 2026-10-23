@@ -20,16 +20,13 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { stripComments } from '../../../__tests__/helpers/stripComments';
 
 // ─── File path for static analysis ───────────────────────────────────────────
 // __dirname = hourglassws/src/hooks/__tests__
 const USE_HOURS_DATA_PATH = path.resolve(__dirname, '..', 'useHoursData.ts');
 const USE_TIMESHEET_PATH = path.resolve(__dirname, '..', 'useTimesheet.ts');
 const USE_PAYMENTS_PATH = path.resolve(__dirname, '..', 'usePayments.ts');
-
-function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-}
 
 // ─── Static analysis helpers ──────────────────────────────────────────────────
 
