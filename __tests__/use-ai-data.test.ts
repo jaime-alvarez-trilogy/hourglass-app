@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAIData } from '../src/hooks/useAIData';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthError, NetworkError } from '../src/api/errors';
+import { invalidateAuthToken } from '../src/api/client';
 import type { CrossoverConfig, Credentials } from '../src/types/config';
 import type { TagData } from '../src/lib/ai';
 
@@ -510,5 +511,33 @@ describe('FR4 (03-keep-last-good): week-transition flush with an unreadable week
       ...STORED_HISTORY,
       { weekStart: PREV_WEEK_MONDAY, hours: 0, earnings: 0, aiPct: 50, brainliftHours: 1 },
     ]);
+  });
+});
+
+// ─── durable-data cross-spec review: sign-out while the AI fetch is in flight ─
+
+describe('cross-spec review: a fetch that settles after a hard reset writes nothing', () => {
+  it('ai_cache stays wiped and no error is shown when sign-out lands mid-fetch', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    mockFetchWorkDiary.mockImplementation(async () => {
+      await gate;
+      return makeSlots(20, 3, 5);
+    });
+
+    const { get } = setupHook();
+    await flushAsync();
+    expect(mockFetchWorkDiary).toHaveBeenCalled();
+
+    // Sign-out: clearAll() removes ai_cache, then invalidateAuthToken()
+    await AsyncStorage.removeItem('ai_cache');
+    invalidateAuthToken();
+
+    release();
+    await flushAsync();
+
+    expect(await AsyncStorage.getItem('ai_cache')).toBeNull();
+    expect(await AsyncStorage.getItem('previousWeekAIPercent')).toBeNull();
+    expect(get().error).toBeNull();
   });
 });
