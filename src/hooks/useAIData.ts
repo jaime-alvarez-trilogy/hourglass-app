@@ -337,7 +337,7 @@ export function useAIData(): UseAIDataResult {
       setIsLoading(false);
       if (err instanceof AuthError) {
         setError('auth');
-        setData(null); // Auth failure — cached data is likely wrong too, clear it
+        // Keep existing data — ai_cache is untouched by an auth failure; re-onboarding is useRoleRefresh's job
       } else if (err instanceof NetworkError) {
         setError('network');
         // Keep existing data — show stale cache rather than blank on network failure
