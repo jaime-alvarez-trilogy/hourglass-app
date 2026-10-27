@@ -19,14 +19,31 @@ export interface RawManualResponse {
   manualTimes: RawManualTime[]
 }
 
+// One entry of GET /api/overtime/request?status=PENDING&weekStartDate=. Two shapes of
+// overtimeRequest are accepted (parseOvertimeItems reads either):
+//   live (QA, 2026-10-27, manager token): { id, weekStartDate: "YYYY-MM-DD", memo,
+//     overtimePeriod (minutes), overtimeCost, status, createdOn: "YYYY-MM-DD" }, with
+//     totalHoursWorked and trackerDataUnavailable beside it. No durationMinutes,
+//     description or startDateTime. A contributor's own request body is
+//     { weekStartDate, overtimePeriod (int minutes), memo }, which confirms the meanings.
+//   older: { id, status, durationMinutes, description, startDateTime }
 export interface RawOvertimeResponse {
   overtimeRequest: {
     id: number
     status: string
-    durationMinutes: number
-    description: string
-    startDateTime: string
+    // Live shape
+    weekStartDate?: string   // Monday of the requested week
+    overtimePeriod?: number  // minutes
+    memo?: string
+    overtimeCost?: number
+    createdOn?: string       // not read: can fall in a later week than weekStartDate
+    // Older shape
+    durationMinutes?: number
+    description?: string
+    startDateTime?: string
   }
+  totalHoursWorked?: number
+  trackerDataUnavailable?: boolean
   assignment: {
     id: number
     salary: number
@@ -35,6 +52,8 @@ export interface RawOvertimeResponse {
         application: {
           candidate: {
             id: number
+            // The person id (TeamMember.userId); Crossover's web app groups overtime by it
+            userId?: number
             printableName: string
             jobTitle: string
           }
@@ -51,6 +70,8 @@ export interface RawOvertimeResponse {
 export interface ManualApprovalItem {
   id: string               // "mt-{timecardIds.join('-')}"
   category: 'MANUAL'
+  // Not a roster id (live QA, 2026-10-27: a legacy id no other endpoint exposes). Auto-approve
+  // never matches on it; the owner is proven from the work diary (src/lib/manualOwnership.ts)
   userId: number
   fullName: string
   durationMinutes: number
@@ -60,6 +81,9 @@ export interface ManualApprovalItem {
   type: 'WEB' | 'MOBILE'
   timecardIds: number[]
   weekStartDate: string
+  // Owner key (`${userId}|qa|prod`) of the account this item was fetched for, set by
+  // fetchAllApprovalItems. Auto-approve only acts on items stamped for the current owner.
+  fetchedFor?: string
 }
 
 export interface OvertimeApprovalItem {
@@ -69,12 +93,20 @@ export interface OvertimeApprovalItem {
   userId: number
   fullName: string
   jobTitle: string
-  durationMinutes: number
+  durationMinutes: number  // durationMinutes ?? overtimePeriod; always finite and > 0
   hours: string
-  cost: number             // (durationMinutes/60) * assignment.salary
-  description: string
+  cost: number             // overtimeCost, else (durationMinutes/60) * assignment.salary
+  description: string      // description ?? memo ?? ''
+  // The request's startDateTime, else `${weekStartDate}T00:00:00`: a weekly request
+  // is anchored at the start of its week (see parseOvertimeItems)
   startDateTime: string
   weekStartDate: string
+  // See ManualApprovalItem.fetchedFor
+  fetchedFor?: string
+  // Auto-approve matching (src/lib/autoApprove.ts). userId above is candidate.id (the
+  // avatar id); these are assignment.id and candidate.userId. null when the row omits them.
+  assignmentId?: number | null
+  personId?: number | null
 }
 
 export type ApprovalItem = ManualApprovalItem | OvertimeApprovalItem
@@ -128,9 +160,33 @@ export function parseManualItems(
 // FR1: parseOvertimeItems — maps overtime entries to OvertimeApprovalItem[]
 // ---------------------------------------------------------------------------
 
+// value when it is a real calendar date in YYYY-MM-DD form, else null
+function validDay(value: unknown): string | null {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+  const [y, m, d] = value.split('-').map(Number)
+  const date = new Date(y, m - 1, d)
+  return date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d
+    ? value
+    : null
+}
+
+// value when it is a date-time string Date can parse, else null
+function validDateTime(value: unknown): string | null {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : null
+}
+
+/**
+ * Maps pending-overtime entries, live or older shape (RawOvertimeResponse), to items.
+ * durationMinutes is durationMinutes ?? overtimePeriod; weekStartDate is the request's
+ * weekStartDate, else the Monday of its startDateTime; startDateTime falls back to
+ * `${weekStartDate}T00:00:00`, so a weekly request sorts at the start of its own week
+ * (createdOn is not used: the live sample was created the week after its week).
+ * An entry with no candidate, no duration (finite and > 0) or no valid week is skipped
+ * with a warning, so it is never shown, planned or approved.
+ */
 export function parseOvertimeItems(raw: RawOvertimeResponse[]): OvertimeApprovalItem[] {
   return raw
-    .map((entry) => {
+    .map((entry): OvertimeApprovalItem | null => {
       const { overtimeRequest, assignment } = entry
 
       if (!overtimeRequest) {
@@ -145,9 +201,26 @@ export function parseOvertimeItems(raw: RawOvertimeResponse[]): OvertimeApproval
         return null
       }
 
-      const hours = overtimeRequest.durationMinutes / 60
-      const cost = Math.round(hours * (assignment?.salary ?? 0) * 100) / 100
-      const weekStartDate = getWeekStartDate(new Date(overtimeRequest.startDateTime))
+      const durationMinutes = overtimeRequest.durationMinutes ?? overtimeRequest.overtimePeriod
+      if (typeof durationMinutes !== 'number' || !Number.isFinite(durationMinutes) || durationMinutes <= 0) {
+        console.warn('[parseOvertimeItems] Skipping entry with missing duration:', overtimeRequest.id)
+        return null
+      }
+
+      const start = validDateTime(overtimeRequest.startDateTime)
+      const weekStartDate =
+        validDay(overtimeRequest.weekStartDate) ?? (start !== null ? getWeekStartDate(new Date(start)) : null)
+      if (weekStartDate === null) {
+        console.warn('[parseOvertimeItems] Skipping entry with invalid week:', overtimeRequest.id)
+        return null
+      }
+
+      const hours = durationMinutes / 60
+      const { overtimeCost } = overtimeRequest
+      const cost =
+        typeof overtimeCost === 'number' && Number.isFinite(overtimeCost)
+          ? overtimeCost
+          : Math.round(hours * (assignment?.salary ?? 0) * 100) / 100
 
       return {
         id: `ot-${overtimeRequest.id}`,
@@ -156,12 +229,14 @@ export function parseOvertimeItems(raw: RawOvertimeResponse[]): OvertimeApproval
         userId: candidate.id,
         fullName: candidate.printableName,
         jobTitle: candidate.jobTitle,
-        durationMinutes: overtimeRequest.durationMinutes,
+        durationMinutes,
         hours: hours.toFixed(1),
         cost,
-        description: overtimeRequest.description,
-        startDateTime: overtimeRequest.startDateTime,
+        description: overtimeRequest.description ?? overtimeRequest.memo ?? '',
+        startDateTime: start ?? `${weekStartDate}T00:00:00`,
         weekStartDate,
+        assignmentId: assignment?.id ?? null,
+        personId: candidate.userId ?? null,
       }
     })
     .filter((item): item is OvertimeApprovalItem => item !== null)

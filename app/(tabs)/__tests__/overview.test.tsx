@@ -1107,6 +1107,7 @@ function makeMember(overrides: Partial<TeamMemberBreakdown['member']> = {}): Tea
   return {
     assignmentId: 'a-1',
     candidateId: 'c-1',
+    userId: null,
     managerId: 'm-1',
     teamId: 't-1',
     teamName: 'Team',

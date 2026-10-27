@@ -92,6 +92,7 @@ const TEAM_DATA: TeamAggregateData = {
       member: {
         assignmentId: '80001',
         candidateId: '3000001',
+        userId: null,
         managerId: '2362707',
         teamId: '4584',
         teamName: 'Platform',
@@ -107,6 +108,7 @@ const TEAM_DATA: TeamAggregateData = {
       member: {
         assignmentId: '80002',
         candidateId: '3000002',
+        userId: null,
         managerId: '2362707',
         teamId: '4584',
         teamName: 'Platform',

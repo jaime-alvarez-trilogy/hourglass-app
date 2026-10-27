@@ -8,9 +8,11 @@
 //   an "incomplete" empty state, and a pull spinner that waits for the forced refetch
 // durable-data 05 FR4: useRequestsBackfill() schedules the once-per-session backfill of
 //   older My Requests weeks, 5 s after mount, so the foreground refresh goes first
+// 1.2 auto-approve: TEAM REQUESTS opens with AutoApproveEntryRow, the way in to
+//   app/direct-reports.tsx (inside the section's entry animation, so the stagger count holds)
 //
 // Layout:
-//   Manager: TEAM REQUESTS section (swipeable ApprovalCards) + MY REQUESTS section
+//   Manager: TEAM REQUESTS section (auto-approve row, swipeable ApprovalCards) + MY REQUESTS section
 //   Contributor: MY REQUESTS section only
 //
 // Both hooks called unconditionally (React rules of hooks).
@@ -31,6 +33,7 @@ import { useApprovalItems } from '@/src/hooks/useApprovalItems'
 import { useMyRequests } from '@/src/hooks/useMyRequests'
 import { useRequestsBackfill } from '@/src/hooks/useRequestsBackfill'
 import { ApprovalCard } from '@/src/components/ApprovalCard'
+import { AutoApproveEntryRow } from '@/src/components/AutoApproveEntryRow'
 import MyRequestCard from '@/src/components/MyRequestCard'
 import { RejectionSheet } from '@/src/components/RejectionSheet'
 import Card from '@/src/components/Card'
@@ -406,6 +409,9 @@ export default function ApprovalsScreen() {
           {isManager && (
             <Animated.View style={getEntryStyle(0)} className="pt-4">
               <SectionLabel className="px-4 mb-2">Team Requests</SectionLabel>
+
+              {/* 1.2 auto-approve: per-report settings and today's auto-approvals */}
+              <AutoApproveEntryRow />
 
               {showTeamSkeletons ? (
                 <View className="px-4 gap-3">

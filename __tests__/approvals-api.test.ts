@@ -179,6 +179,26 @@ describe('FR2: approveManual', () => {
     mockFetch.mockResolvedValueOnce(errorResponse(422));
     await expect(approveManual(TOKEN, false, 'approver-id', [1])).rejects.toBeInstanceOf(ApiError);
   });
+
+  // 1.2 auto-approve: allowOvertime sits before the trailing creds.
+  it('auto-approve: sends allowOvertime: true when asked', async () => {
+    mockFetch.mockResolvedValueOnce(successEmpty());
+    await approveManual(TOKEN, false, 'approver-id', [7], true);
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body).toEqual({ approverId: 'approver-id', timecardIds: [7], allowOvertime: true });
+  });
+
+  it('auto-approve: a weekly-limit refusal surfaces CROS-9300 as ApiError.errorCode', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      headers: { get: () => 'application/json' },
+      text: async () => JSON.stringify({ errorCode: 'CROS-9300', type: 'BAD_REQUEST', text: 'Weekly limit exceeded' }),
+    });
+    const err = await approveManual(TOKEN, false, 'approver-id', [7]).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).errorCode).toBe('CROS-9300');
+  });
 });
 
 // =============================================================================

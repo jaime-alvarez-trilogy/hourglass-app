@@ -4,7 +4,7 @@
  *
  * Scans every .ts/.tsx file under src/ and app/ (excluding __tests__ directories,
  * *.test.* files and src/api/client.ts, which defines apiGet/apiPut) for calls to
- * apiGet, apiPut and the 13 wrappers that forward to them. Each call's last argument
+ * apiGet, apiPut and the 14 wrappers that forward to them. Each call's last argument
  * must be `creds` or a `toAuthCreds(…)` call: the wrappers forward `creds` as the last
  * apiGet/apiPut argument, and the call sites build it with `toAuthCreds`.
  *
@@ -14,7 +14,8 @@
  * bodies first (offsets and newlines kept), then reads each call's balanced `(…)`.
  * Declarations (`function fetchX(`) and non-call mentions (imports, `typeof`, object
  * keys) are not calls. The self-tests below run first, so the guard cannot silently
- * match nothing; the tree scan also asserts every name was found at least once.
+ * match nothing; the tree scan also asserts every name was found at least once, except
+ * the wrappers in UNCALLED_WRAPPERS.
  */
 
 import * as fs from 'fs';
@@ -36,11 +37,15 @@ const WRAPPERS = [
   'rejectOvertime',
   'fetchMyTeams',
   'fetchTeamRoster',
+  'fetchManagedAssignments',
   'fetchReportTimesheet',
   'getProfileDetail',
   'fetchConfigFromAssignments',
 ] as const;
 const CHECKED_NAMES: readonly string[] = [...CLIENT_CALLS, ...WRAPPERS];
+// Still exported (and still checked, so a future call must pass creds) but with no
+// production caller since useTeamRoster moved to fetchManagedAssignments.
+const UNCALLED_WRAPPERS: ReadonlySet<string> = new Set(['fetchMyTeams', 'fetchTeamRoster']);
 
 // ─── Scanner (test-local) ─────────────────────────────────────────────────────
 
@@ -380,7 +385,11 @@ describe('FR4.g: production call sites pass creds', () => {
 
   it('FR4.g.2: finds at least one production call for every checked name', () => {
     const found = new Set(calls.map((c) => c.name));
-    expect(CHECKED_NAMES.filter((name) => !found.has(name))).toEqual([]);
+    expect(CHECKED_NAMES.filter((name) => !found.has(name) && !UNCALLED_WRAPPERS.has(name))).toEqual([]);
+  });
+
+  it('FR4.g.2b: the uncalled wrappers really have no production call (else drop them from the set)', () => {
+    expect(calls.filter((c) => UNCALLED_WRAPPERS.has(c.name)).map((c) => `${c.file}:${c.line}`)).toEqual([]);
   });
 
   it('FR4.g.3: every apiGet / apiPut / wrapper call passes creds or toAuthCreds(…) last', () => {

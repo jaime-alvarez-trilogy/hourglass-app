@@ -33,6 +33,10 @@ jest.mock('@/src/hooks/useApprovalItems');
 // 5 s timer and the backfill's AsyncStorage reads inside render tests.
 jest.mock('@/src/hooks/useRequestsBackfill', () => ({ useRequestsBackfill: jest.fn() }));
 
+// 1.2 auto-approve entry row (manager branch): stubbed for the same reason, its hooks
+// (useAutoApproveSettings / useDirectReports) need a QueryClientProvider.
+jest.mock('@/src/components/AutoApproveEntryRow', () => ({ AutoApproveEntryRow: () => null }));
+
 // useStaggeredEntry — return plain styles (no Reanimated shared values in tests)
 jest.mock('@/src/hooks/useStaggeredEntry', () => ({
   useStaggeredEntry: () => ({

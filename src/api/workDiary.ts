@@ -32,7 +32,9 @@ const workDiaryInFlight = new Map<string, Promise<WorkDiarySlot[]>>();
  * without a token call or request.
  *
  * @param assignmentId  assignment.id from config (e.g. "79996") — NOT userId
- * @param date          YYYY-MM-DD format (local timezone, no conversion)
+ * @param date          YYYY-MM-DD, sent as is with no timeZoneId (a local date for the
+ *                      user's own diary; UTC dates and the day either side for the
+ *                      auto-approve ownership proof, src/lib/manualOwnership.ts)
  * @param credentials   username + password for Basic auth token fetch (and renewal)
  * @param useQA         toggles between QA and production base URL
  */

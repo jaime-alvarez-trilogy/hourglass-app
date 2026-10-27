@@ -289,14 +289,38 @@ export function mapTeamAggregateState(
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 /**
+ * The aggregate's query key: primaryTeamId, the UTC Monday, the environment and
+ * the roster the totals are built from (its sorted assignmentIds). The roster is
+ * its own query and refetches on its own (environment switch, direct-reports
+ * refresh), but a new queryFn alone never refetches: under a key without it, a
+ * fresh aggregate of an older roster (1.1's first 10 rows, restored from the
+ * persisted cache) was kept for the 24h staleTime. Sorted, so the same
+ * assignments in another order keep their cached totals.
+ */
+export function teamAggregateQueryKey(
+  config: Pick<CrossoverConfig, 'primaryTeamId' | 'useQA'> | null | undefined,
+  weekStartDate: string,
+  roster: readonly TeamMember[],
+) {
+  const rosterKey = roster.map((m) => m.assignmentId).sort().join(',');
+  return [
+    'teamAggregate',
+    config?.primaryTeamId,
+    weekStartDate,
+    config?.useQA ? 'qa' : 'prod',
+    rosterKey,
+  ] as const;
+}
+
+/**
  * Returns current-week team totals (paid hours, slot-weighted AI%, BrainLift
  * hours, successful report count) plus an ordered per-person breakdown, for
  * the authenticated manager's direct reports. Per-report failures (either
  * work-diary or timesheet) are isolated: excluded from all totals, retained
  * in `breakdown` with `fetchFailed: true`. When every report fails the query
  * errors and keeps the last good `data` (durable-data 03 FR3). Query key is
- * scoped by team and the current UTC Monday with a 24h staleTime — no custom
- * refresh timers.
+ * scoped by team, the current UTC Monday, the environment and the roster
+ * (teamAggregateQueryKey) with a 24h staleTime — no custom refresh timers.
  */
 export function useTeamAggregateData(): UseTeamAggregateDataResult {
   const { config } = useConfig();
@@ -304,7 +328,7 @@ export function useTeamAggregateData(): UseTeamAggregateDataResult {
   const weekStartDate = getWeekStartDate(true);
 
   const query = useQuery<TeamAggregateData, Error>({
-    queryKey: ['teamAggregate', config?.primaryTeamId, weekStartDate],
+    queryKey: teamAggregateQueryKey(config, weekStartDate, roster),
     queryFn: buildTeamAggregateQueryFn(config, roster),
     enabled: !!config && !rosterLoading && !rosterError,
     staleTime: 24 * 60 * 60 * 1000,

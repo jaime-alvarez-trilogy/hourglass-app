@@ -56,19 +56,23 @@ export async function fetchPendingOvertime(
 
 /**
  * PUT /api/timetracking/workdiaries/manual/approved
- * Body: { approverId, timecardIds, allowOvertime: false }
+ * Body: { approverId, timecardIds, allowOvertime }
  * approverId = config.userId (candidate avatar ID — NOT login userId)
+ * allowOvertime = false: an approval that would push the report past their weekly
+ * limit fails with CROS-9300 / CROS-9301 instead of granting overtime. It sits before
+ * `creds`, which stays last like every other wrapper's.
  */
 export async function approveManual(
   token: string,
   useQA: boolean,
   approverId: string,
   timecardIds: number[],
+  allowOvertime: boolean = false,
   creds?: AuthCreds
 ): Promise<void> {
   await apiPut<unknown>(
     '/api/timetracking/workdiaries/manual/approved',
-    { approverId, timecardIds, allowOvertime: false },
+    { approverId, timecardIds, allowOvertime },
     token,
     useQA,
     creds

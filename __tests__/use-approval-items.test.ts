@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useApprovalItems, fetchAllApprovalItems } from '../src/hooks/useApprovalItems';
 import type { CrossoverConfig } from '../src/types/config';
 import type { ManualApprovalItem, OvertimeApprovalItem } from '../src/lib/approvals';
+import { LIVE_OVERTIME_RAW } from '../src/__fixtures__/overtimeRequests';
 
 // --- Mock API functions ---
 jest.mock('../src/api/approvals', () => ({
@@ -117,12 +118,9 @@ function setupHook() {
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
   let current!: ReturnType<typeof useApprovalItems>;
+  const Probe = () => { current = useApprovalItems(); return null; };
   const Wrapper = () =>
-    React.createElement(
-      QueryClientProvider,
-      { client: queryClient },
-      React.createElement(() => { current = useApprovalItems(); return null; }),
-    );
+    React.createElement(QueryClientProvider, { client: queryClient }, React.createElement(Probe));
   act(() => { create(React.createElement(Wrapper)); });
   return { get: () => current, queryClient };
 }
@@ -195,6 +193,7 @@ describe('FR3: approveItem MANUAL', () => {
       false,
       MANAGER_CONFIG.userId, // approverId = config.userId
       MANUAL_ITEM.timecardIds,
+      false, // allowOvertime
       CREDS_WITH_ENV
     );
   });
@@ -314,6 +313,7 @@ describe('DD1 FR4: approve / reject creds follow config.useQA', () => {
       true,
       MANAGER_CONFIG.userId,
       MANUAL_ITEM.timecardIds,
+      false,
       QA_CREDS
     );
   });
@@ -551,6 +551,20 @@ describe('FR1: fetchAllApprovalItems — items merged from all 3 weeks', () => {
     expect(items[0].weekStartDate).toBe(prevMonday2);
   });
 
+  it('stamps every item with the owner whose config the fetch used (auto-approve owner check)', async () => {
+    mockFetchManual.mockResolvedValue([RAW_MANUAL]);
+    mockFetchOvertime.mockResolvedValue([]);
+
+    // the same raw row comes back for each of the 3 weeks
+    const prod = await fetchAllApprovalItems();
+    expect(prod).toHaveLength(3);
+    expect(new Set(prod.map((i) => i.fetchedFor))).toEqual(new Set(['2362707|prod']));
+
+    mockLoadConfig.mockResolvedValue({ ...MANAGER_CONFIG, useQA: true });
+    const qa = await fetchAllApprovalItems();
+    expect(new Set(qa.map((i) => i.fetchedFor))).toEqual(new Set(['2362707|qa']));
+  });
+
   it('FR1_items_sorted_descending_when_from_multiple_weeks', async () => {
     const { currentMonday, prevMonday1, prevMonday2 } = computeThreeWeeks();
 
@@ -566,6 +580,49 @@ describe('FR1: fetchAllApprovalItems — items merged from all 3 weeks', () => {
     for (let i = 0; i < items.length - 1; i++) {
       expect(items[i].startDateTime >= items[i + 1].startDateTime).toBe(true);
     }
+  });
+});
+
+// Live pending-overtime shape (QA, 2026-10-27): no startDateTime on the request, so the
+// item is anchored at the start of its week (2026-10-19T00:00:00), never at createdOn
+// (2026-10-27, the week after). It sorts after that week's manual time.
+describe('FR1: fetchAllApprovalItems — live-shape overtime', () => {
+  beforeEach(() => {
+    mockFetchManual.mockReset();
+    mockFetchOvertime.mockReset();
+    mockLoadConfig.mockResolvedValue(MANAGER_CONFIG);
+    mockLoadCreds.mockResolvedValue({ username: 'user@test.com', password: 'pass' });
+    (getAuthToken as jest.Mock).mockResolvedValue('mock-token');
+  });
+
+  it('keeps the week the request names and sorts at the start of that week', async () => {
+    const { currentMonday } = computeThreeWeeks();
+    const manual = (timecardId: number, startDateTime: string) => ({
+      status: 'PENDING', timecardIds: [timecardId], durationMinutes: 30, description: 'Work', startDateTime, type: 'WEB' as const,
+    });
+    mockFetchManual.mockImplementation((_token: string, _useQA: boolean, weekStartDate: string) =>
+      Promise.resolve(weekStartDate === currentMonday
+        ? [{
+            userId: 36412,
+            fullName: 'Test CC',
+            manualTimes: [
+              manual(1, '2026-10-18T09:00:00'), // the week before
+              manual(2, '2026-10-27T04:30:00'), // the week after
+              manual(3, '2026-10-20T09:00:00'), // the same week
+            ],
+          }]
+        : []));
+    mockFetchOvertime.mockImplementation((_token: string, _useQA: boolean, weekStartDate: string) =>
+      Promise.resolve(weekStartDate === currentMonday ? [LIVE_OVERTIME_RAW] : []));
+
+    const items = await fetchAllApprovalItems();
+
+    expect(items.map((i) => i.id)).toEqual(['mt-2', 'mt-3', 'ot-9902122', 'mt-1']);
+    const overtime = items[2] as OvertimeApprovalItem;
+    expect(overtime.weekStartDate).toBe('2026-10-19'); // the request's, not the queried week
+    expect(overtime.startDateTime).toBe('2026-10-19T00:00:00');
+    expect(overtime.hours).toBe('2.0');
+    expect(overtime.cost).toBe(3000);
   });
 });
 

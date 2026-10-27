@@ -1,5 +1,5 @@
 /**
- * FR1 (05-cache-hygiene): clearAll removes every AsyncStorage key it owns (19)
+ * FR1 (05-cache-hygiene): clearAll removes every AsyncStorage key it owns (20)
  * FR2 (05-cache-hygiene): Sign-out call site clears TanStack Query cache and cancels notifications
  * FR3 (05-cache-hygiene): Modal env-switch clears all query cache with resetQueries
  */
@@ -46,6 +46,7 @@ const ALL_KEYS = [
   'prev_approval_ids',
   'HOURGLASS_QUERY_CACHE',
   'my_requests_v1',           // durable-data 02-requests-store FR3
+  'auto_approve_v1',          // 1.2 manager auto-approve
 ];
 
 beforeEach(() => {
@@ -54,17 +55,18 @@ beforeEach(() => {
   (AsyncStorage.getItem as jest.Mock).mockResolvedValue(null);
 });
 
-// ─── FR1: clearAll removes every AsyncStorage key it owns (19) ──────────────
+// ─── FR1: clearAll removes every AsyncStorage key it owns (20) ──────────────
 
 describe('FR1: clearAll — removes all AsyncStorage keys', () => {
-  it('calls AsyncStorage.multiRemove with all 19 keys', async () => {
+  it('calls AsyncStorage.multiRemove with all 20 keys', async () => {
     await clearAll();
 
     expect(AsyncStorage.multiRemove).toHaveBeenCalledTimes(1);
     const [keys] = (AsyncStorage.multiRemove as jest.Mock).mock.calls[0];
-    expect(keys).toHaveLength(19);
+    expect(keys).toHaveLength(20);
     expect(keys).toEqual(expect.arrayContaining(ALL_KEYS));
     expect(keys).toContain('my_requests_v1');
+    expect(keys).toContain('auto_approve_v1');
   });
 
   it('includes every key from the full list — no key missing', async () => {

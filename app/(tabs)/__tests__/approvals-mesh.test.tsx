@@ -43,6 +43,10 @@ jest.mock('@/src/hooks/useApprovalItems');
 // QueryClientProvider these renders do not have, and would start the backfill's timer).
 jest.mock('@/src/hooks/useRequestsBackfill', () => ({ useRequestsBackfill: jest.fn() }));
 
+// 1.2 auto-approve entry row (manager branch): stubbed for the same reason, its hooks
+// (useAutoApproveSettings / useDirectReports) need a QueryClientProvider.
+jest.mock('@/src/components/AutoApproveEntryRow', () => ({ AutoApproveEntryRow: () => null }));
+
 jest.mock('@/src/hooks/useStaggeredEntry', () => ({
   useStaggeredEntry: () => ({
     getEntryStyle: () => ({}),

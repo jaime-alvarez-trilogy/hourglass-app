@@ -121,6 +121,16 @@ describe('FR6: fetchWorkDiary', () => {
     expect(params).toHaveProperty('date', '2026-03-04');
   });
 
+  // 1.2 auto-approve proves a manual request's owner from the slots on its UTC dates
+  // (src/lib/manualOwnership.ts). Without timeZoneId the date is a UTC day; with one it
+  // is not (live QA, 2026-10-27: Vancouver's returned none of that day's slots).
+  it('never sends timeZoneId: the date is a UTC day', async () => {
+    await fetchWorkDiary('80232', '2026-10-27', CREDENTIALS, false);
+    const [, params] = mockApiGet.mock.calls[0];
+    expect(params).toEqual({ assignmentId: '80232', date: '2026-10-27' });
+    expect(params).not.toHaveProperty('timeZoneId');
+  });
+
   it('returns the typed WorkDiarySlot array from apiGet', async () => {
     const result = await fetchWorkDiary('79996', '2026-03-04', CREDENTIALS, false);
     expect(result).toEqual(MOCK_SLOTS);

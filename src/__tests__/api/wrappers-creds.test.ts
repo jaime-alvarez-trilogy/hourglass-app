@@ -131,7 +131,7 @@ const APPROVAL_CASES: WrapperCase[] = [
   {
     name: 'approveManual',
     client: mockApiPut,
-    call: (creds) => approveManual(TOKEN, false, '2362707', [101, 102], creds),
+    call: (creds) => approveManual(TOKEN, false, '2362707', [101, 102], false, creds),
     args: [
       '/api/timetracking/workdiaries/manual/approved',
       { approverId: '2362707', timecardIds: [101, 102], allowOvertime: false },

@@ -165,6 +165,19 @@ function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="(auth)" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+        {/* 1.2 auto-approve: per-report settings, pushed from the Requests tab */}
+        <Stack.Screen
+          name="direct-reports"
+          options={{
+            title: 'Direct reports',
+            // (tabs) has no title of its own, so the back button would read "(tabs)"
+            headerBackTitle: 'Requests',
+            headerStyle: { backgroundColor: colors.background },
+            headerTintColor: colors.violet,
+            headerTitleStyle: { color: colors.textPrimary },
+            headerShadowVisible: false,
+          }}
+        />
         <Stack.Screen name="+not-found" />
       </Stack>
       <StatusBar style="auto" />

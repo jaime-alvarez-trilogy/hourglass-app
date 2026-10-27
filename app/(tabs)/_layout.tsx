@@ -33,6 +33,7 @@ import { useHistoryBackfill } from '@/src/hooks/useHistoryBackfill';
 import { useHoursData } from '@/src/hooks/useHoursData';
 import { useAIData } from '@/src/hooks/useAIData';
 import { useApprovalItems } from '@/src/hooks/useApprovalItems';
+import { useAutoApproveRunner } from '@/src/hooks/useAutoApprove';
 import { useConfig } from '@/src/hooks/useConfig';
 import { useWidgetSync } from '@/src/hooks/useWidgetSync';
 import { useWeeklyHistory } from '@/src/hooks/useWeeklyHistory';
@@ -50,6 +51,7 @@ const TAB_SCREENS = [
 
 export default function TabLayout() {
   useHistoryBackfill(); // fire-and-forget — runs once per session, writes AsyncStorage
+  useAutoApproveRunner(); // managers: approves the reports whose auto-approve toggles are on
 
   // Widget sync: keep home screen widget up-to-date on every app open
   const { data: hoursData } = useHoursData();

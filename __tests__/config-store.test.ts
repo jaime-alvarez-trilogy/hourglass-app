@@ -124,11 +124,11 @@ describe('FR9: clearAll', () => {
     expect(result).toBeNull();
   });
 
-  it('clearAll calls AsyncStorage.multiRemove with all 19 keys', async () => {
+  it('clearAll calls AsyncStorage.multiRemove with all 20 keys', async () => {
     await clearAll();
     expect(mockAsyncStorage.multiRemove).toHaveBeenCalledTimes(1);
     const [keys] = (mockAsyncStorage.multiRemove as jest.Mock).mock.calls[0];
-    expect(keys).toHaveLength(19);
+    expect(keys).toHaveLength(20);
     expect(keys).toContain('crossover_config');
     expect(keys).toContain('crossover_username');
     expect(keys).toContain('crossover_password');
@@ -154,6 +154,7 @@ describe('FR9: clearAll', () => {
     expect(keys).toContain('prev_approval_ids');
     expect(keys).toContain('HOURGLASS_QUERY_CACHE');
     expect(keys).toContain('my_requests_v1');          // durable-data 02-requests-store FR3
+    expect(keys).toContain('auto_approve_v1');         // 1.2 manager auto-approve
   });
 
   it('clearAll propagates AsyncStorage.multiRemove errors — does not swallow', async () => {
