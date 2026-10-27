@@ -16,20 +16,30 @@
 //
 // durable-data 05-requests-backfill FR3: toOwnerKey is exported, so the backfill's live
 // view update guards with the same owner stamp as selectMyRequests (C2).
+//
+// 1.2 WorkSmart dashboard parity: one hours-overview call carries this and last UTC week's
+// manual entries, so the planned dates it covers are taken from it and only the rest go to
+// the work diary (one call per day). If the overview fails, every planned date does.
+// Planned dates are LOCAL dates: one is covered only when its whole local day lies inside the
+// overview's two UTC weeks, and its entries are those whose UTC start falls on that local date.
 
 import { useIsRestoring, useQuery, type QueryClient } from '@tanstack/react-query';
 import { useConfig } from './useConfig';
 import { loadConfig, loadCredentials } from '../store/config';
 import { fetchWorkDiary } from '../api/workDiary';
+import { getAuthGeneration } from '../api/client';
 import {
   AuthError,
+  AuthResetError,
   NetworkError,
   AUTH_HTML_500,
   NO_CREDENTIALS,
   MAX_QUERY_RETRIES,
   shouldRetryQuery,
 } from '../api/errors';
-import { groupSlotsIntoEntries } from '../lib/requestsUtils';
+import { fetchCurrentHoursOverview } from './useHoursOverview';
+import { addDays as addUtcDays, type HoursOverview } from '../lib/hoursOverview';
+import { groupOverviewEntries, groupSlotsIntoEntries, localDatesWithin } from '../lib/requestsUtils';
 import { isDaySettled, planRequestRefresh, todayLocal } from '../lib/requestsPlanner';
 import {
   buildRequestsView,
@@ -43,10 +53,13 @@ import {
 import { MOCK_MY_REQUESTS } from '../lib/devMock';
 import { log } from '../lib/log';
 import type { CrossoverConfig, Credentials } from '../types/config';
-import type { MyRequestsData, UseMyRequestsResult } from '../types/requests';
+import type { ManualRequestEntry, MyRequestsData, UseMyRequestsResult } from '../types/requests';
 
 /** ownerKey of the manager-preview view: never a prior, never stored (cross-spec contract). */
 const DEV_MOCK_OWNER_KEY = 'dev-mock';
+
+/** A home-screen overview fetched within this long is reused; a forced run always fetches. */
+const OVERVIEW_MAX_AGE_MS = 60_000;
 
 /** The view's owner stamp: `${assignmentId}|qa` or `${assignmentId}|prod`. */
 export function toOwnerKey(assignmentId: string, useQA: boolean): string {
@@ -123,6 +136,52 @@ export function selectMyRequests(
     staleDates: data?.staleDates ?? [],
     updatedAt: data?.updatedAt ?? null,
   };
+}
+
+// ─── Hours overview ──────────────────────────────────────────────────────────
+
+type OverviewDays = {
+  /** Grouped entries of each planned date the overview covers, in plan order. */
+  days: ReadonlyMap<string, ManualRequestEntry[]>;
+  /** The overview call was superseded by a sign-out or env switch (AuthResetError). */
+  reset: boolean;
+};
+
+const NO_OVERVIEW_DAYS: OverviewDays = { days: new Map(), reset: false };
+
+/**
+ * The planned local `dates` the current UTC week's hours overview covers, grouped as the
+ * work diary would be. The overview holds the manual entries of its week and the one before,
+ * the UTC window [weekStart − 7 d, weekStart + 7 d), so a date counts only when its whole
+ * local day lies inside it. A partly covered edge day (the local Sunday west of UTC, the
+ * local Monday of last week east of it) goes to the work diary like an uncovered one, and
+ * the overview's entries on it are dropped. A failed call covers nothing.
+ */
+async function readOverviewDays(
+  client: QueryClient,
+  owner: RequestsStoreOwner,
+  dates: readonly string[],
+  maxAgeMs: number,
+  now: Date,
+): Promise<OverviewDays> {
+  let overview: HoursOverview;
+  try {
+    overview = await fetchCurrentHoursOverview(client, owner, maxAgeMs, now);
+  } catch (err) {
+    log.warn('requests.overview_failed', { kind: toRequestsError(err) });
+    return { days: new Map(), reset: err instanceof AuthResetError };
+  }
+  const covered = localDatesWithin(
+    dates,
+    Date.parse(`${addUtcDays(overview.weekStart, -7)}T00:00:00Z`),
+    Date.parse(`${addUtcDays(overview.weekStart, 7)}T00:00:00Z`),
+  );
+  const days = groupOverviewEntries(overview.manualEntries, covered);
+  log.info('requests.overview_used', {
+    coveredDays: days.size,
+    workDiaryDays: dates.length - days.size,
+  });
+  return { days, reset: false };
 }
 
 // ─── Query function (exported for testing) ───────────────────────────────────
@@ -218,20 +277,45 @@ export function buildMyRequestsQueryFn(
 
     const forceMark = forcedRefresh;
     const plan = planRequestRefresh({ today, nowMs, days: baseDays, force: forceMark !== null });
+    const fetchedAt = new Date(nowMs).toISOString();
+    const fetched: StoredRequestDay[] = [];
 
-    // Fetch the planned days in parallel, tolerating individual failures
+    // The planned dates the hours overview covers are confirmed days from it. Without a
+    // ctx, or when it fails, every planned date goes to the work diary, as before 1.2.
+    const authGeneration = getAuthGeneration();
+    const overview = ctx
+      ? await readOverviewDays(
+          ctx.client,
+          owner,
+          plan.dates,
+          forceMark !== null ? 0 : OVERVIEW_MAX_AGE_MS,
+          new Date(nowMs),
+        )
+      : NO_OVERVIEW_DAYS;
+    for (const [date, entries] of overview.days) {
+      fetched.push({ date, fetchedAt, entries, settled: isDaySettled(date, entries, today) });
+    }
+
+    // A sign-out or env switch during the overview call: the remaining dates fail as
+    // fetchWorkDiary's queued calls do, never logging in again with this run's credentials
+    const superseded = overview.reset || getAuthGeneration() !== authGeneration;
+    const diaryDates = plan.dates.filter((date) => !overview.days.has(date));
+
+    // Fetch the remaining planned days in parallel, tolerating individual failures
     const settled = await Promise.allSettled(
-      plan.dates.map((date) => fetchWorkDiary(assignmentId, date, credentials, useQA)),
+      diaryDates.map((date) =>
+        superseded
+          ? Promise.reject(new AuthResetError())
+          : fetchWorkDiary(assignmentId, date, credentials, useQA),
+      ),
     );
 
     // A fulfilled array (even []) is a confirmed day. A rejection, or a non-array
     // (an empty body parses to undefined), is a failed day and keeps its old record.
-    const fetchedAt = new Date(nowMs).toISOString();
-    const fetched: StoredRequestDay[] = [];
     const failedDates: string[] = [];
     const reasons: unknown[] = [];
     settled.forEach((result, i) => {
-      const date = plan.dates[i];
+      const date = diaryDates[i];
       if (result.status === 'fulfilled' && Array.isArray(result.value)) {
         const entries = groupSlotsIntoEntries(result.value, date);
         fetched.push({ date, fetchedAt, entries, settled: isDaySettled(date, entries, today) });
@@ -267,7 +351,7 @@ export function buildMyRequestsQueryFn(
     return {
       entries: composeRequestsView(days, today, prior),
       error: null,
-      // plan.dates is newest first, so failedDates already is
+      // plan.dates is newest first, so diaryDates and failedDates already are
       staleDates: failedDates,
       updatedAt: buildRequestsView(days, today).updatedAt,
       ownerKey,

@@ -15,6 +15,13 @@ import { ApiError, AuthError, NetworkError } from '../../src/api/errors';
 import type { PaymentsResponse, TimesheetResponse } from '../../src/lib/hours';
 import type { CrossoverConfig } from '../../src/types/config';
 
+/** Local Monday of `d` as YYYY-MM-DD, from local Date methods only. */
+function localMonday(d: Date): string {
+  const back = d.getDay() === 0 ? 6 : d.getDay() - 1;
+  const m = new Date(d.getFullYear(), d.getMonth(), d.getDate() - back);
+  return `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, '0')}-${String(m.getDate()).padStart(2, '0')}`;
+}
+
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
 const baseConfig: CrossoverConfig = {
@@ -126,7 +133,7 @@ describe('fetchTimesheet', () => {
     expect(result).toEqual(timesheetResponse[0]);
   });
 
-  it('uses getWeekStartDate(true) for the date param (UTC-based Monday)', async () => {
+  it('uses getWeekStartDate(false) for the date param (local Monday)', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       text: async () => JSON.stringify(timesheetResponse),
@@ -136,8 +143,25 @@ describe('fetchTimesheet', () => {
     await fetchTimesheet(baseConfig, 'test-token');
 
     const firstCallUrl = fetchMock.mock.calls[0][0] as string;
-    // On 2026-03-04 UTC, Monday of that week is 2026-03-02
-    expect(firstCallUrl).toContain('date=2026-03-02');
+    // Displayed hours follow the local week: the local Monday of the mocked clock
+    expect(firstCallUrl).toContain(`date=${localMonday(new Date())}`);
+  });
+
+  it('asks for the local week when UTC has already moved on (Sunday evening west of UTC)', async () => {
+    // 02:00 UTC on Monday 9 Mar: still Sunday 8 Mar anywhere west of UTC-2, so the local
+    // Monday is 2 Mar there while the UTC Monday is 9 Mar. Expectation built with local
+    // Date methods, so it holds in any machine time zone.
+    jest.setSystemTime(new Date('2026-03-09T02:00:00.000Z'));
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify(timesheetResponse),
+    });
+    global.fetch = fetchMock as any;
+
+    await fetchTimesheet(baseConfig, 'test-token');
+
+    const firstCallUrl = fetchMock.mock.calls[0][0] as string;
+    expect(firstCallUrl).toContain(`date=${localMonday(new Date())}`);
   });
 
   it('throws on 401 response', async () => {

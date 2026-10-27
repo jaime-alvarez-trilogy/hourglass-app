@@ -92,8 +92,9 @@ export async function fetchFreshData(): Promise<CrossoverSnapshot> {
 
   // 6. Compute hours — fall back to hours_cache if timesheet API failed.
   // Without this, a network blip during background refresh overwrites the widget
-  // with zeros (calculateHours returns zero-state for null inputs), erasing the
-  // last known good values that would otherwise display correctly.
+  // with zero hours (with a null timesheet calculateHours has no local-week hours;
+  // only weeklyEarnings comes from the payments row), erasing the last known good
+  // values that would otherwise display correctly.
   let hoursData: HoursData;
   if (timesheetData !== null) {
     hoursData = calculateHours(timesheetData, paymentsData, config.hourlyRate, config.weeklyLimit);

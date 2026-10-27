@@ -11,6 +11,13 @@
  *   (same clipProgress / timingChartFill pattern as before — zero JS per frame)
  *
  * Overtime coloring and watermark label are preserved exactly.
+ *
+ * 1.2 WorkSmart dashboard parity — manual time (both fields optional; without them every
+ * bar renders exactly as before):
+ * - manualHours (approved, already inside `hours`): the bar's top segment, drawn in the
+ *   same peak → transparent gradient style but violet, above a shortened status-color bar
+ * - pendingHours (awaiting approval, NOT inside `hours`): a translucent violet box with a
+ *   1px violet outline stacked directly above the bar. The y domain includes it.
  */
 
 import React, { useEffect } from 'react';
@@ -38,6 +45,10 @@ export interface DailyHours {
   hours: number;
   isToday?: boolean;
   isFuture?: boolean;
+  /** Approved manual hours, already INCLUDED in `hours` — the bar's violet top segment */
+  manualHours?: number;
+  /** Manual hours awaiting approval, NOT included in `hours` — stacked above the bar */
+  pendingHours?: number;
 }
 
 export interface WeeklyBarChartProps {
@@ -63,6 +74,15 @@ export interface WeeklyBarChartProps {
 /** Warm white-gold used for bars that push the running total beyond weeklyLimit */
 const OVERTIME_WHITE_GOLD = '#FFF8E7';
 const WATERMARK_FONT_SIZE = 52;
+const PENDING_FILL_OPACITY = 0.2;
+const PENDING_STROKE_WIDTH = 1;
+/** Keeps a few minutes of pending time visible as a box rather than a hairline */
+const MIN_PENDING_PX = 3;
+
+/** Absent, negative and NaN read as 0 */
+function positive(v: number | undefined): number {
+  return v !== undefined && v > 0 ? v : 0;
+}
 
 export default function WeeklyBarChart({
   data,
@@ -96,8 +116,11 @@ export default function WeeklyBarChart({
 
   const h = height > 0 ? height : 120;
 
-  // Max Y domain
-  const resolvedMax = Math.max(maxHours ?? 8, ...data.map((d) => d.hours));
+  // Max Y domain — pending time sits on top of the bar, so it must fit too
+  const resolvedMax = Math.max(
+    maxHours ?? 8,
+    ...data.map((d) => d.hours + positive(d.pendingHours)),
+  );
 
   // ── Compute per-bar colors (overtime logic requires running cumulative total) ──
   // A plain loop, not a map callback that reassigns runningTotal (react-hooks 7
@@ -172,7 +195,7 @@ export default function WeeklyBarChart({
               // to avoid VNX point.x/cellW misalignment that causes uneven bar widths.
               domainPadding={{ top: 0, bottom: 0 }}
             >
-              {({ points, chartBounds }) => {
+              {({ points, chartBounds, yScale }) => {
                 const n = chartData.length;
                 const cellW = n > 0 ? (chartBounds.right - chartBounds.left) / n : 0;
                 const barW = cellW * 0.65; // 65% of cell width; rest is gap
@@ -186,23 +209,89 @@ export default function WeeklyBarChart({
                       const barTop = point.y;
                       const barBottom = chartBounds.bottom;
                       const barH = Math.max(0, barBottom - barTop);
-                      if (barH === 0) return null;
+                      const entry = data[i];
+                      const pendingHours = positive(entry?.pendingHours);
+                      if (barH === 0 && pendingHours === 0) return null;
                       const barColor = derivedColors[i] ?? colors.textMuted;
+
+                      // Approved manual time is the top share of the bar (clamped to it)
+                      const manualShare =
+                        entry && entry.hours > 0
+                          ? Math.min(1, positive(entry.manualHours) / entry.hours)
+                          : 0;
+                      const manualH = barH * manualShare;
+                      const trackedTop = barTop + manualH;
+                      const trackedH = barH - manualH;
+
+                      const pendingTop =
+                        pendingHours > 0
+                          ? Math.max(
+                              chartBounds.top,
+                              Math.min(
+                                yScale((entry?.hours ?? 0) + pendingHours),
+                                barTop - MIN_PENDING_PX,
+                              ),
+                            )
+                          : barTop;
+                      const pendingH = barTop - pendingTop;
+
                       return (
-                        <RoundedRect
-                          key={i}
-                          x={barX}
-                          y={barTop}
-                          width={barW}
-                          height={barH}
-                          r={4}
-                        >
-                          <LinearGradient
-                            start={vec(0, barTop)}
-                            end={vec(0, barBottom)}
-                            colors={[barColor, 'transparent']}
-                          />
-                        </RoundedRect>
+                        <React.Fragment key={i}>
+                          {trackedH > 0 && (
+                            <RoundedRect
+                              x={barX}
+                              y={trackedTop}
+                              width={barW}
+                              height={trackedH}
+                              r={4}
+                            >
+                              <LinearGradient
+                                start={vec(0, trackedTop)}
+                                end={vec(0, barBottom)}
+                                colors={[barColor, 'transparent']}
+                              />
+                            </RoundedRect>
+                          )}
+                          {manualH > 0 && (
+                            <RoundedRect
+                              x={barX}
+                              y={barTop}
+                              width={barW}
+                              height={manualH}
+                              r={4}
+                            >
+                              <LinearGradient
+                                start={vec(0, barTop)}
+                                end={vec(0, trackedTop)}
+                                colors={[colors.violet, 'transparent']}
+                              />
+                            </RoundedRect>
+                          )}
+                          {pendingH > 0 && (
+                            <>
+                              <RoundedRect
+                                x={barX}
+                                y={pendingTop}
+                                width={barW}
+                                height={pendingH}
+                                r={4}
+                                color={colors.violet}
+                                opacity={PENDING_FILL_OPACITY}
+                              />
+                              {/* Inset by half the stroke so the 1px line stays inside the box */}
+                              <RoundedRect
+                                x={barX + PENDING_STROKE_WIDTH / 2}
+                                y={pendingTop + PENDING_STROKE_WIDTH / 2}
+                                width={Math.max(0, barW - PENDING_STROKE_WIDTH)}
+                                height={Math.max(0, pendingH - PENDING_STROKE_WIDTH)}
+                                r={4 - PENDING_STROKE_WIDTH / 2}
+                                color={colors.violet}
+                                style="stroke"
+                                strokeWidth={PENDING_STROKE_WIDTH}
+                              />
+                            </>
+                          )}
+                        </React.Fragment>
                       );
                     })}
                   </>

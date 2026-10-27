@@ -33,8 +33,9 @@ export async function fetchTimesheet(
   token: string,
   creds?: AuthCreds
 ): Promise<TimesheetResponse | null> {
-  // Use UTC-safe Monday date for the payments-API-compatible week boundary
-  const date = getWeekStartDate(true);
+  // The LOCAL Monday: displayed hours follow the local week (the timesheet's stats[] are
+  // local days), so Sunday evening still reads this week west of UTC. Payments stay UTC.
+  const date = getWeekStartDate(false);
 
   const baseParams = {
     date,

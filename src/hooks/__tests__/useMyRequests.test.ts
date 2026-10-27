@@ -56,6 +56,14 @@ jest.mock('../../hooks/useConfig', () => ({
   useConfig: jest.fn(),
 }));
 
+// 1.2 WorkSmart dashboard parity: a queryFn run with a ctx tries the hours overview first.
+// Rejecting it keeps every case here on the full work-diary fallback (the behaviour these
+// cases pin), and keeps the real fetchCurrentHoursOverview, which would mint a token over the
+// network, out of this suite. The overview path: useMyRequests.overview.test.ts.
+jest.mock('../../hooks/useHoursOverview', () => ({
+  fetchCurrentHoursOverview: jest.fn(() => Promise.reject(new Error('hours overview not under test'))),
+}));
+
 // ─── Imports ──────────────────────────────────────────────────────────────────
 
 import { loadConfig, loadCredentials } from '../../store/config';

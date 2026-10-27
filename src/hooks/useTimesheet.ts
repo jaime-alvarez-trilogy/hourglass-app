@@ -20,7 +20,8 @@ import { toAuthCreds } from '../api/authCreds';
  * (useHoursData composes this with usePayments and handles caching to 'hours_cache').
  */
 export function useTimesheet(config: CrossoverConfig | null) {
-  const weekStart = getWeekStartDate(true);
+  // Local Monday, like fetchTimesheet's `date` (displayed hours follow the local week)
+  const weekStart = getWeekStartDate(false);
 
   return useQuery<TimesheetResponse | null, Error>({
     queryKey: ['timesheet', weekStart, config?.userId],

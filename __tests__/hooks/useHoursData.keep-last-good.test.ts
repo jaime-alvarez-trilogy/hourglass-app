@@ -12,12 +12,28 @@
  *
  * A failed refresh must never reach 'hours_cache' (the widget and the cold-start hero
  * read it); a genuinely empty week (the server answered `[]`) must still write zeros.
+ *
+ * 1.2 WorkSmart dashboard parity: useHoursData also reads useHoursOverview. It is mocked
+ * here (no overview by default, so the cases above see the timesheet + payments path
+ * alone); the overview cases at the end set its result, and one runs the real hook
+ * through the routed apiGet. Displayed hours follow the local week (the timesheet), so
+ * the overview (UTC days) only adds the limit, the per-day manual split and the pay-week
+ * breakdown, and is never live data on its own.
  */
 
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { apiGet, getAuthToken } from '../../src/api/client';
+import { loadConfig, loadCredentials } from '../../src/store/config';
+import { NetworkError } from '../../src/api/errors';
+import { useHoursData } from '../../src/hooks/useHoursData';
+import { useHoursOverview } from '../../src/hooks/useHoursOverview';
+import { normalizeHoursOverview, type HoursOverview } from '../../src/lib/hoursOverview';
+import { HOURS_OVERVIEW_RAW } from '../../src/__fixtures__/hoursOverview';
+import type { HoursData, PaymentsResponse, TimesheetResponse } from '../../src/lib/hours';
+import type { CrossoverConfig, Credentials } from '../../src/types/config';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -34,17 +50,21 @@ jest.mock('../../src/store/config', () => ({
   ),
 }));
 
-import { apiGet, getAuthToken } from '../../src/api/client';
-import { loadConfig, loadCredentials } from '../../src/store/config';
-import { NetworkError } from '../../src/api/errors';
-import { useHoursData } from '../../src/hooks/useHoursData';
-import type { HoursData, PaymentsResponse, TimesheetResponse } from '../../src/lib/hours';
-import type { CrossoverConfig, Credentials } from '../../src/types/config';
+jest.mock('../../src/hooks/useHoursOverview', () => ({
+  ...jest.requireActual('../../src/hooks/useHoursOverview'),
+  useHoursOverview: jest.fn(),
+}));
+
+const actualUseHoursOverview: typeof useHoursOverview = jest.requireActual(
+  '../../src/hooks/useHoursOverview',
+).useHoursOverview;
 
 const mockApiGet = apiGet as jest.Mock;
 const mockGetAuthToken = getAuthToken as jest.Mock;
 const mockLoadConfig = loadConfig as jest.Mock;
 const mockLoadCredentials = loadCredentials as jest.Mock;
+const mockUseHoursOverview = useHoursOverview as jest.Mock;
+const mockOverviewRefetch = jest.fn();
 const mockStorage = AsyncStorage as unknown as {
   getItem: jest.Mock;
   setItem: jest.Mock;
@@ -56,6 +76,7 @@ const mockStorage = AsyncStorage as unknown as {
 const CACHE_KEY = 'hours_cache';
 const TIMESHEET_PATH = '/api/timetracking/timesheets';
 const PAYMENTS_PATH = '/api/v3/users/current/payments';
+const OVERVIEW_PATH = '/api/v3/assignments/79996/hours-overview';
 
 // Wednesday 2026-10-21, midday UTC: the week key (Monday 2026-10-19) is the same in
 // every host time zone.
@@ -121,12 +142,24 @@ const PAYMENT_ROW: PaymentsResponse = {
 type Responder = () => Promise<unknown>;
 
 /** Routes apiGet by path: the 3 timesheet strategies share one path. */
-function serve(timesheet: Responder, payments: Responder) {
+function serve(timesheet: Responder, payments: Responder, overview?: Responder) {
   mockApiGet.mockImplementation((path: string) => {
     if (path === TIMESHEET_PATH) return timesheet();
     if (path === PAYMENTS_PATH) return payments();
+    if (path === OVERVIEW_PATH && overview) return overview();
     return Promise.reject(new Error(`unexpected apiGet ${path}`));
   });
+}
+
+/** What the mocked useHoursOverview returns: its data, or a failure with none. */
+function overviewResult(data: HoursOverview | undefined, isError = false) {
+  return {
+    data,
+    isError,
+    isLoading: false,
+    error: isError ? new Error('overview failed') : null,
+    refetch: mockOverviewRefetch,
+  };
 }
 
 const outage: Responder = () => Promise.reject(new NetworkError('Network request failed'));
@@ -204,6 +237,7 @@ beforeEach(() => {
   mockLoadConfig.mockResolvedValue(CONFIG);
   mockLoadCredentials.mockResolvedValue(CREDS);
   mockGetAuthToken.mockResolvedValue('token-abc');
+  mockUseHoursOverview.mockReturnValue(overviewResult(undefined));
 });
 
 afterEach(() => {
@@ -306,5 +340,179 @@ describe('cross-spec review: a payments-only failure still shows fresh timesheet
     expect(get().data?.weeklyEarnings).toBe(20 * CONFIG.hourlyRate);
     expect(get().isStale).toBe(false);
     expect(get().error).toBeNull();
+  });
+});
+
+// ─── 1.2 WorkSmart dashboard parity: the hours overview ───────────────────────
+
+describe('1.2: useHoursData refines the current week with the hours overview', () => {
+  // The live-shaped week of Mon 2026-10-19 (NOW is Wednesday of that week): 2410 billable
+  // minutes, capped at 2400 for pay; 130 minutes pending.
+  const OVERVIEW = normalizeHoursOverview(HOURS_OVERVIEW_RAW) as HoursOverview;
+  const LAST_WEEK = { ...OVERVIEW, weekStart: '2026-10-12' };
+
+  /** Approved fixture minutes starting on host-local `date` (jest runs in the host zone). */
+  const approvedMinutesOn = (date: string): number =>
+    OVERVIEW.manualEntries
+      .filter((e) => {
+        const at = new Date(`${e.start}Z`);
+        const local = new Date(at.getTime() - at.getTimezoneOffset() * 60_000);
+        return e.status === 'APPROVED' && local.toISOString().slice(0, 10) === date;
+      })
+      .reduce((sum, e) => sum + e.durationMinutes, 0);
+
+  const good = () => serve(
+    () => Promise.resolve([TIMESHEET_ROW]),
+    () => Promise.resolve([PAYMENT_ROW]),
+  );
+
+  it('overview present → total and days stay the timesheet\'s; limit, manual split and breakdown from it; written to hours_cache', async () => {
+    mockUseHoursOverview.mockReturnValue(overviewResult(OVERVIEW));
+    good();
+
+    const { get, idle } = setupHook();
+    await settle(idle);
+
+    // Used to be the overview's UTC billable total (2410 min): the local timesheet wins
+    expect(get().data?.total).toBe(20);
+    expect(get().data?.weeklyLimit).toBe(40);
+    expect(get().data?.hoursRemaining).toBe(20);
+    expect(get().data?.breakdown?.billable).toBe(2410);
+    expect(get().data?.breakdown?.manualPending).toBe(130);
+    // The timesheet's local days, each with its manual minutes by local date
+    expect(get().data?.daily.map((d) => [d.date, d.hours])).toEqual([
+      ['2026-10-19', 10],
+      ['2026-10-20', 10],
+    ]);
+    for (const d of get().data!.daily) {
+      expect(d.manualHours! * 60).toBeCloseTo(approvedMinutesOn(d.date), 10);
+    }
+    // The payments row has paidHours (20), so earnings stay paidHours × rate.
+    expect(get().data?.weeklyEarnings).toBe(20 * CONFIG.hourlyRate);
+    expect(get().isStale).toBe(false);
+    expect(get().error).toBeNull();
+
+    const stored = JSON.parse((await AsyncStorage.getItem(CACHE_KEY))!);
+    expect(stored.data.total).toBe(20);
+    expect(stored.data.breakdown.billable).toBe(2410);
+  });
+
+  it('overview absent → the timesheet + payments numbers, no breakdown', async () => {
+    good();
+
+    const { get, idle } = setupHook();
+    await settle(idle);
+
+    expect(get().data?.total).toBe(20);
+    expect(get().data?.weeklyEarnings).toBe(1000);
+    expect(get().data?.breakdown).toBeUndefined();
+    expect(get().isStale).toBe(false);
+  });
+
+  it('overview failed (no data) → the timesheet + payments numbers, no error', async () => {
+    mockUseHoursOverview.mockReturnValue(overviewResult(undefined, true));
+    good();
+
+    const { get, idle } = setupHook();
+    await settle(idle);
+
+    expect(get().data?.total).toBe(20);
+    expect(get().data?.breakdown).toBeUndefined();
+    expect(get().error).toBeNull();
+  });
+
+  it('a persisted overview from last week is ignored', async () => {
+    mockUseHoursOverview.mockReturnValue(overviewResult(LAST_WEEK));
+    good();
+
+    const { get, idle } = setupHook();
+    await settle(idle);
+
+    expect(get().data?.total).toBe(20);
+    expect(get().data?.breakdown).toBeUndefined();
+    expect(JSON.parse((await AsyncStorage.getItem(CACHE_KEY))!).data.total).toBe(20);
+  });
+
+  it('a last-week overview is not live data: with timesheet and payments down, hours_cache is served', async () => {
+    const seeded = await seedHoursCache(SEEDED_HOURS);
+    mockUseHoursOverview.mockReturnValue(overviewResult(LAST_WEEK));
+    serve(outage, outage);
+
+    const { get, idle } = setupHook();
+    await settle(idle);
+
+    expect(get().data?.total).toBe(32.5);
+    expect(get().isStale).toBe(true);
+    expect(await AsyncStorage.getItem(CACHE_KEY)).toBe(seeded);
+  });
+
+  it('a current overview alone is not live data: timesheet and payments both fail → hours_cache is served, untouched', async () => {
+    // Used to serve the overview's UTC week as live hours; its days are UTC, so it cannot
+    // produce the local-week hours the home screen shows.
+    const seeded = await seedHoursCache(SEEDED_HOURS);
+    mockUseHoursOverview.mockReturnValue(overviewResult(OVERVIEW));
+    serve(outage, outage);
+
+    const { get, idle } = setupHook();
+    await settle(idle);
+
+    expect(get().data?.total).toBe(32.5);
+    expect(get().data?.weeklyEarnings).toBe(1625);
+    expect(get().data?.breakdown).toBeUndefined();
+    expect(get().isStale).toBe(true);
+    expect(get().isLoading).toBe(false);
+    expect(get().error).toBeNull();
+    // The cache write still needs both queries clean (DD3.7).
+    expect(await AsyncStorage.getItem(CACHE_KEY)).toBe(seeded);
+    expect(hoursCacheWrites()).toEqual([]);
+  });
+
+  it('a current overview alone, no cache: no live data, the error surfaces', async () => {
+    mockUseHoursOverview.mockReturnValue(overviewResult(OVERVIEW));
+    serve(outage, outage);
+
+    const { get, idle } = setupHook();
+    await settle(idle);
+
+    expect(get().data).toBeNull();
+    expect(get().error).not.toBeNull();
+    expect(hoursCacheWrites()).toEqual([]);
+  });
+
+  it('refetch() also refetches the overview', async () => {
+    mockUseHoursOverview.mockReturnValue(overviewResult(OVERVIEW));
+    good();
+
+    const { get, idle } = setupHook();
+    await settle(idle);
+    await act(async () => {
+      get().refetch();
+    });
+
+    expect(mockOverviewRefetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('end to end with the real useHoursOverview: the routed body refines the week', async () => {
+    mockUseHoursOverview.mockImplementation(actualUseHoursOverview);
+    serve(
+      () => Promise.resolve([TIMESHEET_ROW]),
+      () => Promise.resolve([PAYMENT_ROW]),
+      () => Promise.resolve(HOURS_OVERVIEW_RAW),
+    );
+
+    const { get, idle } = setupHook();
+    await settle(() => idle() && get().data?.breakdown !== undefined);
+
+    const overviewCalls = mockApiGet.mock.calls.filter(([p]) => p === OVERVIEW_PATH);
+    expect(overviewCalls).toHaveLength(1);
+    expect(overviewCalls[0][1]).toEqual({ date: '2026-10-21' });
+    expect(overviewCalls[0][3]).toBe(false);
+    expect(overviewCalls[0][4]).toEqual({ ...CREDS, useQA: false });
+
+    // Used to be the overview's UTC billable total, with timesheet and payments down
+    expect(get().data?.total).toBe(20);
+    expect(get().data?.breakdown?.weekStart).toBe('2026-10-19');
+    expect(get().data?.breakdown?.billable).toBe(2410);
+    expect(get().isStale).toBe(false);
   });
 });

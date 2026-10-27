@@ -15,6 +15,8 @@ import * as path from 'path';
 
 // Use official Reanimated mock + missing exports: prevents native binary initialization
 // and worklet background timer crashes when multiple test suites share a worker process.
+// 1.2: the pay-days query needs a QueryClient; the home screen hides the card without data
+jest.mock('@/src/hooks/usePayDays', () => ({ usePayDays: () => ({ data: undefined }) }));
 jest.mock('react-native-reanimated', () => {
   const mock = require('react-native-reanimated/mock');
   return { ...mock, useReducedMotion: () => false };

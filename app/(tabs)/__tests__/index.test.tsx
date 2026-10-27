@@ -44,6 +44,8 @@ jest.mock('@/src/hooks/useFocusKey', () => ({
   useFocusKey: () => 'focus-key-0',
 }));
 jest.mock('@/src/hooks/useApprovalItems');
+// 1.2: the pay-days query needs a QueryClient; the home screen hides the card without data
+jest.mock('@/src/hooks/usePayDays', () => ({ usePayDays: () => ({ data: undefined }) }));
 jest.mock('@/src/components/FadeInScreen', () => {
   const mockReact = require('react');
   return {

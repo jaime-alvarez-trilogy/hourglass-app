@@ -2,13 +2,20 @@
 //
 // On success: writes HoursData to AsyncStorage 'hours_cache' with cachedAt timestamp.
 // On total failure: reads 'hours_cache' from AsyncStorage; returns isStale=true.
+// 1.2: the hours overview (useHoursOverview) refines the current week when it has data —
+// real weekly limit, per-day manual/pending split and the UTC pay-week breakdown. It is
+// optional: a missing or failed overview leaves the timesheet + payments numbers as they
+// were. It never stands in for the timesheet: its days are UTC, while the displayed hours
+// follow the local week, so an overview alone is not live data.
 
 import { useEffect, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTimesheet } from './useTimesheet';
 import { usePayments } from './usePayments';
+import { useHoursOverview } from './useHoursOverview';
 import { calculateHours } from '../lib/hours';
 import { useConfig } from './useConfig';
+import { utcWeekStart } from '../lib/hoursOverview';
 import type { HoursData } from '../lib/hours';
 
 const CACHE_KEY = 'hours_cache';
@@ -34,6 +41,12 @@ export function useHoursData(): UseHoursDataResult {
 
   const timesheetQuery = useTimesheet(config);
   const paymentsQuery = usePayments(config);
+  const overviewQuery = useHoursOverview(config);
+  // Only a current-week overview is used; a persisted one from last week is ignored
+  const overview =
+    overviewQuery.data && overviewQuery.data.weekStart === utcWeekStart()
+      ? overviewQuery.data
+      : null;
 
   // Load cache on mount
   useEffect(() => {
@@ -65,7 +78,8 @@ export function useHoursData(): UseHoursDataResult {
         timesheetQuery.data,
         paymentsQuery.data,
         hourlyRate,
-        weeklyLimit
+        weeklyLimit,
+        overview,
       );
       const entry: CachedHours = {
         data: computed,
@@ -80,6 +94,7 @@ export function useHoursData(): UseHoursDataResult {
     timesheetQuery.isError,
     paymentsQuery.isError,
     config,
+    overview,
   ]);
 
   const bothError = timesheetQuery.isError && paymentsQuery.isError;
@@ -94,6 +109,7 @@ export function useHoursData(): UseHoursDataResult {
   const refetch = () => {
     timesheetQuery.refetch();
     paymentsQuery.refetch();
+    if (config?.assignmentId) overviewQuery.refetch();
   };
 
   // Memoize to prevent new object reference on every render — useWidgetSync
@@ -104,12 +120,13 @@ export function useHoursData(): UseHoursDataResult {
     const hourlyRate = config.hourlyRate ?? 0;
     const weeklyLimit = config.weeklyLimit ?? 40;
     return calculateHours(
-      timesheetQuery.data!,
+      timesheetQuery.data ?? null,
       paymentsQuery.data ?? null,
       hourlyRate,
       weeklyLimit,
+      overview,
     );
-  }, [timesheetQuery.data, paymentsQuery.data, config, hasLiveData]);
+  }, [timesheetQuery.data, paymentsQuery.data, config, hasLiveData, overview]);
 
   // Serving from live data
   if (hasLiveData && config) {
