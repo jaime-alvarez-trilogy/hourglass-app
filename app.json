@@ -73,7 +73,7 @@
           }
         ]
       },
-      "buildNumber": "19"
+      "buildNumber": "20"
     },
     "android": {
       "package": "com.jalvarez0907.hourglass",
@@ -158,7 +158,8 @@
       "expo-font",
       "expo-image",
       "expo-web-browser",
-      "expo-sharing"
+      "expo-sharing",
+      "expo-status-bar"
     ],
     "updates": {
       "url": "https://u.expo.dev/4ad8a6bd-aec2-45a5-935f-5598d47b605d"
