@@ -1,15 +1,19 @@
 // Mock for @shopify/react-native-skia — Jest/node environment
 // Canvas passes through children so React tree is renderable in tests.
 // All drawing primitives (Rect, Path, Circle, Line) return null — no canvas output in Jest.
+// Fill and ImageShader are the exceptions (host elements), for the NoiseOverlay tests.
 // useDerivedValue is mocked to synchronously return { value: fn() } for test predictability.
 
 const React = require('react');
 
-/** Shared mock path object factory — includes trim() for 04-victory-charts FR4 */
+/**
+ * Shared mock path object factory.
+ * 10-sdk-58-ios-27 FR2: no moveTo / lineTo / trim. Skia 2.14 removes them from SkPath (#4092),
+ * so app code builds paths with Skia.Path.MakeFromSVGString and trims with the <Path start end>
+ * props. Any leftover mutation now throws "is not a function" in a test instead of on device.
+ */
 function makeMockPath(): Record<string, jest.Mock> {
   return {
-    moveTo: jest.fn().mockReturnThis(),
-    lineTo: jest.fn().mockReturnThis(),
     cubicTo: jest.fn().mockReturnThis(),
     quadTo: jest.fn().mockReturnThis(),
     addArc: jest.fn().mockReturnThis(),
@@ -17,7 +21,6 @@ function makeMockPath(): Record<string, jest.Mock> {
     close: jest.fn().mockReturnThis(),
     copy: jest.fn(function() { return makeMockPath(); }),
     reset: jest.fn().mockReturnThis(),
-    trim: jest.fn().mockReturnThis(),
   };
 }
 
@@ -39,8 +42,19 @@ module.exports = {
   Text: (_props: any) => null,
   Group: ({ children }: any) => children ?? null,
   Paint: (_props: any) => null,
-  Fill: (_props: any) => null,
+  // Fill renders as a host element so NoiseOverlay tests can see its opacity and shader child.
+  Fill: ({ children, ...props }: any) => React.createElement('Fill', props, children),
   RoundedRect: (_props: any) => null,
+
+  // Image shader + loader — used by NoiseShader. loadData resolves on the next microtask with
+  // whatever the factory returns; Skia.Image.MakeImageFromEncoded returns a 256x256 stub. Mount
+  // inside `await act(async () => …)` to see the loaded branch.
+  ImageShader: (props: any) => React.createElement('ImageShader', props),
+  loadData: jest.fn((_source: any, factory: (data: any) => any) =>
+    Promise.resolve(factory({ __mockData: true })),
+  ),
+  FilterMode: { Nearest: 0, Linear: 1 },
+  MipmapMode: { None: 0, Nearest: 1, Linear: 2 },
 
   // Paint effects — null in test environment
   SweepGradient: (_props: any) => null,
@@ -75,8 +89,9 @@ module.exports = {
   useSharedValueEffect: (_effect: any, ..._deps: any[]) => {},
 
   Skia: {
-    // Path supports both Skia.Path() (legacy factory) and Skia.Path.Make() (canonical API)
-    // MakeFromSVGString added for 04-victory-charts FR4 (AIArcHero Skia rebuild)
+    // Path supports both Skia.Path() (legacy factory) and Skia.Path.Make() (still in 2.14).
+    // MakeFromSVGString returns a path stub: it's the one construction idiom app code uses
+    // (AIArcHero, ScrubCursor; spec 10 FR2). Tests spy on it to assert the SVG string.
     Path: Object.assign(
       () => makeMockPath(),
       {
@@ -85,6 +100,9 @@ module.exports = {
       },
     ),
     XYWHRect: jest.fn((x: number, y: number, w: number, h: number) => ({ x, y, w, h })),
+    Image: {
+      MakeImageFromEncoded: jest.fn((_data: any) => ({ width: () => 256, height: () => 256 })),
+    },
     Color: jest.fn((color: string) => color),
   },
 };

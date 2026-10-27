@@ -9,6 +9,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loadConfig, loadCredentials } from '../store/config';
 import { getAuthToken } from '../api/client';
+import { toAuthCreds } from '../api/authCreds';
 import { fetchTimesheet } from '../api/timesheet';
 import { fetchPayments } from '../api/payments';
 import { fetchWorkDiary } from '../api/workDiary';
@@ -75,22 +76,25 @@ export async function fetchFreshData(): Promise<CrossoverSnapshot> {
     throw new Error('fetchFreshData: credentials not available — user not authenticated');
   }
 
-  // 3. Auth token
+  // 3. Auth token, plus one renewal creds object so an expired cached token is
+  // renewed and retried instead of zeroing the widget
   const token = await getAuthToken(credentials.username, credentials.password, config.useQA);
+  const creds = toAuthCreds(credentials, config.useQA);
 
   // 4. Week start for API calls (UTC-safe)
   const weekStart = getWeekStartDate(true);
 
   // 5. Parallel: timesheet + payments (each non-fatal on failure)
   const [timesheetData, paymentsData] = await Promise.all([
-    fetchTimesheet(config, token).catch(() => null),
-    fetchPayments(config, token).catch(() => null),
+    fetchTimesheet(config, token, creds).catch(() => null),
+    fetchPayments(config, token, creds).catch(() => null),
   ]);
 
   // 6. Compute hours — fall back to hours_cache if timesheet API failed.
   // Without this, a network blip during background refresh overwrites the widget
-  // with zeros (calculateHours returns zero-state for null inputs), erasing the
-  // last known good values that would otherwise display correctly.
+  // with zero hours (with a null timesheet calculateHours has no local-week hours;
+  // only weeklyEarnings comes from the payments row), erasing the last known good
+  // values that would otherwise display correctly.
   let hoursData: HoursData;
   if (timesheetData !== null) {
     hoursData = calculateHours(timesheetData, paymentsData, config.hourlyRate, config.weeklyLimit);
@@ -154,8 +158,8 @@ export async function fetchFreshData(): Promise<CrossoverSnapshot> {
 
   if (config.isManager) {
     const [rawManual, rawOvertime] = await Promise.all([
-      fetchPendingManual(token, config.useQA, weekStart).catch(() => null),
-      fetchPendingOvertime(token, config.useQA, weekStart).catch(() => null),
+      fetchPendingManual(token, config.useQA, weekStart, creds).catch(() => null),
+      fetchPendingOvertime(token, config.useQA, weekStart, creds).catch(() => null),
     ]);
 
     const manualItems = rawManual ? parseManualItems(rawManual, weekStart) : [];

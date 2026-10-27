@@ -2,6 +2,19 @@
 // Pure functions with no side effects. Fully testable.
 // getWeekLabels added for 07-overview-sync FR2.
 // computeHoursVariance added for 03-hours-variance.
+// 1.2 WorkSmart dashboard parity: calculateHours takes the hours overview (optional). The
+// displayed hours stay on the local-week timesheet; for the current UTC week the overview
+// adds the real weekly limit, the per-day manual/pending split and the UTC pay-week
+// breakdown.
+
+import {
+  cappedBillableMinutes,
+  isHourlyKind,
+  localDateOfUtcWallTime,
+  selectedOverviewWeek,
+  utcWeekStart,
+  type HoursOverview,
+} from './hoursOverview';
 
 export type UrgencyLevel = 'none' | 'low' | 'high' | 'critical' | 'expired';
 
@@ -9,6 +22,31 @@ export interface DailyEntry {
   date: string;      // YYYY-MM-DD
   hours: number;
   isToday: boolean;
+  /** Approved manual hours of this local day, included in `hours` (hours overview only) */
+  manualHours?: number;
+  /** Manual hours of this local day waiting for approval, NOT in `hours` (hours overview only) */
+  pendingHours?: number;
+}
+
+/**
+ * The current UTC pay week's minute buckets from the hours overview (1.2): Mon–Sun UTC,
+ * which is what payments count, not the local week the displayed hours follow. All values
+ * are minutes. `billable` = tracked + manualApproved, uncapped; `cappedBillable` is what
+ * counts toward pay (min(billable, limit + approved OT) for hourly contracts).
+ */
+export interface WeekBreakdown {
+  weekStart: string;
+  tracked: number;
+  idle: number;
+  manualApproved: number;
+  manualPending: number;
+  manualRejected: number;
+  disputed: number;
+  billable: number;
+  cappedBillable: number;
+  limitMinutes: number;
+  approvedOvertime: number;
+  isHourly: boolean;
 }
 
 export interface HoursData {
@@ -22,12 +60,21 @@ export interface HoursData {
   overtimeHours: number;
   timeRemaining: number; // ms
   deadline: Date;
+  /** Weekly limit in hours used for this week's numbers (the overview's, when known) */
+  weeklyLimit?: number;
+  /** The UTC pay week's buckets, present when the hours overview is known (1.2) */
+  breakdown?: WeekBreakdown;
 }
 
+/**
+ * One row of GET /api/timetracking/timesheets: the user's LOCAL Mon–Sun week. `stats` has
+ * one entry per local day (dated "2026-10-19T00:00:00.000Z", but the Z date names the
+ * local day). totalHours is uncapped and includes approved manual time, not pending.
+ */
 export interface TimesheetResponse {
   totalHours?: number;
   hourWorked?: number;
-  manualHourWorked?: number | string; // manual/logbook hours (includes pending entries)
+  manualHourWorked?: number | string; // approved manual/logbook hours (pending not included)
   averageHoursPerDay: number;
   stats?: Array<{ date: string; hours: number }>;
 }
@@ -209,15 +256,113 @@ export function getWeekLabels(count: number): string[] {
  * Pure function — no side effects, fully testable.
  *
  * Priority rules:
- * - total (hours worked/displayed): max(payments.paidHours, payments.workedHours), so
- *   overtime that's been worked but not yet approved in payroll still shows up;
- *   falls back to timesheet.totalHours/hourWorked when payments data is unavailable
- * - weeklyEarnings: derived from paidHours specifically (approved/compensated hours
- *   only), NOT from the displayed total — working overtime doesn't guarantee it's
- *   paid, so earnings must never inflate off hours Crossover hasn't approved yet
- * - today: matched by local YYYY-MM-DD date string from stats array
+ * - total (hours displayed): timesheet.totalHours (else hourWorked) whenever there is a
+ *   timesheet. Displayed hours follow the user's LOCAL Mon–Sun week, like WorkSmart's
+ *   time tracker, and the timesheet is that week: uncapped (real overtime shows) and
+ *   including approved manual time. Payments are on the UTC pay week, so they never
+ *   stand in for it: with no timesheet at all the displayed hours are 0 (and
+ *   hoursRemaining the full limit), whatever the payments row says
+ * - weeklyEarnings (payments, UTC): derived from paidHours specifically (approved/
+ *   compensated hours only), NOT from the displayed total — working overtime doesn't
+ *   guarantee it's paid, so earnings must never inflate off hours Crossover hasn't
+ *   approved yet. Without paidHours: workedHours, else the timesheet total
+ * - today / daily / isToday: matched by local YYYY-MM-DD date string from stats array
+ * - overview (1.2, optional): for the current UTC week the hours overview adds the
+ *   weekly limit, the per-day manual/pending split and the UTC pay-week breakdown; it
+ *   never replaces the local hours (its days are UTC) — see applyHoursOverview
  */
 export function calculateHours(
+  timesheetData: TimesheetResponse | null | undefined,
+  paymentsData: PaymentsResponse | null | undefined,
+  hourlyRate: number,
+  weeklyLimit: number,
+  overview?: HoursOverview | null,
+): HoursData {
+  const base = calculateHoursFromTimesheet(timesheetData, paymentsData, hourlyRate, weeklyLimit);
+  return overview ? applyHoursOverview(base, overview, paymentsData, hourlyRate) : base;
+}
+
+/**
+ * Overlays the hours overview on a timesheet-based result, for the current UTC week
+ * only (a persisted overview from last week is ignored). The overview has no time-zone
+ * parameter (its days and weeks are UTC), so it never replaces the displayed hours:
+ * total, today, daily hours, average and todayEarnings stay on the local timesheet.
+ * From the overview:
+ * - weeklyLimit (its limit when known); hoursRemaining / overtimeHours are the local
+ *   total against it
+ * - per-day manualHours / pendingHours: APPROVED / PENDING manual entries, each filed
+ *   under the local date its start falls on (REJECTED ignored)
+ * - breakdown: the UTC pay week's minute buckets
+ * - weeklyEarnings (payments): the payments row's paidHours when there is one, else
+ *   (hourly contracts only) the capped billable time
+ */
+export function applyHoursOverview(
+  base: HoursData,
+  overview: HoursOverview,
+  paymentsData: PaymentsResponse | null | undefined,
+  hourlyRate: number,
+  now: Date = new Date(),
+): HoursData {
+  if (overview.weekStart !== utcWeekStart(now)) return base;
+  const week = selectedOverviewWeek(overview);
+  // selectedOverviewWeek falls back to the newest row; an older week's total must never
+  // read as this week's
+  if (!week || week.weekStart !== overview.weekStart) return base;
+
+  const limit = overview.limitHours > 0 ? overview.limitHours : (base.weeklyLimit ?? 40);
+
+  // Manual minutes by the local date of their start. The overview lists this and last UTC
+  // week's entries, which covers every day of the local week.
+  const approvedByDate = new Map<string, number>();
+  const pendingByDate = new Map<string, number>();
+  for (const e of overview.manualEntries) {
+    const byDate =
+      e.status === 'APPROVED' ? approvedByDate : e.status === 'PENDING' ? pendingByDate : null;
+    const date = byDate ? localDateOfUtcWallTime(e.start) : null;
+    if (byDate && date) byDate.set(date, (byDate.get(date) ?? 0) + e.durationMinutes);
+  }
+  const daily: DailyEntry[] = base.daily.map((d) => ({
+    ...d,
+    manualHours: (approvedByDate.get(d.date) ?? 0) / 60,
+    pendingHours: (pendingByDate.get(d.date) ?? 0) / 60,
+  }));
+
+  const cappedBillable = cappedBillableMinutes(
+    { billable: week.billable, limitHours: limit, approvedOvertime: week.approvedOvertime },
+    overview.kind,
+  );
+  const paidHours = paymentsData?.paidHours ?? 0;
+  // NOT_PAID / FIXED: no per-hour pay to derive, so keep the base figure
+  const weeklyEarnings =
+    paidHours > 0 || !isHourlyKind(overview.kind)
+      ? base.weeklyEarnings
+      : (cappedBillable / 60) * hourlyRate;
+
+  return {
+    ...base,
+    daily,
+    weeklyEarnings,
+    hoursRemaining: Math.max(0, limit - base.total),
+    overtimeHours: Math.max(0, base.total - limit),
+    weeklyLimit: limit,
+    breakdown: {
+      weekStart: week.weekStart,
+      tracked: week.tracked,
+      idle: week.idle,
+      manualApproved: week.manualApproved,
+      manualPending: week.manualPending,
+      manualRejected: week.manualRejected,
+      disputed: week.disputed,
+      billable: week.billable,
+      cappedBillable,
+      limitMinutes: limit * 60,
+      approvedOvertime: week.approvedOvertime,
+      isHourly: isHourlyKind(overview.kind),
+    },
+  };
+}
+
+function calculateHoursFromTimesheet(
   timesheetData: TimesheetResponse | null | undefined,
   paymentsData: PaymentsResponse | null | undefined,
   hourlyRate: number,
@@ -231,40 +376,40 @@ export function calculateHours(
   const timeRemaining = deadline.getTime() - now;
   const limit = weeklyLimit || 40;
 
-  // Handle null/missing timesheet
+  // paidHours = approved/compensated hours (regular + approved OT) — this is what
+  // Crossover will actually pay out. workedHours = raw tracked time, uncapped, and
+  // can exceed paidHours when overtime has been worked but not yet approved in
+  // payroll. Both are for the UTC pay week (payments), not the local week.
+  const paidHours = paymentsData?.paidHours ?? 0;
+  const workedHoursRaw = paymentsData?.workedHours ?? 0;
+
+  // Handle null/missing timesheet: no local-week figure, so the displayed hours stay at
+  // zero. The payments row is the UTC pay week and never stands in for them; only the
+  // earnings (payments) still come from it. No per-day data without a timesheet.
   if (!timesheetData) {
     return {
       total: 0,
       average: 0,
       today: 0,
       daily: [],
-      weeklyEarnings: 0,
+      weeklyEarnings: (paidHours > 0 ? paidHours : workedHoursRaw) * hourlyRate,
       todayEarnings: 0,
       hoursRemaining: limit,
       overtimeHours: 0,
       timeRemaining,
       deadline,
+      weeklyLimit: limit,
     };
   }
 
-  // Extract timesheet values
-  const timesheetTotal = parseFloat(
+  // Extract timesheet values. The timesheet is the user's LOCAL Mon–Sun week, uncapped
+  // and including approved manual time — what WorkSmart's time tracker shows — so its
+  // total is the displayed total, whatever the payments row says.
+  const total = parseFloat(
     String(timesheetData.totalHours ?? timesheetData.hourWorked ?? 0)
   );
   const averageHours = parseFloat(String(timesheetData.averageHoursPerDay ?? 0));
   const stats = timesheetData.stats ?? [];
-
-  // paidHours = approved/compensated hours (regular + approved OT) — this is what
-  // Crossover will actually pay out. workedHours = raw tracked time, uncapped, and
-  // can exceed paidHours when overtime has been worked but not yet approved in
-  // payroll. Displayed hours must reflect what was actually worked (so real OT
-  // isn't hidden behind an unapproved-hours ceiling); take the higher of the two.
-  const paidHours = paymentsData?.paidHours ?? 0;
-  const workedHoursRaw = paymentsData?.workedHours ?? 0;
-  const total =
-    paidHours > 0 || workedHoursRaw > 0
-      ? Math.max(paidHours, workedHoursRaw)
-      : timesheetTotal;
 
   // Today's hours by local date string match
   const todayLocal = (() => {
@@ -286,12 +431,12 @@ export function calculateHours(
     isToday: s.date.startsWith(todayLocal),
   }));
 
-  // Earnings are tied to paidHours specifically, NOT the displayed `total` — working
-  // overtime doesn't guarantee it's compensated, so weeklyEarnings must never inflate
-  // off hours Crossover hasn't approved yet. Falls back to `total` only when payments
-  // data is missing entirely (paidHours and workedHours both 0), matching the
-  // timesheetTotal fallback above.
-  const earningsBasis = paidHours > 0 ? paidHours : total;
+  // Earnings are payments (UTC pay week) and tied to paidHours specifically, NOT the
+  // displayed `total` — working overtime doesn't guarantee it's compensated, so
+  // weeklyEarnings must never inflate off hours Crossover hasn't approved yet. Without
+  // paidHours they fall back to workedHours, and to the timesheet `total` only when
+  // payments data is missing entirely (paidHours and workedHours both 0).
+  const earningsBasis = paidHours > 0 ? paidHours : workedHoursRaw > 0 ? workedHoursRaw : total;
   const weeklyEarnings = earningsBasis * hourlyRate;
   const todayEarnings = todayHours * hourlyRate;
 
@@ -310,6 +455,7 @@ export function calculateHours(
     overtimeHours,
     timeRemaining,
     deadline,
+    weeklyLimit: limit,
   };
 }
 

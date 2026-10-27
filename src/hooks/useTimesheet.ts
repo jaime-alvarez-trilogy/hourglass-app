@@ -10,6 +10,8 @@ import { loadCredentials, getApiBase } from '../store/config';
 import type { CrossoverConfig } from '../types/config';
 import type { TimesheetResponse } from '../lib/hours';
 import { getAuthToken } from '../api/client';
+import { shouldRetryOnce } from '../api/errors';
+import { toAuthCreds } from '../api/authCreds';
 
 /**
  * React Query wrapper around fetchTimesheet for the current week's data.
@@ -18,7 +20,8 @@ import { getAuthToken } from '../api/client';
  * (useHoursData composes this with usePayments and handles caching to 'hours_cache').
  */
 export function useTimesheet(config: CrossoverConfig | null) {
-  const weekStart = getWeekStartDate(true);
+  // Local Monday, like fetchTimesheet's `date` (displayed hours follow the local week)
+  const weekStart = getWeekStartDate(false);
 
   return useQuery<TimesheetResponse | null, Error>({
     queryKey: ['timesheet', weekStart, config?.userId],
@@ -27,10 +30,10 @@ export function useTimesheet(config: CrossoverConfig | null) {
       const creds = await loadCredentials();
       if (!creds) throw new Error('No credentials');
       const token = await getAuthToken(creds.username, creds.password, config.useQA);
-      return fetchTimesheet(config, token);
+      return fetchTimesheet(config, token, toAuthCreds(creds, config.useQA));
     },
     enabled: !!config,
     staleTime: 15 * 60 * 1000, // 15 minutes
-    retry: 1,
+    retry: shouldRetryOnce, // one retry, outages only (never a credential failure)
   });
 }

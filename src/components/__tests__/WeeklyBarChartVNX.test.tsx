@@ -15,6 +15,8 @@
 //   SC2.12 — Renders without crash for data=[] and width=0
 //   SC2.13 — watermarkLabel preserved with opacity <= 0.10
 //
+// 1.2 WorkSmart dashboard parity: manual / pending segments — SC-12.1–12.9 (last block)
+//
 // Strategy:
 // - Source-level checks for VNX API usage (import, props, data flow)
 // - Render tests for crash safety
@@ -24,6 +26,13 @@ import React from 'react';
 import { create, act } from 'react-test-renderer';
 import * as fs from 'fs';
 import * as path from 'path';
+import { RoundedRect } from '@shopify/react-native-skia';
+import { CartesianChart } from 'victory-native';
+import WeeklyBarChart, {
+  type DailyHours,
+  type WeeklyBarChartProps,
+} from '@/src/components/WeeklyBarChart';
+import { colors } from '@/src/lib/colors';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -31,7 +40,11 @@ jest.mock('victory-native', () => {
   const R = require('react');
   const chartBounds = { left: 0, right: 300, top: 0, bottom: 120, width: 300, height: 120 };
   return {
-    CartesianChart: ({ children, data, xKey, yKeys }: any) => {
+    CartesianChart: ({ children, data, xKey, yKeys, domain }: any) => {
+      // Linear y scale over the passed domain — WeeklyBarChart stacks pending time with it
+      const yMax = domain?.y?.[1] ?? 1;
+      const yScale = (v: number) =>
+        chartBounds.bottom - (v / yMax) * (chartBounds.bottom - chartBounds.top);
       // Provide realistic points.value so per-bar RoundedRect rendering executes
       const points: any = {};
       if (yKeys && data) {
@@ -45,7 +58,7 @@ jest.mock('victory-native', () => {
         yKeys.forEach((k: string) => { points[k] = []; });
       }
       return R.createElement('CartesianChart', { data, xKey, yKeys },
-        typeof children === 'function' ? children({ points, chartBounds }) : children
+        typeof children === 'function' ? children({ points, chartBounds, yScale }) : children
       );
     },
     Line: ({ children }: any) =>
@@ -394,5 +407,152 @@ describe('WeeklyBarChart — 09FR2: domainPadding suppresses VNX vertical squash
       { day: 'Sun', hours: 0,   isToday: false, isFuture: true  },
     ];
     expect(() => renderChart({ data: lowHoursData, width: 300, height: 120 })).not.toThrow();
+  });
+});
+
+// ─── 1.2 WorkSmart dashboard parity: manual / pending segments ───────────────
+//
+// SC-12.1 — DailyHours declares optional manualHours / pendingHours
+// SC-12.2 — without the fields: one bar per day, geometry + gradient exactly as before
+// SC-12.3 — y domain max includes hours + pendingHours
+// SC-12.4 — approved manual: violet → transparent top segment over a shortened bar
+// SC-12.5 — manual ≥ hours: the whole bar is the violet segment
+// SC-12.6 — pending: translucent violet fill + 1px violet stroke stacked on the bar
+// SC-12.7 — a few minutes of pending still draws a MIN_PENDING_PX box
+// SC-12.8 — overtime white-gold still keys off `hours` (manual counts, pending doesn't)
+// SC-12.9 — zero / negative / NaN fields render like absent ones
+//
+// The mock gives every bar point.y = 60 (bar top), and yScale(4) = 60 while the domain
+// max is 8, so a 4h bar keeps the mock's geometry coherent for the stacking checks.
+
+describe('WeeklyBarChart — 1.2 manual / pending segments', () => {
+  const CELL_W = 300 / 7;
+  const BAR_W = CELL_W * 0.65;
+  const VIOLET = colors.violet;
+  const SUCCESS = colors.success;
+  const barX = (i: number) => i * CELL_W + (CELL_W - BAR_W) / 2;
+
+  function renderWith(data: DailyHours[], extra: Partial<WeeklyBarChartProps> = {}) {
+    let tree: any;
+    act(() => {
+      tree = create(React.createElement(WeeklyBarChart, { data, width: 300, height: 120, ...extra }));
+    });
+    return tree;
+  }
+
+  const rects = (tree: any): any[] =>
+    tree.root.findAll((n: any) => n.type === RoundedRect).map((n: any) => n.props);
+  const barRects = (tree: any, i: number) => rects(tree).filter((p) => Math.abs(p.x - barX(i)) < 1);
+  const gradient = (p: any) => p.children?.props;
+  const domainMax = (tree: any) => tree.root.findByType(CartesianChart).props.domain.y[1];
+  const geometry = (tree: any) =>
+    rects(tree).map((p) => ({
+      x: p.x, y: p.y, width: p.width, height: p.height, r: p.r,
+      color: p.color, style: p.style, gradient: gradient(p),
+    }));
+
+  const withDay = (i: number, patch: Partial<DailyHours>): DailyHours[] =>
+    MOCK_DATA.map((d, j) => (j === i ? { ...d, ...patch } : d));
+
+  it('SC-12.1 — DailyHours declares manualHours?: number and pendingHours?: number', () => {
+    const source = fs.readFileSync(BAR_CHART_FILE, 'utf8');
+    expect(source).toMatch(/manualHours\s*\?\s*:\s*number/);
+    expect(source).toMatch(/pendingHours\s*\?\s*:\s*number/);
+  });
+
+  it('SC-12.2 — without the fields: one gradient bar per day, no extra segments', () => {
+    const tree = renderWith(MOCK_DATA);
+    const all = rects(tree);
+    expect(all).toHaveLength(7);
+    all.forEach((p, i) => {
+      expect(p).toMatchObject({ x: barX(i), y: 60, width: BAR_W, height: 60, r: 4 });
+      expect(p.style).toBeUndefined();
+      expect(p.color).toBeUndefined();
+      expect(gradient(p).start).toEqual({ x: 0, y: 60 });
+      expect(gradient(p).end).toEqual({ x: 0, y: 120 });
+      expect(gradient(p).colors[0]).not.toBe(VIOLET);
+      expect(gradient(p).colors[1]).toBe('transparent');
+    });
+  });
+
+  it('SC-12.3 — y domain max includes hours + pendingHours', () => {
+    expect(domainMax(renderWith(MOCK_DATA))).toBe(8);
+    expect(domainMax(renderWith(withDay(2, { pendingHours: 3 })))).toBe(9.5); // 6.5 + 3
+    expect(domainMax(renderWith(withDay(2, { pendingHours: 3 }), { maxHours: 12 }))).toBe(12);
+    // Approved manual is already inside `hours` — it never widens the domain
+    expect(domainMax(renderWith(withDay(1, { manualHours: 5 })))).toBe(8);
+  });
+
+  it('SC-12.4 — approved manual is a violet → transparent top segment', () => {
+    const tree = renderWith(withDay(0, { hours: 8, manualHours: 2 }));
+    const [tracked, manual] = barRects(tree, 0);
+    // 2h of 8h = top quarter of the 60px bar
+    expect(manual).toMatchObject({ y: 60, height: 15, r: 4 });
+    expect(gradient(manual).colors).toEqual([VIOLET, 'transparent']);
+    expect(gradient(manual).start).toEqual({ x: 0, y: 60 });
+    expect(gradient(manual).end).toEqual({ x: 0, y: 75 });
+    expect(tracked).toMatchObject({ y: 75, height: 45, r: 4 });
+    expect(gradient(tracked).colors).toEqual([SUCCESS, 'transparent']);
+    expect(gradient(tracked).start).toEqual({ x: 0, y: 75 });
+    expect(gradient(tracked).end).toEqual({ x: 0, y: 120 });
+    // Other bars untouched
+    expect(barRects(tree, 1)).toHaveLength(1);
+  });
+
+  it('SC-12.5 — manual ≥ hours: the whole bar is violet', () => {
+    const tree = renderWith(withDay(0, { hours: 3, manualHours: 5 }));
+    const segs = barRects(tree, 0);
+    expect(segs).toHaveLength(1);
+    expect(segs[0]).toMatchObject({ y: 60, height: 60 });
+    expect(gradient(segs[0]).colors[0]).toBe(VIOLET);
+  });
+
+  it('SC-12.6 — pending: translucent violet fill + 1px violet stroke stacked on the bar', () => {
+    // 4h bar (top at y=60) + 2h pending → pending top at yScale(6) = 30
+    const tree = renderWith(withDay(2, { hours: 4, pendingHours: 2 }));
+    const segs = barRects(tree, 2);
+    expect(segs).toHaveLength(3);
+    const [bar, fill, stroke] = segs;
+    expect(bar).toMatchObject({ y: 60, height: 60 });
+    expect(fill).toMatchObject({ x: barX(2), y: 30, width: BAR_W, height: 30, color: VIOLET });
+    expect(fill.opacity).toBeGreaterThan(0);
+    expect(fill.opacity).toBeLessThanOrEqual(0.3);
+    expect(fill.style).toBeUndefined();
+    expect(stroke).toMatchObject({
+      style: 'stroke', strokeWidth: 1, color: VIOLET,
+      x: barX(2) + 0.5, y: 30.5, width: BAR_W - 1, height: 29,
+    });
+  });
+
+  it('SC-12.7 — a few minutes of pending still draws a visible box', () => {
+    const tree = renderWith(withDay(2, { hours: 4, pendingHours: 0.01 }));
+    const fill = barRects(tree, 2).find((p) => p.color === VIOLET && p.style === undefined);
+    expect(fill).toMatchObject({ y: 57, height: 3 });
+  });
+
+  it('SC-12.8 — overtime colour keys off hours: manual counts, pending does not', () => {
+    // Mon 8h; Tue 6h + 4h pending = 14h counted, under the 15h limit
+    const base = withDay(0, { hours: 8 }).map((d, j) =>
+      j === 1 ? { ...d, hours: 6, pendingHours: 4 } : j === 2 ? { ...d, isToday: false } : d,
+    );
+    const underLimit = barRects(renderWith(base, { weeklyLimit: 15 }), 1)
+      .find((p) => p.style === undefined && p.color === undefined);
+    expect(gradient(underLimit).colors[0]).toBe(SUCCESS);
+
+    // Mon 8h; Tue 8h incl. 3h approved manual = 16h, over the limit
+    const overLimit = base.map((d, j) => (j === 1 ? { day: 'Tue', hours: 8, manualHours: 3 } : d));
+    const tracked = barRects(renderWith(overLimit, { weeklyLimit: 15 }), 1)
+      .find((p) => gradient(p)?.colors[0] !== VIOLET);
+    expect(gradient(tracked).colors[0]).toBe('#FFF8E7');
+  });
+
+  it('SC-12.9 — zero, negative and NaN fields render exactly like absent ones', () => {
+    const noisy = MOCK_DATA.map((d, i) => ({
+      ...d,
+      manualHours: [0, -2, NaN, 0, 0, 0, 0][i],
+      pendingHours: [0, -1, NaN, 0, 0, 0, 0][i],
+    }));
+    expect(geometry(renderWith(noisy))).toEqual(geometry(renderWith(MOCK_DATA)));
+    expect(domainMax(renderWith(noisy))).toBe(8);
   });
 });

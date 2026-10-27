@@ -4,8 +4,8 @@
 
 import React from 'react';
 import { View, Text } from 'react-native';
-import type { StyleProp, ViewStyle } from 'react-native';
-import Animated from 'react-native-reanimated';
+import type { ViewStyle } from 'react-native';
+import Animated, { type AnimatedStyle } from 'react-native-reanimated';
 import GlassCard from './GlassCard';
 
 interface InsightChipProps {
@@ -13,8 +13,8 @@ interface InsightChipProps {
   mutedLine: string;
   /** Hex color from colors.* palette — sets dot fill */
   dotColor: string;
-  /** From useStaggeredEntry's getEntryStyle(3 + i) */
-  animatedStyle?: StyleProp<ViewStyle>;
+  /** From useStaggeredEntry's getEntryStyle(3 + i) (a Reanimated 4.7 animated style) */
+  animatedStyle?: AnimatedStyle<ViewStyle>;
 }
 
 export function InsightChip({

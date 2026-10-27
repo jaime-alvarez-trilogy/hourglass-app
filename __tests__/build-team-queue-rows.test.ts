@@ -7,7 +7,9 @@
 // The helper is a pure function (no React, no hooks), so we test it directly.
 
 import { buildTeamQueueRows } from '../app/(tabs)/approvals';
+import { parseOvertimeItems } from '../src/lib/approvals';
 import type { ManualApprovalItem } from '../src/lib/approvals';
+import { LIVE_OVERTIME_RAW } from '../src/__fixtures__/overtimeRequests';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -156,5 +158,36 @@ describe('buildTeamQueueRows — urgency flag', () => {
 
     const itemRows = rows.filter((r) => r.type === 'item') as { type: 'item'; showUrgency: boolean }[];
     expect(itemRows.every((r) => r.showUrgency === false)).toBe(true);
+  });
+});
+
+// Live pending-overtime shape (QA, 2026-10-27): weekStartDate comes on the request. The 1.0
+// parser derived 'NaN-NaN-NaN' from its absent startDateTime, so the item had no header.
+describe('buildTeamQueueRows — live-shape overtime', () => {
+  const OCT_CURRENT = '2026-10-26';
+  const OCT_PREV1   = '2026-10-19';
+  const OCT_PREV2   = '2026-10-12';
+
+  it('BTQ_live_overtime_item_listed_under_its_week_header', () => {
+    const [overtime] = parseOvertimeItems([LIVE_OVERTIME_RAW]);
+    const cur = makeManualItem({ weekStartDate: OCT_CURRENT, startDateTime: '2026-10-27T04:30:00' });
+    const rows = buildTeamQueueRows([cur, overtime], OCT_CURRENT, OCT_PREV1, OCT_PREV2, false);
+
+    expect(rows).toEqual([
+      { type: 'header', label: 'This Week' },
+      { type: 'item', item: cur, showUrgency: false },
+      { type: 'header', label: 'Last Week' },
+      { type: 'item', item: overtime, showUrgency: false },
+    ]);
+  });
+
+  it('BTQ_live_overtime_item_two_weeks_back_gets_the_urgency_flag', () => {
+    const [overtime] = parseOvertimeItems([LIVE_OVERTIME_RAW]);
+    const rows = buildTeamQueueRows([overtime], '2026-11-02', OCT_CURRENT, OCT_PREV1, true);
+
+    expect(rows).toEqual([
+      { type: 'header', label: '2 Weeks Ago' },
+      { type: 'item', item: overtime, showUrgency: true },
+    ]);
   });
 });

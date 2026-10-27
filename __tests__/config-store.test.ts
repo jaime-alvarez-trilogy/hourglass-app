@@ -124,11 +124,11 @@ describe('FR9: clearAll', () => {
     expect(result).toBeNull();
   });
 
-  it('clearAll calls AsyncStorage.multiRemove with all 18 keys', async () => {
+  it('clearAll calls AsyncStorage.multiRemove with all 20 keys', async () => {
     await clearAll();
     expect(mockAsyncStorage.multiRemove).toHaveBeenCalledTimes(1);
     const [keys] = (mockAsyncStorage.multiRemove as jest.Mock).mock.calls[0];
-    expect(keys).toHaveLength(18);
+    expect(keys).toHaveLength(20);
     expect(keys).toContain('crossover_config');
     expect(keys).toContain('crossover_username');
     expect(keys).toContain('crossover_password');
@@ -153,11 +153,31 @@ describe('FR9: clearAll', () => {
     expect(keys).toContain('prev_approval_count');
     expect(keys).toContain('prev_approval_ids');
     expect(keys).toContain('HOURGLASS_QUERY_CACHE');
+    expect(keys).toContain('my_requests_v1');          // durable-data 02-requests-store FR3
+    expect(keys).toContain('auto_approve_v1');         // 1.2 manager auto-approve
   });
 
   it('clearAll propagates AsyncStorage.multiRemove errors — does not swallow', async () => {
     const error = new Error('AsyncStorage multiRemove failed');
     (mockAsyncStorage.multiRemove as jest.Mock).mockRejectedValueOnce(error);
     await expect(clearAll()).rejects.toThrow('AsyncStorage multiRemove failed');
+  });
+
+  // Final review 2026-10-21: expo-secure-store 58 rejects deleteItemAsync with a
+  // KeyChainException when SecItemDelete returns anything but success / not-found
+  // (e.g. errSecInteractionNotAllowed). SDK 55 resolved. The credential deletes are
+  // best-effort, so sign-out never stops halfway.
+  it('clearAll resolves when SecureStore.deleteItemAsync rejects, after removing the AsyncStorage keys', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockSecureStore.deleteItemAsync.mockRejectedValue(new Error('KeyChainException: -25308'));
+    try {
+      await expect(clearAll()).resolves.toBeUndefined();
+      expect(mockSecureStore.deleteItemAsync).toHaveBeenCalledWith('crossover_username');
+      expect(mockSecureStore.deleteItemAsync).toHaveBeenCalledWith('crossover_password');
+      expect(mockAsyncStorage.multiRemove).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

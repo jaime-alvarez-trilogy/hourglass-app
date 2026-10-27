@@ -1,8 +1,23 @@
 // FR3, FR4, FR5: Centralized Crossover API client
 // Spec 04 (auth-resilience): in-memory token cache + Tomcat HTML 5xx -> AuthError.
+// durable-data 01-auth-renewal: single-flight renewal, the mint generation guard,
+// the failed-login latch and HTML 5xx after renewal -> ApiError.
 
-import { AuthError, NetworkError, ApiError, type ErrorEnvelope } from './errors';
+import {
+  AuthError,
+  NetworkError,
+  ApiError,
+  AUTH_HTML_500,
+  AUTH_LOGIN_LATCHED,
+  AuthResetError,
+  HTML_5XX_AFTER_RENEWAL,
+  type ErrorEnvelope,
+} from './errors';
+import type { AuthCreds } from './authCreds';
 import { getApiBase } from '../store/config';
+import { log } from '../lib/log';
+
+export type { AuthCreds } from './authCreds';
 
 // ---------------------------------------------------------------------------
 // Spec 04 — token cache module state
@@ -11,15 +26,43 @@ import { getApiBase } from '../store/config';
 // explicit `invalidateAuthToken()`, or when sign-out / env-switch runs from
 // app/modal.tsx (FR7).
 
-let cachedToken: string | null = null;
-let mintInFlight: Promise<string> | null = null;
+// Both are keyed by the env + username + password fingerprint, so a caller never
+// receives (or joins a mint of) another account's or another environment's token.
+// durable-data cross-spec review: a stale caller (old account / old env) that
+// reaches getAuthToken after a hard reset must not hand its token to the new owner.
+let cachedToken: { fingerprint: string; token: string } | null = null;
+const mintsInFlight = new Map<string, Promise<string>>();
+// Bumped by every hard reset (`invalidateAuthToken`). A mint that started under an
+// older generation must not write its token into the cache.
+let authGeneration = 0;
+
+/** How long a login rejected by the token endpoint is refused locally. */
+export const LOGIN_LATCH_MS = 60_000;
+
+// Failed-login latch. Holds only a non-reversible fingerprint of the rejected
+// env + username + password (never the password or the Basic string), so a
+// changed password cannot cause a storm of failed logins.
+let loginLatch: { fingerprint: string; until: number; statusCode: 401 | 403 } | null = null;
+
+/** FNV-1a 32-bit over env + username + password, as 8 lowercase hex chars. */
+function fingerprintCreds(username: string, password: string, useQA: boolean): string {
+  const input = `${useQA ? 'qa' : 'prod'}\u0000${username}\u0000${password}`;
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
 
 /**
  * Mint a fresh auth token by POSTing credentials to /api/v3/token.
  *
- * Cache-bypass: this helper never reads from or writes to `cachedToken`.
- * Use it for one-off mints (e.g. `probeEnvironments`) where you want to
- * verify creds without affecting the session cache.
+ * Cache-bypass: this helper never reads from or writes to `cachedToken`, and
+ * it neither consults nor sets the failed-login latch (`loginLatch`). Use it
+ * for one-off mints (e.g. `probeEnvironments`) where you want to verify creds
+ * without affecting the session cache, so a wrong password during onboarding
+ * is never latched or blocked by an earlier latch.
  *
  * Side effects: a single `fetch` to the token endpoint. Throws on non-2xx.
  */
@@ -56,33 +99,87 @@ export async function mintAuthToken(
 }
 
 /**
- * Get an auth token. Returns the cached token if one exists, otherwise mints
- * a fresh one. Concurrent first-callers share a single in-flight mint.
+ * Get an auth token. Returns the cached token if it was minted for the same
+ * env + username + password, otherwise mints a fresh one. Concurrent callers
+ * with the same credentials share a single in-flight mint; a caller with other
+ * credentials or another env never receives or joins it. The cache holds one
+ * token: the newest current mint replaces it.
  *
- * To force a re-mint (e.g. after a 401 retry), call `invalidateAuthToken()`
- * first.
+ * To force a re-mint after a rejected token, call `invalidateIfCurrent(token)`
+ * first (the apiGet/apiPut retry does this).
+ *
+ * Generation guard: the mint writes `cachedToken` only if no hard reset
+ * (`invalidateAuthToken`) ran while it was in flight. Its callers still receive
+ * the token either way.
+ *
+ * Failed-login latch: when the token endpoint rejects the credentials (an
+ * AuthError other than AUTH_HTML_500), the same env + username + password is
+ * refused for LOGIN_LATCH_MS with `AuthError(AUTH_LOGIN_LATCHED)` and no fetch.
+ * Only a current mint sets the latch; a successful mint or
+ * `invalidateAuthToken()` clears it. `mintAuthToken` ignores it.
  */
 export async function getAuthToken(
   username: string,
   password: string,
   useQA: boolean,
 ): Promise<string> {
-  if (cachedToken) return cachedToken;
-  if (mintInFlight) return mintInFlight;
-  mintInFlight = mintAuthToken(username, password, useQA)
-    .then((t) => {
-      cachedToken = t;
-      return t;
-    })
-    .finally(() => {
-      mintInFlight = null;
+  const fingerprint = fingerprintCreds(username, password, useQA);
+  if (cachedToken && cachedToken.fingerprint === fingerprint) return cachedToken.token;
+  const joined = mintsInFlight.get(fingerprint);
+  if (joined) return joined;
+  if (loginLatch && loginLatch.fingerprint === fingerprint && Date.now() < loginLatch.until) {
+    throw new AuthError(loginLatch.statusCode, 'Login recently rejected', {
+      errorCode: AUTH_LOGIN_LATCHED,
     });
-  return mintInFlight;
+  }
+  const gen = authGeneration;
+  const p: Promise<string> = mintAuthToken(username, password, useQA)
+    .then(
+      (t) => {
+        if (gen === authGeneration && mintsInFlight.get(fingerprint) === p) {
+          cachedToken = { fingerprint, token: t };
+          loginLatch = null;
+        }
+        log.info('auth.token_minted', {});
+        return t;
+      },
+      (err: unknown) => {
+        if (
+          err instanceof AuthError &&
+          err.errorCode !== AUTH_HTML_500 &&
+          gen === authGeneration &&
+          mintsInFlight.get(fingerprint) === p
+        ) {
+          loginLatch = { fingerprint, until: Date.now() + LOGIN_LATCH_MS, statusCode: err.statusCode };
+          log.warn('auth.login_latched', { statusCode: err.statusCode });
+        }
+        throw err;
+      },
+    )
+    .finally(() => {
+      if (mintsInFlight.get(fingerprint) === p) mintsInFlight.delete(fingerprint);
+    });
+  mintsInFlight.set(fingerprint, p);
+  return p;
 }
 
 /**
- * Wipe the in-memory token cache and any pending in-flight mint.
- * Idempotent and safe to call when no token is cached.
+ * Evict `token` from the cache only if it is still the cached one. Leaves any
+ * in-flight mint alone, so concurrent auth failures share one re-mint and a
+ * late 401 carrying an old token never discards a fresher one.
+ */
+export function invalidateIfCurrent(token: string): void {
+  if (cachedToken?.token === token) cachedToken = null;
+}
+
+/**
+ * Hard reset: wipe the in-memory token cache, any pending in-flight mint and
+ * the failed-login latch, and bump the mint generation so a mint already in
+ * flight cannot repopulate the cache or set the latch. Idempotent and safe to
+ * call when no token is cached.
+ *
+ * Only for sign-out, env switch and not-contributor. A rejected token on a
+ * data request goes through `invalidateIfCurrent` instead.
  *
  * MUST be called from `app/modal.tsx`:
  * - after `clearAll()` in `handleSignOut` (so the cache does not survive sign-out)
@@ -91,7 +188,19 @@ export async function getAuthToken(
  */
 export function invalidateAuthToken(): void {
   cachedToken = null;
-  mintInFlight = null;
+  mintsInFlight.clear();
+  loginLatch = null;
+  authGeneration++;
+}
+
+/**
+ * durable-data 02-requests-store FR1 — read-only view of the generation that
+ * `invalidateAuthToken()` bumps. `fetchWorkDiary` puts it in its in-flight
+ * sharing key, so a call made after a hard reset never joins a request started
+ * before it.
+ */
+export function getAuthGeneration(): number {
+  return authGeneration;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +222,11 @@ function getHeader(response: Response, name: string): string {
   return h.get(name) ?? '';
 }
 
+/** HTTP >= 500 with `content-type: text/html` (a Tomcat or load-balancer error page). */
+function isHtml5xx(response: Response): boolean {
+  return response.status >= 500 && getHeader(response, 'content-type').includes('text/html');
+}
+
 /**
  * Spec 04 — recognize "auth-like" responses that should trigger a retry-with-fresh-token:
  * - HTTP 401 (explicit auth failure)
@@ -123,12 +237,20 @@ function getHeader(response: Response, name: string): string {
  * needs an intact body for envelope parsing.
  */
 function shouldRetryAuth(response: Response): boolean {
-  if (response.status === 401) return true;
-  if (response.status >= 500) {
-    const ct = getHeader(response, 'content-type');
-    if (ct.includes('text/html')) return true;
+  return response.status === 401 || isHtml5xx(response);
+}
+
+/**
+ * durable-data 01-auth-renewal FR3 — a retried response that is still HTML 5xx
+ * came back for a token the token endpoint has just issued, so it is a server
+ * outage, not a bad token. Throw a retryable ApiError without reading the body.
+ */
+function throwIfHtml5xxAfterRenewal(response: Response): void {
+  if (isHtml5xx(response)) {
+    throw new ApiError(response.status, 'Server error after token renewal', {
+      errorCode: HTML_5XX_AFTER_RENEWAL,
+    });
   }
-  return false;
 }
 
 // Spec 03 (error-envelope) + Spec 04 (auth-resilience):
@@ -169,14 +291,11 @@ async function handleStatus(response: Response): Promise<never> {
   // (statusCode is 401 to satisfy the existing 401|403 type; real status lives
   // in serverText). AUTH_HTML_500 errorCode lets downstream code distinguish
   // this from a real 401.
-  if (response.status >= 500) {
-    const ct = getHeader(response, 'content-type');
-    if (ct.includes('text/html')) {
-      throw new AuthError(401, undefined, {
-        errorCode: 'AUTH_HTML_500',
-        text: `Token rejected — HTML 5xx response (status ${response.status})`,
-      });
-    }
+  if (isHtml5xx(response)) {
+    throw new AuthError(401, undefined, {
+      errorCode: AUTH_HTML_500,
+      text: `Token rejected — HTML 5xx response (status ${response.status})`,
+    });
   }
 
   throw new ApiError(response.status, undefined, envelope);
@@ -193,10 +312,27 @@ async function handleStatus(response: Response): Promise<never> {
  * Unexpected end of input" on those; reading text first and returning `undefined`
  * for an empty body avoids it. Used by BOTH apiGet and apiPut so the read and
  * write paths can never drift apart again.
+ *
+ * 10-sdk-58-ios-27 FR3 (`expo/fetch` is `globalThis.fetch` from SDK 56):
+ * - The body is read exactly once, as text. expo/fetch rejects a second
+ *   `text()`/`json()` with `TypeError: … Response body is already used`.
+ * - A blank body (empty or whitespace-only, `text.trim() === ''`) returns `undefined`.
+ * - A non-blank body that isn't JSON throws `ApiError(status, 'Invalid JSON response
+ *   body')`, never a raw `SyntaxError`. This applies to apiPut too, even though the
+ *   approve/reject callers discard the result (src/api/approvals.ts): a 200 HTML page
+ *   (a captive portal or proxy) means the PUT may never have reached Crossover, so an
+ *   error is safer than a false success. After the error, `useApprovalItems` restores
+ *   the list and refetches in `finally` (src/hooks/useApprovalItems.ts:155-162), so the
+ *   user sees the real state before retrying.
  */
 async function parseBody<T>(response: Response): Promise<T> {
   const text = await response.text();
-  return (text ? JSON.parse(text) : undefined) as T;
+  if (text.trim() === '') return undefined as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new ApiError(response.status, 'Invalid JSON response body');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -204,17 +340,48 @@ async function parseBody<T>(response: Response): Promise<T> {
 // ---------------------------------------------------------------------------
 
 /**
- * Typed GET request. When `creds` is provided and the first response is
- * auth-like (401 or HTML 5xx), the cache is invalidated, a fresh token is
- * minted, and the request is retried exactly once. When `creds` is omitted,
- * behavior is identical to today: one fetch, no retry.
+ * Shared renew-and-retry for apiGet/apiPut. On an auth-like first response (401
+ * or HTML 5xx) the failed token is evicted with `invalidateIfCurrent`, with or
+ * without `creds`. When `creds` is provided, a fresh token is fetched via
+ * `getAuthToken` (concurrent failures share one mint), `auth.token_retried` is
+ * logged and `doFetch` runs exactly once more; a retried response that is still
+ * HTML 5xx throws `ApiError(HTML_5XX_AFTER_RENEWAL)`. Returns the last response.
+ *
+ * A request that was sent before a hard reset (`invalidateAuthToken()`) never
+ * renews: it throws `AuthResetError` instead of minting with the old account's
+ * credentials or the old environment.
+ */
+async function fetchWithRenewal(
+  doFetch: (t: string) => Promise<Response>,
+  token: string,
+  creds?: AuthCreds,
+): Promise<Response> {
+  const gen = authGeneration;
+  const response = await doFetch(token);
+  if (!shouldRetryAuth(response)) return response;
+  invalidateIfCurrent(token);
+  if (!creds) return response;
+  if (gen !== authGeneration) throw new AuthResetError();
+  const fresh = await getAuthToken(creds.username, creds.password, creds.useQA);
+  log.warn('auth.token_retried', { triggerStatusCode: response.status });
+  const retried = await doFetch(fresh);
+  throwIfHtml5xxAfterRenewal(retried);
+  return retried;
+}
+
+/**
+ * Typed GET request. Renewal via `fetchWithRenewal`: on an auth-like first
+ * response (401 or HTML 5xx) the failed token is always evicted. With `creds`,
+ * the request is retried exactly once on a fresh token, and a retried response
+ * that is still HTML 5xx throws `ApiError(HTML_5XX_AFTER_RENEWAL)`. Without
+ * `creds`: one fetch, no retry; the next `getAuthToken` mints fresh.
  */
 export async function apiGet<T>(
   path: string,
   params: Record<string, string>,
   token: string,
   useQA: boolean,
-  creds?: { username: string; password: string; useQA: boolean },
+  creds?: AuthCreds,
 ): Promise<T> {
   const url = buildUrl(getApiBase(useQA), path, params);
 
@@ -229,29 +396,24 @@ export async function apiGet<T>(
     }
   }
 
-  let response = await doFetch(token);
-
-  if (creds && shouldRetryAuth(response)) {
-    invalidateAuthToken();
-    const fresh = await getAuthToken(creds.username, creds.password, creds.useQA);
-    response = await doFetch(fresh);
-  }
-
+  const response = await fetchWithRenewal(doFetch, token, creds);
   if (!response.ok) await handleStatus(response);
   return parseBody<T>(response);
 }
 
 /**
- * Typed PUT request. Same retry contract as `apiGet`: opt-in via optional
- * `creds` arg. The retry re-serializes `body` so the second fetch carries
- * the same payload (Response.body is single-shot per request).
+ * Typed PUT request. Same renewal contract as `apiGet` (`fetchWithRenewal`): the
+ * failed token is evicted even without `creds`; only the renew-and-retry needs
+ * `creds`, and a retried response that is still HTML 5xx throws
+ * `ApiError(HTML_5XX_AFTER_RENEWAL)`. Both fetches send the same pre-serialized
+ * `body` string (a request body is single-shot, so each fetch gets its own).
  */
 export async function apiPut<T>(
   path: string,
   body: unknown,
   token: string,
   useQA: boolean,
-  creds?: { username: string; password: string; useQA: boolean },
+  creds?: AuthCreds,
 ): Promise<T> {
   const base = getApiBase(useQA);
   const serialized = JSON.stringify(body);
@@ -271,14 +433,7 @@ export async function apiPut<T>(
     }
   }
 
-  let response = await doFetch(token);
-
-  if (creds && shouldRetryAuth(response)) {
-    invalidateAuthToken();
-    const fresh = await getAuthToken(creds.username, creds.password, creds.useQA);
-    response = await doFetch(fresh);
-  }
-
+  const response = await fetchWithRenewal(doFetch, token, creds);
   if (!response.ok) await handleStatus(response);
   return parseBody<T>(response);
 }

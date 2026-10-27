@@ -149,13 +149,17 @@ describe('01-floating-pill-tab — FR2: Tab Items', () => {
     expect(source).toContain("alignItems: 'center'");
   });
 
-  it('SC2.8 — onPress handler calls navigation.navigate', () => {
-    expect(source).toContain('navigation.navigate');
+  // 10-sdk-58-ios-27 FR4: expo-router 58's tabBar props are { state, descriptors, emitter,
+  // navigateToTab, insets } (BottomTabView.js renderTabBar); there is no `navigation` prop.
+  it('SC2.8 — onPress handler calls navigateToTab(route.key) (expo-router 58 tab bar API)', () => {
+    expect(source).toContain('navigateToTab(route.key)');
+    expect(code).not.toContain('navigation.navigate');
   });
 
-  it('SC2.9 — onLongPress emits tabLongPress via navigation.emit', () => {
+  it('SC2.9 — onLongPress emits tabLongPress via emitter.emit (expo-router 58 tab bar API)', () => {
     expect(source).toContain('tabLongPress');
-    expect(source).toContain('navigation.emit');
+    expect(source).toContain('emitter.emit');
+    expect(code).not.toContain('navigation.emit');
   });
 });
 
@@ -307,9 +311,12 @@ describe('01-floating-pill-tab — Integration: forbidden imports', () => {
     expect(code).not.toContain('IconSymbol');
   });
 
-  it('imports BottomTabBarProps from @react-navigation/bottom-tabs', () => {
+  // 10-sdk-58-ios-27 FR4: expo-router 58 has no @react-navigation/* dependency; js-tabs
+  // re-exports BottomTabBarProps (build/layouts/Tabs.d.ts).
+  it('imports BottomTabBarProps from expo-router/js-tabs, not @react-navigation/bottom-tabs', () => {
     expect(source).toMatch(
-      /from\s*['"]@react-navigation\/bottom-tabs['"]/,
+      /import\s+type\s*\{[^}]*\bBottomTabBarProps\b[^}]*\}\s*from\s*['"]expo-router\/js-tabs['"]/,
     );
+    expect(source).not.toContain('@react-navigation/bottom-tabs');
   });
 });

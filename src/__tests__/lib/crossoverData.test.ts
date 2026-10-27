@@ -106,6 +106,10 @@ const MOCK_CREDENTIALS = {
   password: 'secret123',
 };
 
+// durable-data 01-auth-renewal FR4: MOCK_CREDENTIALS + MOCK_CONFIG.useQA, the renewal
+// creds every background request must carry.
+const CREDS_WITH_ENV = { ...MOCK_CREDENTIALS, useQA: false };
+
 const MOCK_TIMESHEET = {
   totalHours: 32.5,
   averageHoursPerDay: 6.5,
@@ -439,5 +443,55 @@ describe('FR7: fetchFreshData — approvalItems in snapshot', () => {
     // When both fail, approvalItems should exist but be empty
     expect(result).toHaveProperty('approvalItems');
     expect(result.approvalItems).toEqual([]);
+  });
+});
+
+// ─── DD1 FR4 (durable-data 01-auth-renewal): background requests carry creds ──
+// The push-triggered refresh runs with whatever token is cached; an expired one
+// must be renewed and retried, not turned into zeroed widget hours.
+
+describe('DD1 FR4: fetchFreshData — renewal creds on every request', () => {
+  it('fetchTimesheet and fetchPayments are called with (config, token, creds)', async () => {
+    await fetchFreshData();
+
+    expect(mockFetchTimesheet).toHaveBeenCalledWith(MOCK_CONFIG, 'token-abc123', CREDS_WITH_ENV);
+    expect(mockFetchPayments).toHaveBeenCalledWith(MOCK_CONFIG, 'token-abc123', CREDS_WITH_ENV);
+  });
+
+  it('manager: both pending fetches carry the same creds object as timesheet and payments', async () => {
+    await fetchFreshData();
+
+    expect(mockFetchPendingManual).toHaveBeenCalledWith('token-abc123', false, '2026-03-16', CREDS_WITH_ENV);
+    expect(mockFetchPendingOvertime).toHaveBeenCalledWith('token-abc123', false, '2026-03-16', CREDS_WITH_ENV);
+    const creds = mockFetchTimesheet.mock.calls[0][2];
+    expect(mockFetchPayments.mock.calls[0][2]).toBe(creds);
+    expect(mockFetchPendingManual.mock.calls[0][3]).toBe(creds);
+    expect(mockFetchPendingOvertime.mock.calls[0][3]).toBe(creds);
+  });
+
+  it('QA config: the creds carry useQA true', async () => {
+    const qaConfig = { ...MOCK_CONFIG, useQA: true };
+    mockLoadConfig.mockResolvedValue(qaConfig);
+
+    await fetchFreshData();
+
+    const qaCreds = { ...MOCK_CREDENTIALS, useQA: true };
+    expect(mockFetchTimesheet).toHaveBeenCalledWith(qaConfig, 'token-abc123', qaCreds);
+    expect(mockFetchPayments).toHaveBeenCalledWith(qaConfig, 'token-abc123', qaCreds);
+    expect(mockFetchPendingManual).toHaveBeenCalledWith('token-abc123', true, '2026-03-16', qaCreds);
+    expect(mockFetchPendingOvertime).toHaveBeenCalledWith('token-abc123', true, '2026-03-16', qaCreds);
+  });
+
+  // Preserved: fetchWorkDiary keeps its (assignmentId, date, credentials, useQA)
+  // signature and builds the creds itself.
+  it('fetchWorkDiary still receives the stored credentials unchanged', async () => {
+    await fetchFreshData();
+
+    expect(mockFetchWorkDiary).toHaveBeenCalledWith(
+      MOCK_CONFIG.assignmentId,
+      expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      MOCK_CREDENTIALS,
+      false,
+    );
   });
 });

@@ -2,8 +2,12 @@
 // Pure functions for reading, writing, and merging the weekly_history_v2 AsyncStorage store.
 // Two hooks write to this store independently (useEarningsHistory, useAIData).
 // One hook reads it (useWeeklyHistory).
+//
+// durable-data 03-keep-last-good FR4: writers read through readWeeklyHistoryForWrite, which
+// returns null when the store cannot be read, and skip the save. Readers keep loadWeeklyHistory.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { log } from './log';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -104,6 +108,31 @@ export function mergeWeeklySnapshot(
     .slice(-WEEKLY_HISTORY_MAX);
 }
 
+// ─── readWeeklyHistoryForWrite ────────────────────────────────────────────────
+
+/**
+ * Strict read for writers (durable-data 03 FR4). Returns null only when
+ * AsyncStorage.getItem throws, so the caller skips its save rather than replacing
+ * every stored week with its one week. Otherwise as loadWeeklyHistory: [] on missing
+ * key, invalid JSON or non-array value. Never throws.
+ */
+export async function readWeeklyHistoryForWrite(): Promise<WeeklySnapshot[] | null> {
+  let raw: string | null;
+  try {
+    raw = await AsyncStorage.getItem(WEEKLY_HISTORY_KEY);
+  } catch {
+    log.warn('history.read_failed', {});
+    return null;
+  }
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as WeeklySnapshot[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 // ─── loadWeeklyHistory ────────────────────────────────────────────────────────
 
 /**
@@ -112,15 +141,7 @@ export function mergeWeeklySnapshot(
  * Never throws.
  */
 export async function loadWeeklyHistory(): Promise<WeeklySnapshot[]> {
-  try {
-    const raw = await AsyncStorage.getItem(WEEKLY_HISTORY_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed as WeeklySnapshot[];
-  } catch {
-    return [];
-  }
+  return (await readWeeklyHistoryForWrite()) ?? [];
 }
 
 // ─── wipeAIHistory (dev only) ─────────────────────────────────────────────────
@@ -128,9 +149,11 @@ export async function loadWeeklyHistory(): Promise<WeeklySnapshot[]> {
 /**
  * Zeroes out aiPct and brainliftHours on every stored snapshot.
  * Preserves earnings and hours. Call once to demo the backfill animation.
+ * Writes nothing when the store cannot be read.
  */
 export async function wipeAIHistory(): Promise<void> {
-  const history = await loadWeeklyHistory();
+  const history = await readWeeklyHistoryForWrite();
+  if (!history) return;
   const wiped = history.map(s => ({ ...s, aiPct: 0, brainliftHours: 0 }));
   await saveWeeklyHistory(wiped);
 }

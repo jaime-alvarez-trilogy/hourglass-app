@@ -24,6 +24,9 @@ export interface SecondBrainDeepDive {
 // GET /api/timetracking/workdiaries?assignmentId={id}&date=YYYY-MM-DD
 // Each slot represents 10 minutes of tracked time.
 export interface WorkDiarySlot {
+  // ← API: the slot id. A manual slot's id is a timecardId: a pending manual request's
+  // timecardIds are its slots' ids (live QA, 2026-10-27; src/lib/manualOwnership.ts).
+  id?: number;
   tags: string[];
   autoTracker: boolean;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
@@ -53,8 +56,9 @@ export interface RawTeam {
 }
 
 // FR1 (01-team-roster-api): One team-assignment row returned by
-// GET /api/v2/teams/assignments?teamId={id}&status=ACTIVE (Spring `content`
-// envelope, or a bare array as a defensive fallback — see src/api/team.ts).
+// GET /api/v2/teams/assignments?status=ACTIVE (every assignment the caller
+// manages; &teamId={id} for one team), in a paged Spring `content` envelope,
+// or a bare array as a defensive fallback — see src/api/team.ts.
 export interface RawTeamAssignment {
   id: number;
   // Kept as string rather than an 'ACTIVE'-only literal because the client
@@ -65,6 +69,7 @@ export interface RawTeamAssignment {
     // Login/profile identifier — NOT the same as `id` above. TeamMember's
     // candidateId is derived from `id`, not `userId`; see CLAUDE.md's
     // documented assignmentId/userId/candidateId gotcha before using this.
+    // Mapped to TeamMember.userId (the person id the approvals endpoints use).
     userId: number;
     printableName: string;
     photoUrl?: string;
@@ -80,11 +85,17 @@ export interface RawTeamAssignment {
 }
 
 // FR1 (01-team-roster-api): App-facing roster row normalized from
-// RawTeamAssignment by fetchTeamRoster (src/api/team.ts). All identifiers
-// are stringified at the transport boundary.
+// RawTeamAssignment by fetchManagedAssignments / fetchTeamRoster
+// (src/api/team.ts). All identifiers are stringified at the transport boundary.
 export interface TeamMember {
   assignmentId: string;
   candidateId: string;
+  // Auto-approve: candidate.userId (the person id), or null when the row omits
+  // it. The overtime request's candidate.userId is this id, not candidateId
+  // (the avatar id). The pending-manual response's top-level userId is neither
+  // (live QA, 2026-10-27: an id no roster carries); manual requests are matched
+  // by work-diary proof instead (src/lib/manualOwnership.ts).
+  userId: string | null;
   managerId: string;
   teamId: string;
   teamName: string;

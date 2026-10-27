@@ -1,17 +1,28 @@
 // Tests: weeklyHistory pure functions — 06-overview-history FR1
 // Covers: mergeWeeklySnapshot, loadWeeklyHistory, saveWeeklyHistory, exported constants.
+// durable-data 03-keep-last-good FR4 (DD3.25-DD3.27): readWeeklyHistoryForWrite (the strict
+// reader the writers use), loadWeeklyHistory delegating to it, and wipeAIHistory skipping
+// the write when the store cannot be read. ../log is mocked to observe the read-failure trace.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   mergeWeeklySnapshot,
   loadWeeklyHistory,
+  readWeeklyHistoryForWrite,
   saveWeeklyHistory,
+  wipeAIHistory,
   WEEKLY_HISTORY_KEY,
   WEEKLY_HISTORY_MAX,
 } from '../weeklyHistory';
 import type { WeeklySnapshot } from '../weeklyHistory';
+import { log } from '../log';
+
+jest.mock('../log', () => ({
+  log: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+}));
 
 const MockAsyncStorage = AsyncStorage as jest.Mocked<typeof AsyncStorage> & { _reset: () => void };
+const mockWarn = log.warn as jest.Mock;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -253,6 +264,105 @@ describe('loadWeeklyHistory and saveWeeklyHistory', () => {
     it('saveWeeklyHistory propagates AsyncStorage errors', async () => {
       MockAsyncStorage.setItem.mockRejectedValueOnce(new Error('disk full'));
       await expect(saveWeeklyHistory([makeSnapshot('2026-03-09')])).rejects.toThrow('disk full');
+    });
+  });
+});
+
+// ─── durable-data 03 FR4: a read failure is never saved over ──────────────────
+
+describe('durable-data 03 FR4: readWeeklyHistoryForWrite and the strict-read writers', () => {
+  /** A stored history the device already holds (the last good weeks). */
+  const STORED: WeeklySnapshot[] = [
+    makeSnapshot('2026-09-28', { overtime: 2, dailyHours: [8, 8, 8, 8, 8, 0, 0] }),
+    makeSnapshot('2026-10-05', { aiPct: 81, brainliftHours: 6.5 }),
+  ];
+
+  /** Seeds weekly_history_v2 and returns the raw stored string. */
+  async function seedStored(): Promise<string> {
+    const raw = JSON.stringify(STORED);
+    await AsyncStorage.setItem(WEEKLY_HISTORY_KEY, raw);
+    MockAsyncStorage.setItem.mockClear();
+    return raw;
+  }
+
+  const historyWrites = () =>
+    MockAsyncStorage.setItem.mock.calls.filter(([key]) => key === WEEKLY_HISTORY_KEY);
+
+  beforeEach(() => {
+    // _reset() only clears calls: drop any unconsumed ...Once value as well, so one case's
+    // queued rejection can never reach the next case.
+    MockAsyncStorage.getItem.mockReset();
+    MockAsyncStorage._reset();
+    mockWarn.mockClear();
+  });
+
+  describe('DD3.25 — readWeeklyHistoryForWrite', () => {
+    it('DD3.25 — round trip: returns the stored array', async () => {
+      await seedStored();
+      await expect(readWeeklyHistoryForWrite()).resolves.toEqual(STORED);
+      expect(mockWarn).not.toHaveBeenCalled();
+    });
+
+    it('DD3.25 — a missing key → [] (an empty history, safe to write)', async () => {
+      await expect(readWeeklyHistoryForWrite()).resolves.toEqual([]);
+      expect(mockWarn).not.toHaveBeenCalled();
+    });
+
+    it('DD3.25 — corrupt JSON → [] (already lost, so writers may overwrite it)', async () => {
+      MockAsyncStorage.getItem.mockResolvedValueOnce('not valid json {{{');
+      await expect(readWeeklyHistoryForWrite()).resolves.toEqual([]);
+      expect(mockWarn).not.toHaveBeenCalled();
+    });
+
+    it('DD3.25 — non-array JSON (object, null) → []', async () => {
+      MockAsyncStorage.getItem.mockResolvedValueOnce(JSON.stringify({ foo: 'bar' }));
+      await expect(readWeeklyHistoryForWrite()).resolves.toEqual([]);
+      MockAsyncStorage.getItem.mockResolvedValueOnce(JSON.stringify(null));
+      await expect(readWeeklyHistoryForWrite()).resolves.toEqual([]);
+      expect(mockWarn).not.toHaveBeenCalled();
+    });
+
+    it('DD3.25 — getItem rejects → null, with one history.read_failed warn and no error text', async () => {
+      MockAsyncStorage.getItem.mockRejectedValueOnce(new Error('SQLITE_IOERR manifest.json'));
+
+      await expect(readWeeklyHistoryForWrite()).resolves.toBeNull();
+
+      expect(MockAsyncStorage.getItem).toHaveBeenCalledWith(WEEKLY_HISTORY_KEY);
+      expect(mockWarn).toHaveBeenCalledTimes(1);
+      expect(mockWarn).toHaveBeenCalledWith('history.read_failed', {});
+      expect(JSON.stringify(mockWarn.mock.calls)).not.toContain('SQLITE');
+    });
+  });
+
+  describe('DD3.26 — loadWeeklyHistory keeps its never-throws contract', () => {
+    it('DD3.26 — getItem rejects → [] (readers still render an empty history), with the strict reader\'s single trace', async () => {
+      MockAsyncStorage.getItem.mockRejectedValueOnce(new Error('SQLITE_IOERR'));
+      await expect(loadWeeklyHistory()).resolves.toEqual([]);
+      expect(mockWarn).toHaveBeenCalledTimes(1);
+      expect(mockWarn).toHaveBeenCalledWith('history.read_failed', {});
+    });
+  });
+
+  describe('DD3.27 — wipeAIHistory', () => {
+    it('DD3.27 — getItem rejects → resolves without writing; the stored history is untouched', async () => {
+      const raw = await seedStored();
+      MockAsyncStorage.getItem.mockRejectedValueOnce(new Error('SQLITE_IOERR'));
+
+      await expect(wipeAIHistory()).resolves.toBeUndefined();
+
+      expect(MockAsyncStorage.setItem).not.toHaveBeenCalled();
+      expect(await AsyncStorage.getItem(WEEKLY_HISTORY_KEY)).toBe(raw);
+    });
+
+    it('DD3.27 (preserved) — a readable history: zeroes aiPct and brainliftHours, keeps hours and earnings', async () => {
+      await seedStored();
+
+      await wipeAIHistory();
+
+      expect(historyWrites()).toHaveLength(1);
+      expect(JSON.parse(historyWrites()[0][1])).toEqual(
+        STORED.map(s => ({ ...s, aiPct: 0, brainliftHours: 0 })),
+      );
     });
   });
 });

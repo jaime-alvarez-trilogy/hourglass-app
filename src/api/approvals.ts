@@ -1,7 +1,10 @@
 // FR2: Approval API functions — wrapping confirmed Crossover endpoints
 // All endpoints documented in WS/memory/MEMORY.md
+// durable-data 01-auth-renewal FR4: each takes an optional trailing `creds` and
+// forwards it to apiGet/apiPut, so an expired token is renewed and retried once.
 
 import { apiGet, apiPut } from './client'
+import type { AuthCreds } from './authCreds'
 import type { RawManualResponse, RawOvertimeResponse } from '../lib/approvals'
 
 // ---------------------------------------------------------------------------
@@ -15,13 +18,15 @@ import type { RawManualResponse, RawOvertimeResponse } from '../lib/approvals'
 export async function fetchPendingManual(
   token: string,
   useQA: boolean,
-  weekStartDate: string
+  weekStartDate: string,
+  creds?: AuthCreds
 ): Promise<RawManualResponse[]> {
   return (await apiGet<RawManualResponse[]>(
     '/api/timetracking/workdiaries/manual/pending',
     { weekStartDate },
     token,
-    useQA
+    useQA,
+    creds
   )) ?? []
 }
 
@@ -32,13 +37,15 @@ export async function fetchPendingManual(
 export async function fetchPendingOvertime(
   token: string,
   useQA: boolean,
-  weekStartDate: string
+  weekStartDate: string,
+  creds?: AuthCreds
 ): Promise<RawOvertimeResponse[]> {
   return (await apiGet<RawOvertimeResponse[]>(
     '/api/overtime/request',
     { status: 'PENDING', weekStartDate },
     token,
-    useQA
+    useQA,
+    creds
   )) ?? []
 }
 
@@ -49,20 +56,26 @@ export async function fetchPendingOvertime(
 
 /**
  * PUT /api/timetracking/workdiaries/manual/approved
- * Body: { approverId, timecardIds, allowOvertime: false }
+ * Body: { approverId, timecardIds, allowOvertime }
  * approverId = config.userId (candidate avatar ID — NOT login userId)
+ * allowOvertime = false: an approval that would push the report past their weekly
+ * limit fails with CROS-9300 / CROS-9301 instead of granting overtime. It sits before
+ * `creds`, which stays last like every other wrapper's.
  */
 export async function approveManual(
   token: string,
   useQA: boolean,
   approverId: string,
-  timecardIds: number[]
+  timecardIds: number[],
+  allowOvertime: boolean = false,
+  creds?: AuthCreds
 ): Promise<void> {
   await apiPut<unknown>(
     '/api/timetracking/workdiaries/manual/approved',
-    { approverId, timecardIds, allowOvertime: false },
+    { approverId, timecardIds, allowOvertime },
     token,
-    useQA
+    useQA,
+    creds
   )
 }
 
@@ -75,13 +88,15 @@ export async function rejectManual(
   useQA: boolean,
   approverId: string,
   timecardIds: number[],
-  reason: string
+  reason: string,
+  creds?: AuthCreds
 ): Promise<void> {
   await apiPut<unknown>(
     '/api/timetracking/workdiaries/manual/rejected',
     { approverId, timecardIds, rejectionReason: reason },
     token,
-    useQA
+    useQA,
+    creds
   )
 }
 
@@ -92,13 +107,15 @@ export async function rejectManual(
 export async function approveOvertime(
   token: string,
   useQA: boolean,
-  overtimeId: number
+  overtimeId: number,
+  creds?: AuthCreds
 ): Promise<void> {
   await apiPut<unknown>(
     `/api/overtime/request/approval/${overtimeId}`,
     {},
     token,
-    useQA
+    useQA,
+    creds
   )
 }
 
@@ -110,12 +127,14 @@ export async function rejectOvertime(
   token: string,
   useQA: boolean,
   overtimeId: number,
-  memo: string
+  memo: string,
+  creds?: AuthCreds
 ): Promise<void> {
   await apiPut<unknown>(
     `/api/overtime/request/rejection/${overtimeId}`,
     { memo },
     token,
-    useQA
+    useQA,
+    creds
   )
 }

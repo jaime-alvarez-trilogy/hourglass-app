@@ -2,10 +2,15 @@
 //
 // 3-zone layout:
 //   Zone 1 — Hero Panel (PanelGradient, MetricValue, StateBadge, sub-metrics)
-//   Zone 2 — Weekly Chart (Card, WeeklyBarChart, day labels)
+//   Zone 1.5 — Hours breakdown (WeekBreakdownCard; 1.2, from the hours overview)
+//   Zone 2 — Weekly Chart (Card, WeeklyBarChart, DayByDayStrip: manual / pending per day)
+//   Zone 2.2 — Pay days (PayDaysCard; 1.2, from /pay-days)
 //   Zone 2.5 — AI Trajectory compact card (AIConeChart, FR2 03-ai-tab-integration)
 //   Zone 3 — Earnings (Card, MetricValue, TrendSparkline)
 //   Footer  — UrgencyBanner (shown when urgency >= low)
+//
+// Zones 1.5 and 2.2 fold to their header on a tap (1.2): the flag is a device preference
+// kept by useCardCollapsed, default expanded.
 //
 // No StyleSheet. No hardcoded hex values.
 
@@ -30,6 +35,8 @@ import { useConfig } from '@/src/hooks/useConfig';
 import { useIsManager } from '@/src/hooks/useIsManager';
 import { useHoursData } from '@/src/hooks/useHoursData';
 import { useEarningsHistory } from '@/src/hooks/useEarningsHistory';
+import { usePayDays } from '@/src/hooks/usePayDays';
+import { useCardCollapsed } from '@/src/hooks/useCardCollapsed';
 import { useAIData } from '@/src/hooks/useAIData';
 import { useFocusKey } from '@/src/hooks/useFocusKey';
 import { useStaggeredEntry } from '@/src/hooks/useStaggeredEntry';
@@ -46,6 +53,9 @@ import { AnimatedPressable } from '@/src/components/AnimatedPressable';
 import PanelGradient from '@/src/components/PanelGradient';
 import MetricValue from '@/src/components/MetricValue';
 import WeeklyBarChart from '@/src/components/WeeklyBarChart';
+import DayByDayStrip from '@/src/components/DayByDayStrip';
+import WeekBreakdownCard from '@/src/components/WeekBreakdownCard';
+import PayDaysCard from '@/src/components/PayDaysCard';
 import TrendSparkline from '@/src/components/TrendSparkline';
 import AIConeChart from '@/src/components/AIConeChart';
 import { DayPatternChart } from '@/src/components/DayPatternChart';
@@ -140,6 +150,8 @@ function mapDailyToChartData(daily: DailyEntry[]): DailyHours[] {
       hours: entry?.hours ?? 0,
       isToday: entry?.isToday ?? false,
       isFuture: !entry,
+      manualHours: entry?.manualHours,
+      pendingHours: entry?.pendingHours,
     };
   });
 }
@@ -160,6 +172,10 @@ export default function HoursDashboard() {
   const { config } = useConfig();
   const { data, isLoading, isStale, cachedAt, error, refetch } = useHoursData();
   const { trend: earningsHistoryTrend } = useEarningsHistory();
+  const { data: payDays } = usePayDays(config);
+  // 1.2: the PAY WEEK / PAY DAYS cards fold to their header to bring the content below up
+  const payWeekCard = useCardCollapsed('payWeek');
+  const payDaysCard = useCardCollapsed('payDays');
 
   // Layout dimensions for chart, sparkline, and compact cone (measured via onLayout)
   const [chartDims, setChartDims] = useState({ width: 0, height: 0 });
@@ -174,7 +190,8 @@ export default function HoursDashboard() {
   const { items: approvalItems } = useApprovalItems();
   const isManager = useIsManager();
 
-  const weeklyLimit = config?.weeklyLimit ?? 40;
+  // The hours overview's limit wins when known (1.2); else the onboarding value
+  const weeklyLimit = data?.weeklyLimit ?? config?.weeklyLimit ?? 40;
 
   // AI Trajectory compact card (FR2 03-ai-tab-integration)
   const { data: aiData, previousWeekPercent } = useAIData();
@@ -425,6 +442,17 @@ export default function HoursDashboard() {
         </PanelGradient>
         </Animated.View>
 
+        {/* ── Zone 1.5: Hours breakdown (1.2, hours overview) ───────────── */}
+        {data?.breakdown && (
+          <Animated.View style={getEntryStyle(1)}>
+            <WeekBreakdownCard
+              breakdown={data.breakdown}
+              collapsed={payWeekCard.collapsed}
+              onToggle={payWeekCard.toggle}
+            />
+          </Animated.View>
+        )}
+
         {/* ── Deadline urgency banner — below hero, above chart ─────────── */}
         {urgencyLevel !== 'none' && data && (
           <UrgencyBanner timeRemaining={data.timeRemaining} />
@@ -476,19 +504,17 @@ export default function HoursDashboard() {
             </View>
           )}
 
-          {/* Day labels */}
-          <View className="flex-row mt-2">
-            {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
-              <Text
-                key={day}
-                className="flex-1 text-center text-textMuted text-xs font-sans"
-              >
-                {day}
-              </Text>
-            ))}
-          </View>
+          {/* Day labels + billable / manual / pending per day (1.2) */}
+          <DayByDayStrip days={dailyChartData} showLegend />
         </Card>
         </Animated.View>
+
+        {/* ── Zone 2.2: Pay days (1.2, /pay-days) ───────────────────────── */}
+        {payDays && payDays.cards.length > 0 && (
+          <Animated.View style={getEntryStyle(2)}>
+            <PayDaysCard payDays={payDays} collapsed={payDaysCard.collapsed} onToggle={payDaysCard.toggle} />
+          </Animated.View>
+        )}
 
         {/* ── Zone 2: Day Pattern card (04-home-integration) ──────────────── */}
         {showPatternChart && (

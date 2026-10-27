@@ -88,8 +88,8 @@ function makeManualItem(id: string, fullName: string, hours: string): ManualAppr
 }
 
 describe('FR5: useWidgetSync', () => {
-  it('calls updateWidgetData on first render when hoursData and config are non-null', () => {
-    renderHook(() =>
+  it('calls updateWidgetData on first render when hoursData and config are non-null', async () => {
+    await renderHook(() =>
       useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, 2, MOCK_CONFIG)
     );
 
@@ -105,24 +105,24 @@ describe('FR5: useWidgetSync', () => {
     );
   });
 
-  it('does NOT call updateWidgetData when hoursData is null', () => {
-    renderHook(() =>
+  it('does NOT call updateWidgetData when hoursData is null', async () => {
+    await renderHook(() =>
       useWidgetSync(null, MOCK_AI_DATA, false, 0, MOCK_CONFIG)
     );
 
     expect(mockUpdateWidgetData).not.toHaveBeenCalled();
   });
 
-  it('does NOT call updateWidgetData when config is null', () => {
-    renderHook(() =>
+  it('does NOT call updateWidgetData when config is null', async () => {
+    await renderHook(() =>
       useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, 0, null)
     );
 
     expect(mockUpdateWidgetData).not.toHaveBeenCalled();
   });
 
-  it('calls updateWidgetData again when hoursData changes (new reference)', () => {
-    const { rerender } = renderHook<void, { hoursData: typeof MOCK_HOURS_DATA }>(
+  it('calls updateWidgetData again when hoursData changes (new reference)', async () => {
+    const { rerender } = await renderHook<void, { hoursData: typeof MOCK_HOURS_DATA }>(
       ({ hoursData }) => useWidgetSync(hoursData, MOCK_AI_DATA, false, 0, MOCK_CONFIG),
       { initialProps: { hoursData: MOCK_HOURS_DATA } }
     );
@@ -130,13 +130,13 @@ describe('FR5: useWidgetSync', () => {
     expect(mockUpdateWidgetData).toHaveBeenCalledTimes(1);
 
     const updatedHoursData = { ...MOCK_HOURS_DATA, total: 38.0 };
-    rerender({ hoursData: updatedHoursData });
+    await rerender({ hoursData: updatedHoursData });
 
     expect(mockUpdateWidgetData).toHaveBeenCalledTimes(2);
   });
 
-  it('calls updateWidgetData again when pendingCount changes', () => {
-    const { rerender } = renderHook<void, { pendingCount: number }>(
+  it('calls updateWidgetData again when pendingCount changes', async () => {
+    const { rerender } = await renderHook<void, { pendingCount: number }>(
       ({ pendingCount }) =>
         useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, pendingCount, MOCK_CONFIG),
       { initialProps: { pendingCount: 0 } }
@@ -144,7 +144,7 @@ describe('FR5: useWidgetSync', () => {
 
     expect(mockUpdateWidgetData).toHaveBeenCalledTimes(1);
 
-    rerender({ pendingCount: 3 });
+    await rerender({ pendingCount: 3 });
 
     expect(mockUpdateWidgetData).toHaveBeenCalledTimes(2);
     expect(mockUpdateWidgetData).toHaveBeenLastCalledWith(
@@ -158,8 +158,8 @@ describe('FR5: useWidgetSync', () => {
     );
   });
 
-  it('passes aiData = null to updateWidgetData when aiData is null and aiIsLoading is false (settled)', () => {
-    renderHook(() =>
+  it('passes aiData = null to updateWidgetData when aiData is null and aiIsLoading is false (settled)', async () => {
+    await renderHook(() =>
       useWidgetSync(MOCK_HOURS_DATA, null, false, 0, MOCK_CONFIG)
     );
 
@@ -175,16 +175,16 @@ describe('FR5: useWidgetSync', () => {
     );
   });
 
-  it('does NOT call updateWidgetData when aiIsLoading=true and aiData=null (wait for AI to settle)', () => {
-    renderHook(() =>
+  it('does NOT call updateWidgetData when aiIsLoading=true and aiData=null (wait for AI to settle)', async () => {
+    await renderHook(() =>
       useWidgetSync(MOCK_HOURS_DATA, null, true, 0, MOCK_CONFIG)
     );
 
     expect(mockUpdateWidgetData).not.toHaveBeenCalled();
   });
 
-  it('calls updateWidgetData once aiIsLoading transitions false with aiData still null', () => {
-    const { rerender } = renderHook<void, { aiIsLoading: boolean }>(
+  it('calls updateWidgetData once aiIsLoading transitions false with aiData still null', async () => {
+    const { rerender } = await renderHook<void, { aiIsLoading: boolean }>(
       ({ aiIsLoading }) =>
         useWidgetSync(MOCK_HOURS_DATA, null, aiIsLoading, 0, MOCK_CONFIG),
       { initialProps: { aiIsLoading: true } }
@@ -192,7 +192,7 @@ describe('FR5: useWidgetSync', () => {
 
     expect(mockUpdateWidgetData).not.toHaveBeenCalled();
 
-    rerender({ aiIsLoading: false });
+    await rerender({ aiIsLoading: false });
 
     expect(mockUpdateWidgetData).toHaveBeenCalledTimes(1);
   });
@@ -202,12 +202,12 @@ describe('FR5: useWidgetSync', () => {
 
     const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
-    // renderHook should not throw even when updateWidgetData rejects
-    expect(() => {
+    // renderHook should not throw even when updateWidgetData rejects (RNTL 14: it resolves)
+    await expect(
       renderHook(() =>
         useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, 0, MOCK_CONFIG)
-      );
-    }).not.toThrow();
+      ),
+    ).resolves.toEqual(expect.objectContaining({ result: expect.anything() }));
 
     // Allow promise rejection to propagate and be caught
     await act(async () => {
@@ -219,8 +219,8 @@ describe('FR5: useWidgetSync', () => {
     consoleSpy.mockRestore();
   });
 
-  it('does not call updateWidgetData when both hoursData and config are null', () => {
-    renderHook(() =>
+  it('does not call updateWidgetData when both hoursData and config are null', async () => {
+    await renderHook(() =>
       useWidgetSync(null, null, false, 0, null)
     );
 
@@ -229,18 +229,18 @@ describe('FR5: useWidgetSync', () => {
 
   // ─── FR5 (08-widget-enhancements): new optional params ─────────────────────
 
-  it('4-arg call (no approvalItems/myRequests) still works — updateWidgetData called once', () => {
-    renderHook(() =>
+  it('4-arg call (no approvalItems/myRequests) still works — updateWidgetData called once', async () => {
+    await renderHook(() =>
       useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, 0, MOCK_CONFIG)
     );
     expect(mockUpdateWidgetData).toHaveBeenCalledTimes(1);
   });
 
-  it('passes approvalItems to updateWidgetData when provided', () => {
+  it('passes approvalItems to updateWidgetData when provided', async () => {
     const approvalItems = [
       makeManualItem('mt-1', 'Alice', '1.0'),
     ];
-    renderHook(() =>
+    await renderHook(() =>
       useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, 1, MOCK_CONFIG, approvalItems)
     );
     expect(mockUpdateWidgetData).toHaveBeenCalledWith(
@@ -254,11 +254,11 @@ describe('FR5: useWidgetSync', () => {
     );
   });
 
-  it('passes myRequests to updateWidgetData when provided', () => {
+  it('passes myRequests to updateWidgetData when provided', async () => {
     const myRequests: ManualRequestEntry[] = [
       { id: 'req-1', date: '2026-03-18', durationMinutes: 60, memo: 'Fix', status: 'PENDING', rejectionReason: null },
     ];
-    renderHook(() =>
+    await renderHook(() =>
       useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, 0, MOCK_CONFIG, [], myRequests)
     );
     expect(mockUpdateWidgetData).toHaveBeenCalledWith(
@@ -272,14 +272,14 @@ describe('FR5: useWidgetSync', () => {
     );
   });
 
-  it('re-fires updateWidgetData when approvalItems reference changes', () => {
+  it('re-fires updateWidgetData when approvalItems reference changes', async () => {
     const initialApprovals = [makeManualItem('mt-1', 'Alice', '1.0')];
     const updatedApprovals = [
       makeManualItem('mt-1', 'Alice', '1.0'),
       makeManualItem('mt-2', 'Bob', '2.0'),
     ];
 
-    const { rerender } = renderHook<void, { approvalItems: typeof initialApprovals }>(
+    const { rerender } = await renderHook<void, { approvalItems: typeof initialApprovals }>(
       ({ approvalItems }) =>
         useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, approvalItems.length, MOCK_CONFIG, approvalItems),
       { initialProps: { approvalItems: initialApprovals } }
@@ -287,7 +287,7 @@ describe('FR5: useWidgetSync', () => {
 
     expect(mockUpdateWidgetData).toHaveBeenCalledTimes(1);
 
-    rerender({ approvalItems: updatedApprovals });
+    await rerender({ approvalItems: updatedApprovals });
 
     expect(mockUpdateWidgetData).toHaveBeenCalledTimes(2);
   });
@@ -298,8 +298,8 @@ describe('FR5: useWidgetSync', () => {
 describe('FR6 (01-data-extensions): useWidgetSync prevWeekSnapshot param', () => {
   const MOCK_SNAPSHOT = { hours: 30.0, earnings: 1200 };
 
-  it('FR6: prevWeekSnapshot forwarded to bridge.updateWidgetData when provided', () => {
-    renderHook(() =>
+  it('FR6: prevWeekSnapshot forwarded to bridge.updateWidgetData when provided', async () => {
+    await renderHook(() =>
       useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, 0, MOCK_CONFIG, [], [], MOCK_SNAPSHOT)
     );
     expect(mockUpdateWidgetData).toHaveBeenCalledWith(
@@ -313,8 +313,8 @@ describe('FR6 (01-data-extensions): useWidgetSync prevWeekSnapshot param', () =>
     );
   });
 
-  it('FR6: null prevWeekSnapshot forwarded as null', () => {
-    renderHook(() =>
+  it('FR6: null prevWeekSnapshot forwarded as null', async () => {
+    await renderHook(() =>
       useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, 0, MOCK_CONFIG, [], [], null)
     );
     expect(mockUpdateWidgetData).toHaveBeenCalledWith(
@@ -328,21 +328,21 @@ describe('FR6 (01-data-extensions): useWidgetSync prevWeekSnapshot param', () =>
     );
   });
 
-  it('FR6: existing 5-arg callers still work (backward compat)', () => {
-    renderHook(() =>
+  it('FR6: existing 5-arg callers still work (backward compat)', async () => {
+    await renderHook(() =>
       useWidgetSync(MOCK_HOURS_DATA, MOCK_AI_DATA, false, 0, MOCK_CONFIG)
     );
     expect(mockUpdateWidgetData).toHaveBeenCalledTimes(1);
   });
 
-  it('FR6: prevWeekSnapshot NOT in useEffect deps — changing snapshot does NOT add extra calls vs dep change', () => {
+  it('FR6: prevWeekSnapshot NOT in useEffect deps — changing snapshot does NOT add extra calls vs dep change', async () => {
     const snap1 = { hours: 30.0, earnings: 1200 };
     const snap2 = { hours: 28.0, earnings: 1120 };
     // Use stable array references so approvalItems dep does NOT change between renders
     const stableApprovals: never[] = [];
     const stableRequests: never[] = [];
 
-    const { rerender } = renderHook<
+    const { rerender } = await renderHook<
       void,
       { snap: typeof snap1 | typeof snap2 }
     >(
@@ -357,7 +357,7 @@ describe('FR6 (01-data-extensions): useWidgetSync prevWeekSnapshot param', () =>
 
     // Change only the snapshot — should NOT add new calls beyond what mount produced
     mockUpdateWidgetData.mockClear();
-    rerender({ snap: snap2 });
+    await rerender({ snap: snap2 });
 
     // No additional calls — prevWeekSnapshot is NOT in deps
     expect(mockUpdateWidgetData).toHaveBeenCalledTimes(0);

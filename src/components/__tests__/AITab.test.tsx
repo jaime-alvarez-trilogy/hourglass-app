@@ -75,6 +75,7 @@ jest.mock('react-native-web/dist/exports/TextInput/index.js', () => {
 jest.mock('expo-router', () => ({
   useRouter: () => ({ replace: jest.fn() }),
   useFocusEffect: (cb: () => void) => { cb(); },
+  useIsFocused: () => true,
 }));
 
 jest.mock('@/src/hooks/useAppBreakdown', () => ({
@@ -159,16 +160,10 @@ jest.mock('@/src/hooks/useConfig', () => ({
   }),
 }));
 
-// useFocusKey — added by 03-ai-tab-integration (ai.tsx now calls useFocusKey for chartKey)
-// Also mock @react-navigation/native to avoid NavigationContainer requirement
+// useFocusKey — added by 03-ai-tab-integration (ai.tsx now calls useFocusKey for chartKey).
+// The expo-router mock above also stubs useIsFocused, so nothing needs a NavigationContainer.
 jest.mock('@/src/hooks/useFocusKey', () => ({
   useFocusKey: () => 0,
-}));
-
-jest.mock('@react-navigation/native', () => ({
-  useIsFocused: () => true,
-  useNavigation: () => ({ navigate: jest.fn(), replace: jest.fn(), push: jest.fn() }),
-  useRoute: () => ({ params: {} }),
 }));
 
 // AIConeChart — stub without Skia (03-ai-tab-integration adds cone chart to ai.tsx)

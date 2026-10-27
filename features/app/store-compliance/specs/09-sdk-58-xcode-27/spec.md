@@ -48,7 +48,7 @@ Local toolchain on 2026-10-19: macOS 27.0.1, Xcode 27.0 (27A266a), iOS SDK 27.0 
 
 4. **Pinning images for the `development` and `preview` profiles.** **Descoped.** These profiles keep `auto`, which resolves to the `sdk-58` alias at SDK 58. Only the store artifact needs a reproducible toolchain (Decision 2 in spec-research).
 
-5. **Replacing the deprecated `ImageBackground`** (`src/components/GlassCard.tsx:238`, `src/components/ApprovalCard.tsx:390`). **Descoped.** RN 0.88 deprecates it but doesn't remove it. Revisit when a removal is announced.
+5. **Replacing the deprecated `ImageBackground`.** **Done in spec 10** (its Out of Scope 11): the noise texture now draws with Skia (`src/components/NoiseShader.tsx`).
 
 6. **Android changes.** This covers expo-widgets 58's new Android implementation versus `react-native-android-widget`, and R8 becoming the default. **Descoped** under the FEATURE non-goal (no Android store listing). The iOS release doesn't run Android prebuild.
 

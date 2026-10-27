@@ -10,6 +10,7 @@
 //   - @shopify/react-native-skia — project-level __mocks__ auto-applied (RadialGradient, etc.)
 //   - AnimatedMeshBackground — stubbed as identifiable View (testID) to verify rendering
 //   - useConfig, useMyRequests, useApprovalItems — jest automocks
+//   - useRequestsBackfill — factory mock (durable-data 05 C16)
 //   - Other components (FadeInScreen, SkeletonLoader, etc.) — lightweight stubs
 
 import React from 'react';
@@ -37,6 +38,14 @@ jest.mock('@/src/components/AnimatedMeshBackground', () => {
 jest.mock('@/src/hooks/useConfig');
 jest.mock('@/src/hooks/useMyRequests');
 jest.mock('@/src/hooks/useApprovalItems');
+
+// durable-data 05 C16: factory form, so the real hook never loads (it needs a
+// QueryClientProvider these renders do not have, and would start the backfill's timer).
+jest.mock('@/src/hooks/useRequestsBackfill', () => ({ useRequestsBackfill: jest.fn() }));
+
+// 1.2 auto-approve entry row (manager branch): stubbed for the same reason, its hooks
+// (useAutoApproveSettings / useDirectReports) need a QueryClientProvider.
+jest.mock('@/src/components/AutoApproveEntryRow', () => ({ AutoApproveEntryRow: () => null }));
 
 jest.mock('@/src/hooks/useStaggeredEntry', () => ({
   useStaggeredEntry: () => ({
@@ -113,9 +122,23 @@ import ApprovalsScreen from '../approvals';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
+// The current week's Monday (local), so the entry lands in "This Week" whenever the
+// test runs (durable-data 04 C9: older entries sit behind the collapsed Older toggle).
+function getCurrentMondayString(): string {
+  const today = new Date();
+  const day = today.getDay();
+  const daysFromMonday = day === 0 ? 6 : day - 1;
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - daysFromMonday);
+  const y = monday.getFullYear();
+  const m = String(monday.getMonth() + 1).padStart(2, '0');
+  const d = String(monday.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 const MOCK_ENTRY = {
-  id: '2026-03-24|Fix deploy',
-  date: '2026-03-24',
+  id: `${getCurrentMondayString()}|Fix deploy`,
+  date: getCurrentMondayString(),
   durationMinutes: 30,
   memo: 'Fix deploy',
   status: 'PENDING' as const,

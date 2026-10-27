@@ -1,10 +1,16 @@
-/**
- * @jest-environment jsdom
- */
 // FR1-FR4, FR6-FR7: Auth screen rendering and interaction tests
+//
+// 10-sdk-58-ios-27 FR4 (Decision 4): rewritten for RNTL 14 onto host queries. RNTL 14 renders
+// through test-renderer, which keeps host elements only, so the removed legacy *ByType
+// queries (composite TouchableOpacity / TextInput / Text types) have no direct port:
+//   - text, placeholder and display-value queries find labels, inputs and messages;
+//   - testIDs exist only where nothing else fits: the GradientButton CTAs while loading (the
+//     label is replaced by a spinner) and the spinners themselves (no text or role);
+//   - every render, fireEvent and act is awaited (all async in RNTL 14).
+// RNTL 14 accepts only React Native's own host text names (Text/RCTText), so this suite runs
+// in the jest.config.js "ios" project (jest-expo/ios), not the react-native-web node project.
 import React from 'react';
-import { render, fireEvent } from '@testing-library/react-native';
-import { TextInput, TouchableOpacity, Text, ActivityIndicator } from 'react-native';
+import { render, fireEvent, screen, waitFor, within } from '@testing-library/react-native';
 import type { CrossoverConfig } from '../src/types/config';
 
 // --- Mocks (must come before screen imports) ---
@@ -103,24 +109,17 @@ function makeRouter() {
   return { push, replace };
 }
 
-/** Recursively collect all string leaves from a React element children tree */
-function collectText(children: unknown): string {
-  if (typeof children === 'string' || typeof children === 'number') {
-    return String(children);
-  }
-  if (Array.isArray(children)) {
-    return children.map(collectText).join('');
-  }
-  if (children && typeof children === 'object' && 'props' in (children as object)) {
-    return collectText((children as { props: { children?: unknown } }).props?.children);
-  }
-  return '';
-}
+/** Every host TextInput (its display value defaults to ''), via RNTL's display-value query. */
+const allTextInputs = () => screen.queryAllByDisplayValue(/.*/);
 
-/** Find a TouchableOpacity whose child text includes the given string */
-function findButton(touchables: Array<{ props: { children?: unknown; disabled?: boolean } }>, label: string) {
-  return touchables.find((t) => collectText(t.props.children).includes(label));
-}
+/**
+ * Host elements a press can land on. Every Touchable/Pressable renders a host View carrying
+ * the responder and click handlers; plain Views and Text don't.
+ */
+const pressableHosts = () =>
+  screen.container.queryAll(
+    (el) => typeof el.props.onResponderRelease === 'function' || typeof el.props.onClick === 'function',
+  );
 
 
 beforeEach(() => {
@@ -134,20 +133,18 @@ beforeEach(() => {
 // ============================================================
 
 describe('FR2: Welcome Screen', () => {
-  it('navigates to /(auth)/credentials on "Get Started" (SC2.4)', () => {
+  it('navigates to /(auth)/credentials on "Get Started" (SC2.4)', async () => {
     const { push } = makeRouter();
-    const { UNSAFE_getAllByType } = render(<WelcomeScreen />);
-    const getStartedBtn = UNSAFE_getAllByType(TouchableOpacity).find((t) =>
-      collectText(t.props.children).includes('Get Started')
-    );
-    expect(getStartedBtn).toBeDefined(); // guard: fail fast if button not found
-    fireEvent.press(getStartedBtn!);
+    await render(<WelcomeScreen />);
+    // Positive control for pressableHosts(), which the verifying screen asserts is empty.
+    expect(pressableHosts().length).toBeGreaterThanOrEqual(1);
+    await fireEvent.press(screen.getByText('Get Started'));
     expect(push).toHaveBeenCalledWith('/(auth)/credentials');
   });
 
-  it('does not show email/password/token input fields (SC2.5)', () => {
-    const { UNSAFE_queryAllByType } = render(<WelcomeScreen />);
-    expect(UNSAFE_queryAllByType(TextInput)).toHaveLength(0);
+  it('does not show email/password/token input fields (SC2.5)', async () => {
+    await render(<WelcomeScreen />);
+    expect(allTextInputs()).toHaveLength(0);
   });
 });
 
@@ -156,93 +153,74 @@ describe('FR2: Welcome Screen', () => {
 // ============================================================
 
 describe('FR3: Credentials Screen', () => {
-  it('email input has email-address keyboard and autoCapitalize none (SC3.1)', () => {
-    const { UNSAFE_getAllByType } = render(<CredentialsScreen />);
-    const inputs = UNSAFE_getAllByType(TextInput);
-    const email = inputs.find((i) => i.props.keyboardType === 'email-address');
-    expect(email).toBeDefined();
-    expect(email!.props.autoCapitalize).toBe('none');
+  it('email input has email-address keyboard and autoCapitalize none (SC3.1)', async () => {
+    await render(<CredentialsScreen />);
+    const email = screen.getByPlaceholderText('you@crossover.com');
+    expect(email.props.keyboardType).toBe('email-address');
+    expect(email.props.autoCapitalize).toBe('none');
   });
 
-  it('password input has secureTextEntry (SC3.1)', () => {
-    const { UNSAFE_getAllByType } = render(<CredentialsScreen />);
-    const inputs = UNSAFE_getAllByType(TextInput);
-    const password = inputs.find((i) => i.props.secureTextEntry);
-    expect(password).toBeDefined();
+  it('password input has secureTextEntry (SC3.1)', async () => {
+    await render(<CredentialsScreen />);
+    expect(screen.getByPlaceholderText('••••••••').props.secureTextEntry).toBe(true);
   });
 
-  it('empty fields — Sign In shows validation errors; submitCredentials not called (SC3.2)', () => {
+  it('empty fields — Sign In shows validation errors; submitCredentials not called (SC3.2)', async () => {
     const submitCredentials = jest.fn();
     mockUseOnboarding.mockReturnValue(makeSetupResult({ submitCredentials }));
-    const { UNSAFE_getAllByType } = render(<CredentialsScreen />);
-    const button = UNSAFE_getAllByType(TouchableOpacity).find((t) =>
-      collectText(t.props.children).includes('Sign In')
-    );
-    expect(button).toBeDefined(); // guard: fail fast if button not found
-    fireEvent.press(button!);
+    await render(<CredentialsScreen />);
+    // "Sign In" is both the title and the CTA label, so the CTA is found by its testID.
+    await fireEvent.press(screen.getByTestId('credentials-submit'));
     expect(submitCredentials).not.toHaveBeenCalled();
-    const texts = UNSAFE_getAllByType(Text).map((t) => String(t.props.children));
-    expect(texts.some((t) => t.toLowerCase().includes('required'))).toBe(true);
+    expect(screen.getAllByText(/required/i).length).toBeGreaterThanOrEqual(1);
   });
 
-  it('both fields filled → Sign In calls submitCredentials(email, password) (SC3.3)', () => {
+  it('both fields filled → Sign In calls submitCredentials(email, password) (SC3.3)', async () => {
     const submitCredentials = jest.fn().mockResolvedValue(undefined);
     mockUseOnboarding.mockReturnValue(makeSetupResult({ submitCredentials }));
-    const { UNSAFE_getAllByType } = render(<CredentialsScreen />);
-    const inputs = UNSAFE_getAllByType(TextInput);
-    const emailInput = inputs.find((i) => i.props.keyboardType === 'email-address');
-    const passwordInput = inputs.find((i) => i.props.secureTextEntry);
-    expect(emailInput).toBeDefined();
-    expect(passwordInput).toBeDefined();
-    fireEvent.changeText(emailInput!, 'user@test.com');
-    fireEvent.changeText(passwordInput!, 'pass123');
-    const button = UNSAFE_getAllByType(TouchableOpacity).find((t) =>
-      collectText(t.props.children).includes('Sign In')
-    );
-    expect(button).toBeDefined();
-    fireEvent.press(button!);
+    await render(<CredentialsScreen />);
+    await fireEvent.changeText(screen.getByPlaceholderText('you@crossover.com'), 'user@test.com');
+    await fireEvent.changeText(screen.getByPlaceholderText('••••••••'), 'pass123');
+    await fireEvent.press(screen.getByTestId('credentials-submit'));
     expect(submitCredentials).toHaveBeenCalledWith('user@test.com', 'pass123');
   });
 
-  it('submit button is disabled and shows spinner while isLoading (SC3.4)', () => {
+  it('submit button is disabled and shows spinner while isLoading (SC3.4)', async () => {
     mockUseOnboarding.mockReturnValue(makeSetupResult({ isLoading: true }));
-    const { UNSAFE_getAllByType, UNSAFE_queryAllByType } = render(<CredentialsScreen />);
+    await render(<CredentialsScreen />);
     // When loading, the CTA shows ActivityIndicator instead of button label text
-    const disabledBtn = UNSAFE_getAllByType(TouchableOpacity).find((t) => t.props.disabled === true);
-    expect(disabledBtn).toBeDefined(); // a disabled button must exist
-    // Verify spinner is rendered inside the disabled button (confirms loading state)
-    expect(UNSAFE_queryAllByType(ActivityIndicator).length).toBeGreaterThanOrEqual(1);
-    // The button's own children should contain the spinner, not "Sign In" text
-    const btnText = collectText(disabledBtn!.props.children);
-    expect(btnText).not.toContain('Sign In');
+    const button = screen.getByTestId('credentials-submit');
+    expect(button).toBeDisabled();
+    // The spinner is rendered inside the disabled button (confirms loading state)
+    expect(within(button).getByTestId('credentials-submit-spinner')).toBeOnTheScreen();
+    // The button's own children contain the spinner, not "Sign In" text
+    expect(within(button).queryByText('Sign In')).toBeNull();
   });
 
-  it('shows error string from hook when error is non-null (SC3.5)', () => {
+  it('shows error string from hook when error is non-null (SC3.5)', async () => {
     mockUseOnboarding.mockReturnValue(makeSetupResult({ error: 'Invalid email or password.' }));
-    const { UNSAFE_getAllByType } = render(<CredentialsScreen />);
-    const texts = UNSAFE_getAllByType(Text).map((t) => String(t.props.children));
-    expect(texts.some((t) => t.includes('Invalid email or password.'))).toBe(true);
+    await render(<CredentialsScreen />);
+    expect(screen.getByText('Invalid email or password.')).toBeOnTheScreen();
   });
 
-  it('renders sign-in form with email and password fields (SC2.1)', () => {
+  it('renders sign-in form with email and password fields (SC2.1)', async () => {
     // Environment toggle (Production/QA) is not yet implemented in credentials.tsx.
     // Test verifies the form renders with input fields.
-    const { UNSAFE_getAllByType } = render(<CredentialsScreen />);
-    const inputs = UNSAFE_getAllByType(TextInput);
-    expect(inputs.length).toBeGreaterThanOrEqual(2); // email + password
+    await render(<CredentialsScreen />);
+    expect(allTextInputs().length).toBeGreaterThanOrEqual(2); // email + password
   });
 
-  it('Sign In button is present and pressable (SC2.2)', () => {
+  it('Sign In button is present and pressable (SC2.2)', async () => {
     // Environment selection is not yet implemented; verify core form interaction works.
-    const { UNSAFE_getAllByType } = render(<CredentialsScreen />);
-    const touchables = UNSAFE_getAllByType(TouchableOpacity);
-    expect(touchables.length).toBeGreaterThan(0);
+    await render(<CredentialsScreen />);
+    expect(screen.getByTestId('credentials-submit')).toBeEnabled();
+    expect(pressableHosts().length).toBeGreaterThan(0);
   });
 
-  it('credentials screen renders without crash (SC2.2 — environment toggle not yet impl)', () => {
+  it('credentials screen renders without crash (SC2.2 — environment toggle not yet impl)', async () => {
     // The Production/QA environment toggle has not yet been added to credentials.tsx.
     // This test verifies the screen renders correctly without throwing.
-    expect(() => render(<CredentialsScreen />)).not.toThrow();
+    await expect(render(<CredentialsScreen />)).resolves.toBeDefined();
   });
 });
 
@@ -251,47 +229,46 @@ describe('FR3: Credentials Screen', () => {
 // ============================================================
 
 describe('FR4: Verifying Screen', () => {
-  it('renders ActivityIndicator and "Verifying your account…" (SC4.1)', () => {
-    const { UNSAFE_getAllByType } = render(<VerifyingScreen />);
-    expect(UNSAFE_getAllByType(ActivityIndicator)).toHaveLength(1);
-    const texts = UNSAFE_getAllByType(Text).map((t) => String(t.props.children));
-    expect(texts.some((t) => t.includes('Verifying'))).toBe(true);
+  it('renders ActivityIndicator and "Verifying your account…" (SC4.1)', async () => {
+    await render(<VerifyingScreen />);
+    expect(screen.getByTestId('verifying-spinner')).toBeOnTheScreen();
+    expect(screen.getByText(/Verifying/)).toBeOnTheScreen();
   });
 
-  it('renders no interactive controls (SC4.1)', () => {
-    const { UNSAFE_queryAllByType } = render(<VerifyingScreen />);
-    expect(UNSAFE_queryAllByType(TouchableOpacity)).toHaveLength(0);
-    expect(UNSAFE_queryAllByType(TextInput)).toHaveLength(0);
+  it('renders no interactive controls (SC4.1)', async () => {
+    await render(<VerifyingScreen />);
+    expect(pressableHosts()).toHaveLength(0);
+    expect(allTextInputs()).toHaveLength(0);
   });
 
-  it('navigates to /(auth)/success when step is "success" (SC4.3)', () => {
+  it('navigates to /(auth)/success when step is "success" (SC4.3)', async () => {
     const { replace } = makeRouter();
     mockUseOnboarding.mockReturnValue(makeSetupResult({ step: 'success' }));
-    render(<VerifyingScreen />);
+    await render(<VerifyingScreen />);
     expect(replace).toHaveBeenCalledWith('/(auth)/success');
   });
 
-  it('navigates to /(auth)/setup when step is "setup" (SC4.4)', () => {
+  it('navigates to /(auth)/setup when step is "setup" (SC4.4)', async () => {
     const { replace } = makeRouter();
     mockUseOnboarding.mockReturnValue(makeSetupResult({ step: 'setup' }));
-    render(<VerifyingScreen />);
+    await render(<VerifyingScreen />);
     expect(replace).toHaveBeenCalledWith('/(auth)/setup');
   });
 
-  it('navigates to /(auth)/credentials when step is "credentials" (SC4.5)', () => {
+  it('navigates to /(auth)/credentials when step is "credentials" (SC4.5)', async () => {
     const { replace } = makeRouter();
     mockUseOnboarding.mockReturnValue(makeSetupResult({ step: 'credentials' }));
-    render(<VerifyingScreen />);
+    await render(<VerifyingScreen />);
     expect(replace).toHaveBeenCalledWith('/(auth)/credentials');
   });
 
   // 05-onboarding-defense FR8
-  it('navigates to /(auth)/not-contributor when step is "not-contributor"', () => {
+  it('navigates to /(auth)/not-contributor when step is "not-contributor"', async () => {
     const { replace } = makeRouter();
     mockUseOnboarding.mockReturnValue(
       makeSetupResult({ step: 'not-contributor', nonContributorRoles: ['MANAGER', 'COMPANY_ADMIN'] }),
     );
-    render(<VerifyingScreen />);
+    await render(<VerifyingScreen />);
     expect(replace).toHaveBeenCalledWith('/(auth)/not-contributor');
   });
 });
@@ -301,60 +278,43 @@ describe('FR4: Verifying Screen', () => {
 // ============================================================
 
 describe('FR6: Setup Screen', () => {
-  it('renders numeric input with decimal-pad keyboard (SC6.2)', () => {
-    const { UNSAFE_getAllByType } = render(<SetupScreen />);
-    const input = UNSAFE_getAllByType(TextInput).find(
-      (i) => i.props.keyboardType === 'decimal-pad'
-    );
-    expect(input).toBeDefined();
+  it('renders numeric input with decimal-pad keyboard (SC6.2)', async () => {
+    await render(<SetupScreen />);
+    expect(screen.getByPlaceholderText('e.g. 50').props.keyboardType).toBe('decimal-pad');
   });
 
-  it('empty input — Continue shows validation error; submitRate not called (SC6.3)', () => {
+  it('empty input — Continue shows validation error; submitRate not called (SC6.3)', async () => {
     const submitRate = jest.fn();
     mockUseOnboarding.mockReturnValue(makeSetupResult({ submitRate }));
-    const { UNSAFE_getAllByType } = render(<SetupScreen />);
-    const button = UNSAFE_getAllByType(TouchableOpacity).find((t) =>
-      collectText(t.props.children).includes('Continue')
-    );
-    expect(button).toBeDefined();
-    fireEvent.press(button!);
+    await render(<SetupScreen />);
+    await fireEvent.press(screen.getByText('Continue'));
     expect(submitRate).not.toHaveBeenCalled();
   });
 
-  it('valid positive number — Continue calls submitRate(rate) (SC6.4)', () => {
+  it('valid positive number — Continue calls submitRate(rate) (SC6.4)', async () => {
     const submitRate = jest.fn().mockResolvedValue(undefined);
     mockUseOnboarding.mockReturnValue(makeSetupResult({ submitRate }));
-    const { UNSAFE_getAllByType } = render(<SetupScreen />);
-    const input = UNSAFE_getAllByType(TextInput).find(
-      (i) => i.props.keyboardType === 'decimal-pad'
-    );
-    expect(input).toBeDefined();
-    fireEvent.changeText(input!, '75');
-    const button = UNSAFE_getAllByType(TouchableOpacity).find((t) =>
-      collectText(t.props.children).includes('Continue')
-    );
-    expect(button).toBeDefined();
-    fireEvent.press(button!);
+    await render(<SetupScreen />);
+    await fireEvent.changeText(screen.getByPlaceholderText('e.g. 50'), '75');
+    await fireEvent.press(screen.getByText('Continue'));
     expect(submitRate).toHaveBeenCalledWith(75);
   });
 
-  it('submit button is disabled and shows spinner while isLoading (SC6.5)', () => {
+  it('submit button is disabled and shows spinner while isLoading (SC6.5)', async () => {
     mockUseOnboarding.mockReturnValue(makeSetupResult({ isLoading: true }));
-    const { UNSAFE_getAllByType, UNSAFE_queryAllByType } = render(<SetupScreen />);
+    await render(<SetupScreen />);
     // When loading, the CTA shows ActivityIndicator instead of "Continue" text
-    const disabledBtn = UNSAFE_getAllByType(TouchableOpacity).find((t) => t.props.disabled === true);
-    expect(disabledBtn).toBeDefined();
-    expect(UNSAFE_queryAllByType(ActivityIndicator).length).toBeGreaterThanOrEqual(1);
+    const button = screen.getByTestId('setup-continue');
+    expect(button).toBeDisabled();
+    expect(within(button).getByTestId('setup-continue-spinner')).toBeOnTheScreen();
     // "Continue" text should NOT appear during loading
-    const texts = UNSAFE_getAllByType(Text).map((t) => String(t.props.children));
-    expect(texts.some((t) => t === 'Continue')).toBe(false);
+    expect(screen.queryByText('Continue')).toBeNull();
   });
 
-  it('displays error string when error is non-null (SC6.6)', () => {
+  it('displays error string when error is non-null (SC6.6)', async () => {
     mockUseOnboarding.mockReturnValue(makeSetupResult({ error: 'Rate lookup failed.' }));
-    const { UNSAFE_getAllByType } = render(<SetupScreen />);
-    const texts = UNSAFE_getAllByType(Text).map((t) => String(t.props.children));
-    expect(texts.some((t) => t.includes('Rate lookup failed.'))).toBe(true);
+    await render(<SetupScreen />);
+    expect(screen.getByText('Rate lookup failed.')).toBeOnTheScreen();
   });
 });
 
@@ -363,40 +323,38 @@ describe('FR6: Setup Screen', () => {
 // ============================================================
 
 describe('FR7: Success Screen', () => {
-  it('displays fullName as primary heading (SC7.1)', () => {
+  it('displays fullName as primary heading (SC7.1)', async () => {
     mockUseOnboarding.mockReturnValue(makeSetupResult({
       pendingConfig: makeConfig({ fullName: 'Jane Doe', setupComplete: false }),
     }));
-    const { UNSAFE_getAllByType } = render(<SuccessScreen />);
-    const texts = UNSAFE_getAllByType(Text).map((t) => String(t.props.children));
-    expect(texts.some((t) => t === 'Jane Doe')).toBe(true);
+    await render(<SuccessScreen />);
+    expect(screen.getByText('Jane Doe')).toBeOnTheScreen();
   });
 
-  it('shows "Contributor" when isManager is false (SC7.2)', () => {
+  it('shows "Contributor" when isManager is false (SC7.2)', async () => {
     mockUseOnboarding.mockReturnValue(makeSetupResult({
       pendingConfig: makeConfig({ isManager: false, setupComplete: false }),
     }));
-    const { UNSAFE_getAllByType } = render(<SuccessScreen />);
-    const texts = UNSAFE_getAllByType(Text).map((t) => String(t.props.children));
-    expect(texts.some((t) => t === 'Contributor')).toBe(true);
+    await render(<SuccessScreen />);
+    expect(screen.getByText('Contributor')).toBeOnTheScreen();
+    expect(screen.queryByText('Manager')).toBeNull();
   });
 
-  it('shows "Manager" when isManager is true (SC7.2)', () => {
+  it('shows "Manager" when isManager is true (SC7.2)', async () => {
     mockUseOnboarding.mockReturnValue(makeSetupResult({
       pendingConfig: makeConfig({ isManager: true, setupComplete: false }),
     }));
-    const { UNSAFE_getAllByType } = render(<SuccessScreen />);
-    const texts = UNSAFE_getAllByType(Text).map((t) => String(t.props.children));
-    expect(texts.some((t) => t === 'Manager')).toBe(true);
+    await render(<SuccessScreen />);
+    expect(screen.getByText('Manager')).toBeOnTheScreen();
+    expect(screen.queryByText('Contributor')).toBeNull();
   });
 
-  it('displays hourly rate formatted as $N / hr (SC7.3)', () => {
+  it('displays hourly rate formatted as $N / hr (SC7.3)', async () => {
     mockUseOnboarding.mockReturnValue(makeSetupResult({
       pendingConfig: makeConfig({ hourlyRate: 75, setupComplete: false }),
     }));
-    const { UNSAFE_getAllByType } = render(<SuccessScreen />);
-    const texts = UNSAFE_getAllByType(Text).map((t) => String(t.props.children));
-    expect(texts.some((t) => t.includes('75') && t.includes('hr'))).toBe(true);
+    await render(<SuccessScreen />);
+    expect(screen.getByText('$75 / hr')).toBeOnTheScreen();
   });
 
   it('calls saveCredentials and saveConfig({ setupComplete: true }) on "Go to Dashboard" (SC7.4)', async () => {
@@ -406,24 +364,18 @@ describe('FR7: Success Screen', () => {
       pendingConfig: makeConfig({ setupComplete: false }),
       pendingCredentials: { username: 'user@test.com', password: 'pass' },
     }));
-    const { UNSAFE_getAllByType } = render(<SuccessScreen />);
-    const button = UNSAFE_getAllByType(TouchableOpacity).find((t) =>
-      collectText(t.props.children).includes('Dashboard')
-    );
-    expect(button).toBeDefined();
-    fireEvent.press(button!);
-    await new Promise((r) => setTimeout(r, 10));
-    expect(mockSaveCredentials).toHaveBeenCalledWith('user@test.com', 'pass');
-    expect(mockSaveConfig).toHaveBeenCalledWith(expect.objectContaining({ setupComplete: true }));
+    await render(<SuccessScreen />);
+    await fireEvent.press(screen.getByText('Go to Dashboard'));
+    await waitFor(() => {
+      expect(mockSaveCredentials).toHaveBeenCalledWith('user@test.com', 'pass');
+      expect(mockSaveConfig).toHaveBeenCalledWith(expect.objectContaining({ setupComplete: true }));
+    });
   });
 
-  it('Dashboard button exists and is not disabled initially (SC7.7)', () => {
-    const { UNSAFE_getAllByType } = render(<SuccessScreen />);
-    const button = UNSAFE_getAllByType(TouchableOpacity).find((t) =>
-      collectText(t.props.children).includes('Dashboard')
-    );
-    expect(button).toBeDefined(); // guard: button must exist
-    expect(button!.props.disabled).not.toBe(true);
+  it('Dashboard button exists and is not disabled initially (SC7.7)', async () => {
+    await render(<SuccessScreen />);
+    // getByText guards existence; toBeEnabled checks the label and every ancestor (the touchable).
+    expect(screen.getByText('Go to Dashboard')).toBeEnabled();
   });
 
   it('shows error message when storage write fails (SC7.5)', async () => {
@@ -433,16 +385,10 @@ describe('FR7: Success Screen', () => {
       pendingConfig: makeConfig({ setupComplete: false }),
       pendingCredentials: { username: 'user@test.com', password: 'pass' },
     }));
-    const { UNSAFE_getAllByType } = render(<SuccessScreen />);
-    const button = UNSAFE_getAllByType(TouchableOpacity).find((t) =>
-      collectText(t.props.children).includes('Dashboard')
-    );
-    expect(button).toBeDefined(); // guard: fail fast if button not found
-    fireEvent.press(button!);
-    await new Promise((r) => setTimeout(r, 20));
-    const allText = UNSAFE_getAllByType(Text).map((t) => String(t.props.children)).join(' ');
+    await render(<SuccessScreen />);
+    await fireEvent.press(screen.getByText('Go to Dashboard'));
     // Must show the actual error message from the failed SecureStore write
-    expect(allText).toContain('SecureStore failed');
+    expect(await screen.findByText(/SecureStore failed/)).toBeOnTheScreen();
   });
 });
 
@@ -460,72 +406,58 @@ describe('05-onboarding-defense FR7: Not-Contributor Screen', () => {
     mockInvalidateAuthToken.mockReset();
   });
 
-  it('renders the detected roles when nonContributorRoles is populated', () => {
+  it('renders the detected roles when nonContributorRoles is populated', async () => {
     mockUseOnboarding.mockReturnValue(
       makeSetupResult({
         step: 'not-contributor',
         nonContributorRoles: ['MANAGER', 'COMPANY_ADMIN'],
       }),
     );
-    const { UNSAFE_getAllByType } = render(<NotContributorScreen />);
-    const allText = UNSAFE_getAllByType(Text).map((t) => collectText(t.props.children)).join(' ');
-    expect(allText).toContain('MANAGER');
-    expect(allText).toContain('COMPANY_ADMIN');
+    await render(<NotContributorScreen />);
+    // The roles render in their own (emphasised) Text, joined with ", ".
+    expect(screen.getByText('MANAGER, COMPANY_ADMIN')).toBeOnTheScreen();
   });
 
-  it('renders "unknown" placeholder when nonContributorRoles is null', () => {
+  it('renders "unknown" placeholder when nonContributorRoles is null', async () => {
     mockUseOnboarding.mockReturnValue(
       makeSetupResult({ step: 'not-contributor', nonContributorRoles: null }),
     );
-    const { UNSAFE_getAllByType } = render(<NotContributorScreen />);
-    const allText = UNSAFE_getAllByType(Text).map((t) => collectText(t.props.children)).join(' ');
-    expect(allText).toContain('unknown');
+    await render(<NotContributorScreen />);
+    expect(screen.getByText('unknown')).toBeOnTheScreen();
   });
 
-  it('renders "unknown" placeholder when nonContributorRoles is []', () => {
+  it('renders "unknown" placeholder when nonContributorRoles is []', async () => {
     mockUseOnboarding.mockReturnValue(
       makeSetupResult({ step: 'not-contributor', nonContributorRoles: [] }),
     );
-    const { UNSAFE_getAllByType } = render(<NotContributorScreen />);
-    const allText = UNSAFE_getAllByType(Text).map((t) => collectText(t.props.children)).join(' ');
-    expect(allText).toContain('unknown');
+    await render(<NotContributorScreen />);
+    expect(screen.getByText('unknown')).toBeOnTheScreen();
   });
 
-  it('renders a Sign Out button', () => {
+  it('renders a Sign Out button', async () => {
     mockUseOnboarding.mockReturnValue(
       makeSetupResult({ step: 'not-contributor', nonContributorRoles: ['MANAGER'] }),
     );
-    const { UNSAFE_getAllByType } = render(<NotContributorScreen />);
-    const button = UNSAFE_getAllByType(TouchableOpacity).find((t) =>
-      collectText(t.props.children).toLowerCase().includes('sign out'),
-    );
-    expect(button).toBeDefined();
+    await render(<NotContributorScreen />);
+    expect(screen.getByText(/sign out/i)).toBeEnabled();
   });
 
   it('pressing Sign Out calls clearAll()', async () => {
     mockUseOnboarding.mockReturnValue(
       makeSetupResult({ step: 'not-contributor', nonContributorRoles: ['MANAGER'] }),
     );
-    const { UNSAFE_getAllByType } = render(<NotContributorScreen />);
-    const button = UNSAFE_getAllByType(TouchableOpacity).find((t) =>
-      collectText(t.props.children).toLowerCase().includes('sign out'),
-    );
-    fireEvent.press(button!);
-    await new Promise((r) => setTimeout(r, 20));
-    expect(mockClearAll).toHaveBeenCalled();
+    await render(<NotContributorScreen />);
+    await fireEvent.press(screen.getByText(/sign out/i));
+    await waitFor(() => expect(mockClearAll).toHaveBeenCalled());
   });
 
   it('pressing Sign Out calls invalidateAuthToken()', async () => {
     mockUseOnboarding.mockReturnValue(
       makeSetupResult({ step: 'not-contributor', nonContributorRoles: ['MANAGER'] }),
     );
-    const { UNSAFE_getAllByType } = render(<NotContributorScreen />);
-    const button = UNSAFE_getAllByType(TouchableOpacity).find((t) =>
-      collectText(t.props.children).toLowerCase().includes('sign out'),
-    );
-    fireEvent.press(button!);
-    await new Promise((r) => setTimeout(r, 20));
-    expect(mockInvalidateAuthToken).toHaveBeenCalled();
+    await render(<NotContributorScreen />);
+    await fireEvent.press(screen.getByText(/sign out/i));
+    await waitFor(() => expect(mockInvalidateAuthToken).toHaveBeenCalled());
   });
 
   it('pressing Sign Out navigates to /(auth)/welcome', async () => {
@@ -533,12 +465,27 @@ describe('05-onboarding-defense FR7: Not-Contributor Screen', () => {
     mockUseOnboarding.mockReturnValue(
       makeSetupResult({ step: 'not-contributor', nonContributorRoles: ['MANAGER'] }),
     );
-    const { UNSAFE_getAllByType } = render(<NotContributorScreen />);
-    const button = UNSAFE_getAllByType(TouchableOpacity).find((t) =>
-      collectText(t.props.children).toLowerCase().includes('sign out'),
-    );
-    fireEvent.press(button!);
-    await new Promise((r) => setTimeout(r, 20));
-    expect(replace).toHaveBeenCalledWith('/(auth)/welcome');
+    await render(<NotContributorScreen />);
+    await fireEvent.press(screen.getByText(/sign out/i));
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/(auth)/welcome'));
+  });
+
+  // Final review 2026-10-21: expo-secure-store 58 can reject the credential delete, and a
+  // clearAll rejection used to skip the redirect, leaving the user on this screen.
+  it('pressing Sign Out still invalidates the token and navigates to welcome when clearAll rejects', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      mockClearAll.mockRejectedValueOnce(new Error('KeyChainException: -25308'));
+      const { replace } = makeRouter();
+      mockUseOnboarding.mockReturnValue(
+        makeSetupResult({ step: 'not-contributor', nonContributorRoles: ['MANAGER'] }),
+      );
+      await render(<NotContributorScreen />);
+      await fireEvent.press(screen.getByText(/sign out/i));
+      await waitFor(() => expect(replace).toHaveBeenCalledWith('/(auth)/welcome'));
+      expect(mockInvalidateAuthToken).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

@@ -84,6 +84,10 @@ export default function ModalScreen() {
           await unregisterPushToken().catch(() => {});
           try {
             await clearAll();
+          } catch (err) {
+            // Finish signing out even if storage refuses: the steps below clear the in-memory
+            // cache, the notifications, the widget timeline and the log (final review 2026-10-21).
+            console.warn('[settings] sign-out: clearAll failed; continuing', err);
           } finally {
             // Spec 04 FR7: wipe the in-memory auth-token cache even if clearAll throws.
             invalidateAuthToken();
@@ -131,6 +135,10 @@ export default function ModalScreen() {
               startTransition(() => {
                 // Update config immediately so the UI reflects the new environment.
                 queryClient.setQueryData(['config'], newConfig);
+                // durable-data 02: ['myRequests', assignmentId] carries no environment, so
+                // drop the old env's view outright; kept, it could be shown or carried
+                // forward under the new env if the first refresh fails.
+                queryClient.removeQueries({ queryKey: ['myRequests'] });
                 // Invalidate all other queries so they refetch from the new env.
                 // Using invalidateQueries (not resetQueries) so existing data stays
                 // visible during the refetch — resetQueries clears data immediately,
@@ -159,6 +167,8 @@ export default function ModalScreen() {
       startTransition(() => {
         queryClient.setQueryData(['config'], updated);
         queryClient.setQueryData(['approvals'], value ? [...MOCK_TEAM_ITEMS] : []);
+        // The 'dev-mock' view is hidden once the preview is off: rebuild it from the store
+        queryClient.invalidateQueries({ queryKey: ['myRequests'] });
       });
     } catch (e) {
       console.error('[settings] toggleDevManagerView failed:', e);

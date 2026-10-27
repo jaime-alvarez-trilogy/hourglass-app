@@ -17,7 +17,7 @@
 ### Web (GitHub Pages)
 - `site/index.html` (new)
 - `site/privacy-policy.html` (new — moved from repo root, text corrected)
-- `site/support.html` (new)
+- `site/support.html` (new; spec 10: "Requires iOS 16.4 or later")
 - `.github/workflows/pages.yml` (new)
 - `privacy-policy.html` (delete — superseded by `site/`)
 
@@ -28,14 +28,20 @@
 - `src/components/NativeWindSmoke.tsx` + its test (delete)
 
 ### Native config
-- `app.json` (modify — invalid keys, Face ID, background modes, privacy manifest, runtimeVersion, buildNumber, later expo-build-properties)
+- `app.json` (modify — invalid keys, Face ID, background modes, privacy manifest, runtimeVersion, buildNumber; spec 10: v1.2.0, widget background and widget privacy-manifest plugins)
+- `plugins/withHourglassWidgetBackground.js`, `plugins/withHourglassWidgetPrivacyManifest.js` (new — spec 10: widget `containerBackground` fallback; `PrivacyInfo.xcprivacy` for the `ExpoWidgetsTarget` extension)
 - `package.json` / `package-lock.json` (modify — dead deps, pins, scripts, SDK bumps)
 - `tsconfig.json` (modify — `types`)
-- `eas.json` (modify — later: pinned build image)
-- `TECH_STACK.md` (modify)
+- `eas.json` (modify — spec 10: `cli.version` ≥ 25.2.0, pinned production image `macos-tahoe-26.6-xcode-27.1`)
+- `TECH_STACK.md` (modify; spec 10: SDK 58 line)
+
+### Docs
+- `docs/RELEASING.md` (modify — spec 04 OTA runbook, spec 05 native release; spec 10: SDK 58 build steps, `runtime.version`, B2 hotfix lane, SDK upgrade)
+- `docs/ARCHITECTURE.md` (modify — spec 10: §5.7 UIKit scenes, §7.2 expo-widgets 58)
+- `README.md`, `CLAUDE.md` (modify — spec 10: SDK 58 / RN 0.88)
 
 ### CI
-- `.github/workflows/test.yml` (modify — typecheck + lint gates)
+- `.github/workflows/test.yml` (modify — typecheck + lint gates; spec 10: Node 22)
 
 ## Table of Contents
 
@@ -68,7 +74,7 @@ The 2026-09-22 compliance audit (134-agent workflow, `wf_c3720f0e-78a`) found no
 - Ship **build 18** (v1.1.0) through App Review before 2026-11-04 with every compliance gate closed.
 - From build 18 onward, OTA hotfixes actually reach installed users.
 - CI gates on tests, typecheck and lint, all green.
-- Reach Expo SDK 57 with scene lifecycle, then SDK 58 / Xcode 27, before April 2027.
+- Reach Expo SDK 58 (UIKit scene lifecycle) built on an Xcode 27 / iOS 27 SDK image, before April 2027: one direct 55 → 58 jump shipped as v1.2.0 (spec 10, superseding the two-step plan in specs 08 and 09).
 
 ### Non-Goals
 
@@ -87,7 +93,7 @@ The 2026-09-22 compliance audit (134-agent workflow, `wf_c3720f0e-78a`) found no
 4. **Clean native config**: `expo-doctor` passes its config-schema check. Info.plist declares only `remote-notification` in `UIBackgroundModes`, has no `NSFaceIDUsageDescription`, and ships a `PrivacyInfo.xcprivacy` that declares `1C8F.1`.
 5. **Working OTA lane**: `runtimeVersion` uses the `fingerprint` policy, so marketing-version bumps don't sever OTA. A baseline update published after release is verified to land on a store install.
 6. **Honest CI**: `npm test`, `npm run typecheck` and `npm run lint` all run on every PR and all pass.
-7. **iOS 27-ready**: Expo SDK 57 with `enableSceneSupport`, then SDK 58 built on an Xcode 27 EAS image.
+7. **iOS 27-ready**: Expo SDK 58, whose template generates the scene lifecycle, built on the pinned EAS image `macos-tahoe-26.6-xcode-27.1` (spec 10).
 
 ## System Architecture
 
@@ -115,9 +121,12 @@ eas update (production) → runtime = fingerprint(native deps) → matches build
 |---------|----------|------|
 | **Build 18 (v1.1.0)** — target submit ≤ 2026-10-31 | Specs 01, 02, 03, 04, 05 (+ 07's Buffer fix if merged) | Native build → TestFlight → App Review |
 | Baseline OTA | Proves the lane (spec 04 FR4) | `eas update` after build 18 is live |
-| Build 19 | Spec 06 (SDK 55 patch refresh) | Native build |
-| SDK 57 (v1.2.0) | Spec 08 | Native build, Dec 2026–Jan 2027 |
-| SDK 58 (v1.3.0) | Spec 09 | Native build, when Expo ships an Xcode 27 image; before April 2027 |
+| 1.1.x hotfixes (while 1.2.0 rolls out) | Fixes for build 18 users | `release/1.1` (from `aade79b`, tag `build-18`): OTA with `scripts/ota-publish.sh`, or a native rebuild on the `sdk-55` image; each fix cherry-picked forward (`docs/RELEASING.md` B2) |
+| **v1.2.0, build 19** | Spec 10: direct SDK 55 → 58 on the iOS 27 SDK, minimum iOS 16.4. Includes spec 06 FR1–FR4; spec 06 FR5 is superseded | Native build (EAS, `macos-tahoe-26.6-xcode-27.1`) → TestFlight → App Review on the user's go-ahead; before April 2027 |
+| After 1.2.0 is live | Baseline OTA for build 19 (spec 04 runbook A); merge `feat/sdk-58` into `main` (allowed once build 18's review is resolved and build 19 has passed the TestFlight smoke); retire `release/1.1` once 1.1.x adoption is negligible | `docs/RELEASING.md` A, Post-release, B2 |
+| ~~Build 19~~ | ~~Spec 06 (SDK 55 patch refresh)~~: FR1–FR4 ported into spec 10 FR1, FR5 superseded | — |
+| ~~SDK 57 (v1.2.0)~~ | ~~Spec 08~~: superseded by spec 10 | — |
+| ~~SDK 58 (v1.3.0)~~ | ~~Spec 09~~: superseded by spec 10 | — |
 
 Non-code steps (App Store Connect, key handling, repo hygiene) are in [OPS.md](OPS.md).
 
@@ -130,10 +139,11 @@ Non-code steps (App Store Connect, key handling, repo hygiene) are in [OPS.md](O
 | 2026-10-19 | [03-native-config-cleanup](specs/03-native-config-cleanup/spec.md) | app.json cleanup, drop background-fetch deps, privacy manifest |
 | 2026-10-19 | [04-ota-lane](specs/04-ota-lane/spec.md) | Fingerprint runtimeVersion + baseline-update verification |
 | 2026-10-19 | [05-release-build-18](specs/05-release-build-18/spec.md) | Build 18 bump, TestFlight smoke, submission runbook |
-| 2026-10-19 | [06-dependency-hygiene](specs/06-dependency-hygiene/spec.md) | Pin patched deps, harden patch-package, SDK 55 patch refresh |
+| 2026-10-19 | [06-dependency-hygiene](specs/06-dependency-hygiene/spec.md) | Pin patched deps, harden patch-package, SDK 55 patch refresh. FR1–FR4 ported into spec 10 FR1; **FR5 superseded by 10** |
 | 2026-10-19 | [07-ci-typecheck-lint](specs/07-ci-typecheck-lint/spec.md) | Fix Buffer bug, delete out-of-repo test, clear TS/lint, add CI gates |
-| 2026-10-19 | [08-expo-sdk-57-scenes](specs/08-expo-sdk-57-scenes/spec.md) | SDK 55→56→57 + UIKit scene lifecycle |
-| 2026-10-19 | [09-sdk-58-xcode-27](specs/09-sdk-58-xcode-27/spec.md) | SDK 58 on an Xcode 27 image (externally blocked) |
+| 2026-10-19 | [08-expo-sdk-57-scenes](specs/08-expo-sdk-57-scenes/spec.md) | **Superseded by 10.** SDK 55→56→57 + UIKit scene lifecycle |
+| 2026-10-19 | [09-sdk-58-xcode-27](specs/09-sdk-58-xcode-27/spec.md) | **Superseded by 10.** SDK 58 on an Xcode 27 image (externally blocked) |
+| 2026-10-20 | [10-sdk-58-ios-27](specs/10-sdk-58-ios-27/spec.md) | Direct SDK 55→58 upgrade, every dependency at its latest SDK 58-compatible version, on the iOS 27 SDK (`macos-tahoe-26.6-xcode-27.1`); v1.2.0 build 19 |
 
 ### Dependency Graph
 
@@ -144,7 +154,8 @@ Non-code steps (App Store Connect, key handling, repo hygiene) are in [OPS.md](O
 | 03-native-config-cleanup | 04, 05, 06 | - | M | build 18 |
 | 04-ota-lane | 05 | 03 | S | build 18 |
 | 05-release-build-18 | 06 | 01, 02, 03, 04 | S | build 18 |
-| 06-dependency-hygiene | 08 | 03, 05 | M | build 19 |
-| 07-ci-typecheck-lint | 08 | - | L | any (JS-only) |
-| 08-expo-sdk-57-scenes | 09 | 06, 07 | L | v1.2.0 |
-| 09-sdk-58-xcode-27 | - | 08 + Expo Xcode 27 image | M | v1.3.0 |
+| 06-dependency-hygiene | 10 | 03, 05 | M | FR1–FR4 ported into spec 10; FR5 superseded |
+| 07-ci-typecheck-lint | 10 | - | L | any (JS-only) |
+| 08-expo-sdk-57-scenes | - | - | - | superseded by 10 |
+| 09-sdk-58-xcode-27 | - | - | - | superseded by 10 |
+| 10-sdk-58-ios-27 | - | 03, 04, 05, 07 (merged); 06 FR1–FR4 (ported) | L | v1.2.0, build 19 |

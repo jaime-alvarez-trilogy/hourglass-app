@@ -6,8 +6,10 @@
 # Publishes the committed tree as an EAS Update on channel "production", but only if a finished
 # iOS production build already has this tree's fingerprint runtime, so the update has an audience.
 # Steps, in order; every refusal prints to stderr and exits 1 before the next step runs:
-#   1. arguments  2. clean tree  3. 40-hex fingerprint runtime  4. audience guard (eas build:list)
-#   5. version check (warning only)  6. --dry-run stops here  7. publish  8. report
+#   1. arguments  2. clean tree  3. 40-hex fingerprint runtime  4. audience guard: a build-<N>
+#   tag on origin whose Runtime: line matches (local builds, scripts/build-ios-local.sh), else
+#   eas build:list (EAS cloud builds 18-20)  5. version check (warning only)  6. --dry-run stops
+#   here  7. publish  8. report
 # Exit codes: 0 published or dry run OK; 1 refusal, or a runtime mismatch after publishing;
 # N when `eas update` itself exits N.
 #
@@ -78,35 +80,123 @@ if ! [[ "$RTV" =~ ^[0123456789abcdef]{40}$ ]]; then
 fi
 
 # --- 4. Audience guard ----------------------------------------------------------------------
-# Fails closed: if EAS can't be asked (offline, logged out), nothing is published.
-builds_json=$(eas build:list --platform ios --status finished --channel "$CHANNEL" \
-  --runtime-version "$RTV" --limit 1 --json --non-interactive) ||
-  die "Refusing to publish: \`eas build:list\` failed (output above), so the audience guard cannot run"
-# One line, "|"-separated, so a single `read` takes it even when trailing fields are empty.
-build_fields=$(printf '%s' "$builds_json" | node -e '
-  const builds = JSON.parse(require("fs").readFileSync(0, "utf8"));
-  if (!Array.isArray(builds)) {
-    console.error("expected a JSON array");
-    process.exit(1);
-  }
-  const b = builds[0] || {};
-  const field = (v) => (v == null ? "" : String(v).replace(/[|\r\n]/g, " "));
-  console.log([builds.length, b.id, b.runtimeVersion, b.appVersion, b.appBuildVersion].map(field).join("|"));
-') || die "Refusing to publish: \`eas build:list\` did not print a JSON array, so the audience guard cannot run"
-IFS='|' read -r build_count build_id build_rtv build_version build_number <<EOF
+# 4a. A build tag. A local build (scripts/build-ios-local.sh) has no EAS build record, so it tags
+# its commit build-<N> with an annotated tag whose message records the runtime. The tag counts
+# only once origin has the same tag object, and the runbook pushes it only after App Store
+# Connect lists the build as VALID (docs/RELEASING.md, Upload). Of several, the highest N wins.
+# This path can only accept: if origin can't be asked, it yields nothing and 4b decides.
+nl='
+'
+tab=$(printf '\t')
+tag_name=''
+tag_n=-1
+tag_version=''
+tag_build=''
+pending_tag=''
+pending_n=-1
+remote_state=unchecked
+remote_tags=''
+local_tags=$(git for-each-ref --format='%(objecttype) %(refname:strip=2) %(objectname)' 'refs/tags/build-*') ||
+  local_tags=''
+while read -r object_type name tag_object; do
+  n=${name#build-}
+  [[ "$n" =~ ^[0123456789]+$ ]] || continue
+  # A lightweight tag has no message, so it never qualifies.
+  [ "$object_type" = tag ] || continue
+  message=$(git for-each-ref --format='%(contents)' "refs/tags/$name") || continue
+  runtime_lines=0
+  runtime_line=''
+  version=''
+  build=''
+  while IFS= read -r line; do
+    case "$line" in
+      Runtime:*)
+        runtime_lines=$((runtime_lines + 1))
+        runtime_line=$line
+        ;;
+      'Version: '*) [ -n "$version" ] || version=${line#Version: } ;;
+      'Build: '*) [ -n "$build" ] || build=${line#Build: } ;;
+    esac
+  done <<EOF
+$message
+EOF
+  { [ "$runtime_lines" = 1 ] && [ "$runtime_line" = "Runtime: $RTV" ]; } || continue
+  # One ls-remote for all tags, and only once a local tag has this runtime.
+  if [ "$remote_state" = unchecked ]; then
+    if remote_tags=$(GIT_TERMINAL_PROMPT=0 git ls-remote --tags origin 'refs/tags/build-*' 2>/dev/null); then
+      remote_state=ok
+    else
+      remote_state=failed
+    fi
+  fi
+  on_origin=0
+  if [ "$remote_state" = ok ]; then
+    case "$nl$remote_tags$nl" in
+      *"$nl$tag_object${tab}refs/tags/$name$nl"*) on_origin=1 ;;
+    esac
+  fi
+  if [ "$on_origin" = 1 ]; then
+    if [ "$n" -gt "$tag_n" ]; then
+      tag_n=$n
+      tag_name=$name
+      tag_version=$version
+      tag_build=$build
+    fi
+  elif [ "$n" -gt "$pending_n" ]; then
+    pending_n=$n
+    pending_tag=$name
+  fi
+done <<EOF
+$local_tags
+EOF
+
+if [ -n "$tag_name" ]; then
+  build_label="tag $tag_name"
+  build_version=$tag_version
+  build_number=$tag_build
+else
+  # 4b. An EAS build record: EAS cloud builds 18-20, and the release/1.1 lane.
+  # Fails closed: if EAS can't be asked (offline, logged out), nothing is published.
+  builds_json=$(eas build:list --platform ios --status finished --channel "$CHANNEL" \
+    --runtime-version "$RTV" --limit 1 --json --non-interactive) ||
+    die "Refusing to publish: \`eas build:list\` failed (output above), so the audience guard cannot run"
+  # One line, "|"-separated, so a single `read` takes it even when trailing fields are empty.
+  build_fields=$(printf '%s' "$builds_json" | node -e '
+    const builds = JSON.parse(require("fs").readFileSync(0, "utf8"));
+    if (!Array.isArray(builds)) {
+      console.error("expected a JSON array");
+      process.exit(1);
+    }
+    const b = builds[0] || {};
+    // eas-cli >= 22 nests the runtime as runtime.version; eas-cli <= 21 has a top-level runtimeVersion.
+    const rtv = (b.runtime && b.runtime.version) ?? b.runtimeVersion;
+    const field = (v) => (v == null ? "" : String(v).replace(/[|\r\n]/g, " "));
+    console.log([builds.length, b.id, rtv, b.appVersion, b.appBuildVersion].map(field).join("|"));
+  ') || die "Refusing to publish: \`eas build:list\` did not print a JSON array, so the audience guard cannot run"
+  IFS='|' read -r build_count build_id build_rtv build_version build_number <<EOF
 $build_fields
 EOF
-if [ "$build_count" = 0 ]; then
-  die "Refusing to publish: no finished iOS build on channel \"$CHANNEL\" has runtime $RTV" \
-    "  Nobody would receive this update. Either:" \
-    "  - your node_modules differ from package-lock.json: run \`npm ci\` and retry, or" \
-    "  - the change is native: ship a new build instead (docs/RELEASING.md, section C)." \
-    "  To see which fingerprint source differs from the latest build:" \
-    "    eas fingerprint:compare --build-id <id> --environment production" \
-    "  (find <id> with: eas build:list --platform ios --channel $CHANNEL --limit 1)"
-fi
-if [ "$build_rtv" != "$RTV" ]; then
-  die "Refusing to publish: eas build:list returned build $build_id with runtime \"$build_rtv\", not $RTV"
+  if [ "$build_count" = 0 ]; then
+    printf '%s\n' "Refusing to publish: no finished iOS build on channel \"$CHANNEL\" has runtime $RTV" \
+      "  Nobody would receive this update. Either:" \
+      "  - your node_modules differ from package-lock.json: run \`npm ci\` and retry, or" \
+      "  - the change is native: ship a new build instead (docs/RELEASING.md, section C)." \
+      "  To see which fingerprint source differs from the latest build:" \
+      "    eas fingerprint:compare --build-id <id> --environment production" \
+      "  (find <id> with: eas build:list --platform ios --channel $CHANNEL --limit 1)" >&2
+    # Say why a local build tag with this runtime didn't count in 4a.
+    if [ -n "$pending_tag" ] && [ "$remote_state" = failed ]; then
+      printf '%s\n' "  Local tag $pending_tag has this runtime, but \`git ls-remote --tags origin\` failed, so it couldn't count." >&2
+    elif [ -n "$pending_tag" ]; then
+      printf '%s\n' "  Local tag $pending_tag has this runtime, but origin doesn't have that tag object. Push it only" \
+        "  once App Store Connect lists build ${pending_tag#build-} as VALID (docs/RELEASING.md, Upload)." >&2
+    fi
+    exit 1
+  fi
+  if [ "$build_rtv" != "$RTV" ]; then
+    die "Refusing to publish: eas build:list returned build $build_id with runtime \"$build_rtv\", not $RTV"
+  fi
+  build_label=$build_id
 fi
 
 # --- 5. Version check (warning only) --------------------------------------------------------
@@ -139,7 +229,7 @@ if [ "$dry_run" = 1 ]; then
     "Dry run OK: nothing was published" \
     "  commit:   $COMMIT" \
     "  runtime:  $RTV" \
-    "  build:    $build_id, $build_version ($build_number)" \
+    "  build:    $build_label, $build_version ($build_number)" \
     "  command:  $publish_command"
   exit 0
 fi

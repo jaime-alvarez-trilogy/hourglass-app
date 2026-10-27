@@ -11,12 +11,22 @@
 //   SC8: console.warn emitted for each skipped entry
 //   SC9: returned value is OvertimeApprovalItem[] (no nulls in array)
 //
+// Live shape (QA, 2026-10-27): overtimeRequest carries weekStartDate / memo / overtimePeriod
+// (minutes) / overtimeCost / createdOn, and no durationMinutes / description / startDateTime
+//   LS1: live entry → hours '2.0', weekStartDate '2026-10-19', cost 3000, memo, week-start anchor
+//   LS2: older shape unchanged (week derived from startDateTime, salary cost)
+//   LS3: mixed lists; older fields win when both are present
+//   LS4: no duration (absent, 0, negative, NaN, a string) → skipped with a warning
+//   LS5: no valid week (and no startDateTime to derive one from) → skipped with a warning
+//   LS6: cost falls back to hours * salary when overtimeCost is not a finite number
+//
 // Strategy:
 // - Pure function, no React needed
 // - Use `as unknown as RawOvertimeResponse` to inject null/undefined at any depth
 // - Spy on console.warn to verify warnings without polluting test output
 
-import { parseOvertimeItems, RawOvertimeResponse, OvertimeApprovalItem } from '../approvals'
+import { getWeekStartDate, parseOvertimeItems, RawOvertimeResponse } from '../approvals'
+import { LIVE_OVERTIME_RAW, liveOvertime } from '../../__fixtures__/overtimeRequests'
 
 // ─── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -249,5 +259,164 @@ describe('parseOvertimeItems', () => {
     expect(result).toHaveLength(2)
     expect(result[0].overtimeId).toBe(1)
     expect(result[1].overtimeId).toBe(42)
+  })
+})
+
+// ─── Live shape (QA, 2026-10-27) ──────────────────────────────────────────────
+
+describe('parseOvertimeItems — live shape and older shape', () => {
+  let warnSpy: jest.SpyInstance
+
+  beforeEach(() => {
+    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    warnSpy.mockRestore()
+  })
+
+  it('LS1: maps the live entry: overtimePeriod, weekStartDate, overtimeCost, memo', () => {
+    const result = parseOvertimeItems([LIVE_OVERTIME_RAW])
+
+    expect(result).toEqual([
+      {
+        id: 'ot-9902122',
+        category: 'OVERTIME',
+        overtimeId: 9902122,
+        userId: 2368317,
+        fullName: 'Priya Natarajan',
+        jobTitle: 'Software Engineer',
+        durationMinutes: 120,
+        hours: '2.0',
+        cost: 3000, // overtimeCost, not 2 h * $25
+        description: 'Release week: migration cutover and on-call cover',
+        startDateTime: '2026-10-19T00:00:00',
+        weekStartDate: '2026-10-19',
+        assignmentId: 77972,
+        personId: 1192813,
+      },
+    ])
+    expect(warnSpy).not.toHaveBeenCalled()
+  })
+
+  it('LS1: anchors startDateTime in its own week, not at createdOn (the week after)', () => {
+    const [item] = parseOvertimeItems([LIVE_OVERTIME_RAW])
+
+    expect(item.startDateTime.startsWith('2026-10-27')).toBe(false)
+    expect(getWeekStartDate(new Date(item.startDateTime))).toBe(item.weekStartDate)
+  })
+
+  it('LS2: the older shape is unchanged: week from startDateTime, cost from salary', () => {
+    const [item] = parseOvertimeItems([wellFormed])
+
+    expect(item.durationMinutes).toBe(60)
+    expect(item.description).toBe('Extra work on feature')
+    expect(item.startDateTime).toBe('2026-04-07T10:00:00Z')
+    expect(item.weekStartDate).toBe('2026-04-06') // Monday of Tue 2026-04-07
+    expect(item.cost).toBe(50)
+    expect(warnSpy).not.toHaveBeenCalled()
+  })
+
+  it('LS3: parses a list mixing both shapes, in order, skipping only the bad entry', () => {
+    const noDuration = liveOvertime({ id: 9902123, overtimePeriod: undefined })
+    const result = parseOvertimeItems([wellFormed, noDuration, LIVE_OVERTIME_RAW])
+
+    expect(result.map((i) => [i.id, i.hours, i.weekStartDate])).toEqual([
+      ['ot-1', '1.0', '2026-04-06'],
+      ['ot-9902122', '2.0', '2026-10-19'],
+    ])
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('LS3: the older fields win when an entry carries both', () => {
+    const both = liveOvertime({
+      durationMinutes: 90,
+      description: 'Older description',
+      startDateTime: '2026-10-21T09:00:00',
+    })
+    const [item] = parseOvertimeItems([both])
+
+    expect(item.durationMinutes).toBe(90)
+    expect(item.description).toBe('Older description')
+    expect(item.startDateTime).toBe('2026-10-21T09:00:00')
+    expect(item.weekStartDate).toBe('2026-10-19') // the request's own week
+  })
+
+  it.each([
+    ['absent', undefined],
+    ['null', null],
+    ['zero', 0],
+    ['negative', -30],
+    ['NaN', NaN],
+    ['Infinity', Infinity],
+    ['a string', '120'],
+  ])('LS4: skips an entry whose duration is %s, with a warning', (_label, overtimePeriod) => {
+    const raw = liveOvertime({ overtimePeriod: overtimePeriod as unknown as number })
+    const result = parseOvertimeItems([raw])
+
+    expect(result).toEqual([])
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(warnSpy.mock.calls[0][0]).toContain('[parseOvertimeItems]')
+    expect(warnSpy.mock.calls[0][0]).toContain('duration')
+  })
+
+  it('LS4: skips an older-shape entry with no durationMinutes', () => {
+    const raw = {
+      ...wellFormed,
+      overtimeRequest: { ...wellFormed.overtimeRequest, durationMinutes: undefined },
+    }
+    expect(parseOvertimeItems([raw])).toEqual([])
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ['absent', undefined],
+    ['the NaN week the 1.0 parser produced', 'NaN-NaN-NaN'],
+    ['not a calendar date', '2026-02-30'],
+    ['not YYYY-MM-DD', '10/19/2026'],
+    ['empty', ''],
+  ])('LS5: skips an entry whose week is %s and has no startDateTime, with a warning', (_label, weekStartDate) => {
+    const result = parseOvertimeItems([liveOvertime({ weekStartDate })])
+
+    expect(result).toEqual([])
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(warnSpy.mock.calls[0][0]).toContain('[parseOvertimeItems]')
+    expect(warnSpy.mock.calls[0][0]).toContain('week')
+  })
+
+  it('LS5: skips an older-shape entry whose startDateTime does not parse', () => {
+    const raw = {
+      ...wellFormed,
+      overtimeRequest: { ...wellFormed.overtimeRequest, startDateTime: 'not a date' },
+    }
+    expect(parseOvertimeItems([raw])).toEqual([])
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('LS5: derives the week from startDateTime when weekStartDate is invalid', () => {
+    const raw = liveOvertime({ weekStartDate: 'NaN-NaN-NaN', startDateTime: '2026-10-22T09:00:00' })
+    const [item] = parseOvertimeItems([raw])
+
+    expect(item.weekStartDate).toBe('2026-10-19')
+    expect(item.startDateTime).toBe('2026-10-22T09:00:00')
+  })
+
+  it.each([
+    ['absent', undefined],
+    ['NaN', NaN],
+    ['a string', '3000'],
+  ])('LS6: falls back to hours * salary when overtimeCost is %s', (_label, overtimeCost) => {
+    const [item] = parseOvertimeItems([liveOvertime({ overtimeCost: overtimeCost as unknown as number })])
+    expect(item.cost).toBe(50) // 2 h * $25
+  })
+
+  it('LS6: keeps an overtimeCost of 0', () => {
+    const [item] = parseOvertimeItems([liveOvertime({ overtimeCost: 0 })])
+    expect(item.cost).toBe(0)
+  })
+
+  it('uses an empty description when there is neither description nor memo', () => {
+    const [item] = parseOvertimeItems([liveOvertime({ memo: undefined })])
+    expect(item.description).toBe('')
   })
 })

@@ -129,9 +129,10 @@ describe('FR1: useStaggeredEntry — springBouncy and stagger delay', () => {
 });
 
 describe('FR1: useStaggeredEntry — focus trigger', () => {
-  it('imports useIsFocused from @react-navigation/native', () => {
+  it('imports useIsFocused from expo-router; no react-navigation import (10-sdk-58-ios-27 FR2)', () => {
     const source = fs.readFileSync(HOOK_FILE, 'utf8');
-    expect(source).toMatch(/useIsFocused.*from.*@react-navigation\/native/);
+    expect(source).toMatch(/useIsFocused.*from.*['"]expo-router['"]/);
+    expect(source).not.toContain('@react-navigation');
   });
 
   it('calls useIsFocused() to get focus state', () => {
@@ -261,11 +262,15 @@ describe('FR2: Home screen — useStaggeredEntry integration', () => {
   });
 
   // SC5.5: total call count updated to 5 (04-home-integration)
-  it('SC4.4: getEntryStyle called exactly 5 times total (indices 0–4); UrgencyBanner NOT wrapped', () => {
+  // 1.2 WorkSmart parity: the hours breakdown and pay-days cards reuse slots 1 and 2, so
+  // there are 7 calls but still only indices 0–4 (count: 5)
+  it('SC4.4: getEntryStyle called 7 times over indices 0–4; UrgencyBanner NOT wrapped', () => {
     const source = fs.readFileSync(HOME_FILE, 'utf8');
     // UrgencyBanner must not be wrapped; Day Pattern + AI Traj + Earnings each get one slot
-    const entryStyleCalls = (source.match(/getEntryStyle\(\d+\)/g) || []).length;
-    expect(entryStyleCalls).toBe(5);
+    const calls = source.match(/getEntryStyle\(\d+\)/g) || [];
+    expect(calls).toHaveLength(7);
+    const indices = new Set(calls.map((c) => Number(c.replace(/\D/g, ''))));
+    expect([...indices].sort()).toEqual([0, 1, 2, 3, 4]);
   });
 });
 

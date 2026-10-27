@@ -1,6 +1,6 @@
 # Hourglass — Architecture Reference
 
-**Last mapped:** 2026-05-22
+**Last mapped:** 2026-05-22. **Updated:** 2026-10-20 for Expo SDK 58 / iOS 27 (store-compliance spec 10): §5.2, §5.3, §5.7, §6.1, §7.1–7.3, §8.6. 2026-10-22 for durable-data 02-requests-store: §3.2, §3.3, §4.4, §6.3, §6.5, §8.5, §8.8. 2026-10-22 for durable-data 03-keep-last-good: §3.2, §6.5, §8.8. 2026-10-22 for durable-data 04-requests-history-ui: §4.4. 2026-10-22 for durable-data 05-requests-backfill: §3.2, §4.4, §6.4, §6.5.
 **Scope:** `hourglassws/` (Expo iOS app). Excludes deprecated Scriptable widgets at the repo root.
 
 A single document for understanding how the app fits together before touching any cross-cutting subsystem. Every section is keyed to file:line so claims are verifiable.
@@ -147,7 +147,8 @@ Four persistence layers. The same logical data sometimes appears in multiple lay
 | `notif_thursday_id` / `notif_monday_id` / `notif_expiry_id` | string | `useScheduledNotifications` | same; cancel-before-reschedule |
 | `push_token` | string | `src/lib/pushToken.ts:15` | sent to Railway server on register; cleared on logout |
 | `prev_approval_ids` | JSON `string[]` | `src/notifications/handler.ts` (`savePrevIds`) | set-difference dedup for instant approval notification. Legacy `prev_approval_count` is cleaned up on every write; both are in the `clearAll` wipe list. |
-| `HOURGLASS_QUERY_CACHE` | TanStack Query persist payload | `PersistQueryClientProvider` (`app/_layout.tsx:80-83`) | full query cache, 24h max age |
+| `my_requests_v1` | JSON `MyRequestsStore { version: 1, owner: { assignmentId, useQA }, days: { [YYYY-MM-DD]: { date, fetchedAt, entries, settled } } }` | `updateRequestsStore` (`src/lib/requestsStore.ts`), from the `useMyRequests` queryFn and the requests backfill (§4.4 step 9): serialized writes, per-date merge of successful fetches only, pruned to 24 weeks (`REQUESTS_RETENTION_WEEKS`), owner checked before and verified after `setItem` | `readRequestsStore` (same file) in the `useMyRequests` queryFn and the backfill. Never throws: `ok` / `empty` (absent, corrupt, unknown version or another owner) / `unreadable` (`getItem` threw, so no write that run). Durable-data 02, §4.4. Wiped by `clearAll` (sign-out). |
+| `HOURGLASS_QUERY_CACHE` | TanStack Query persist payload | `PersistQueryClientProvider` (`app/_layout.tsx:84-87,174-183`), filtered by `dehydrateOptions.shouldDehydrateQuery` (`src/lib/queryPersist.ts`): `success` queries and errored queries that still hold data; never a query whose data is stamped `ownerKey: 'dev-mock'` (durable-data 03, §8.8) | full query cache, 24h max age |
 
 ### 3.3 TanStack Query
 
@@ -158,7 +159,7 @@ QueryClient configured at `app/_layout.tsx:68-76`: `staleTime: 15min`, retries 2
 | `['config']` | `useConfig` (`:13`) | AsyncStorage `crossover_config` | Infinity (manual invalidate) |
 | `['timesheet', weekStartDate, userId]` | `useTimesheet` (`:18`) | `fetchTimesheet()` | 15min |
 | `['payments', weekStartDate, userId]` | `usePayments` (`:18`) | payments API | 15min |
-| `['myRequests', assignmentId]` | `useMyRequests` | manual requests API | default |
+| `['myRequests', assignmentId]` | `useMyRequests` | store-backed view of `my_requests_v1`; `fetchWorkDiary` for the planned days only (§4.4) | 60 s; `retry: shouldRetryQuery` |
 | `['approvals']` | `useApprovalItems` (`:24`) | 6 parallel calls: manual + overtime × 3 weeks | manual invalidate after approve/reject |
 | `['paymentHistory', from, to, userId]` | `usePaymentHistory` | payments history | default |
 | `['earningsHistory', from, to, userId]` | `useEarningsHistory` | earnings ledger | default |
@@ -201,6 +202,40 @@ How a write at one layer reaches the others.
 3. If `newCount > prevCount`, fire local notification.
 4. TanStack Query is **not** touched — on next foreground, queries are either still within `staleTime` (rehydrated from persisted cache) or refetched normally.
 
+### 4.4 My Requests refresh (durable-data 02)
+
+`my_requests_v1` (§3.2) is the source of truth. The TanStack value under `['myRequests', assignmentId]` is only a view built from it (`buildRequestsView` / `composeRequestsView`, `src/lib/requestsStore.ts`), stamped with an `ownerKey` (`assignmentId|qa`, `assignmentId|prod`, or `'dev-mock'`).
+
+1. **Trigger.** Mount, a focus or wake once `staleTime` (60 s) has passed, or `refetch`. The queryFn (`buildMyRequestsQueryFn`, `src/hooks/useMyRequests.ts`) captures `today` and `nowMs` once per run. `devManagerView` returns `MOCK_MY_REQUESTS` stamped `'dev-mock'`, with no store I/O and no credentials read.
+2. **Plan.** `planRequestRefresh` (`src/lib/requestsPlanner.ts`, pure) picks dates from the stored records; the first rule that applies wins:
+   - today, always;
+   - after `markMyRequestsForcedRefresh()` (one-shot), every date in the 3-week window `catchUpStart..today`;
+   - a day in the window with a PENDING entry, after 15 min (`PENDING_TTL_MS`);
+   - yesterday, after 60 min (`RECENT_TTL_MS`);
+   - current-week days, and closed-week days in the window that are not settled, once per calendar day;
+   - an unsettled stored day older than the window, after 6 h (`OLD_UNSETTLED_TTL_MS`).
+
+   A day is **settled** when it has no PENDING entry and was fetched on or after the Tuesday after its week (past the Sunday 23:59 UTC timecard deadline). Settled days are re-fetched only by a forced refresh. A missing day older than the window is never planned here; the backfill fills it (step 9). A typical wake makes 1-2 `fetchWorkDiary` calls instead of 15-21.
+3. **Fetch.** `Promise.allSettled` over `fetchWorkDiary` (`src/api/workDiary.ts`) for the planned dates. Every work-diary call in the app (`useMyRequests`, `useAIData`, `useTeamAggregateData`, `crossoverData`) runs inside one FIFO limiter of `WORK_DIARY_CONCURRENCY = 4` (`src/lib/limit.ts`), so at most 4 are in flight. Concurrent identical calls (same `getAuthGeneration()`, environment, assignment and date) share one in-flight promise. There is no time-based memo, and the generation in the key stops a call made after `invalidateAuthToken()` from joining one started before it. Token mints never take a limiter slot, so the limiter cannot deadlock on a renewal.
+4. **Merge on success only.** A fulfilled array (even `[]`) becomes a stored day (`groupSlotsIntoEntries`, `fetchedAt`, `settled`). A rejection, or a non-array (an empty body), is a failed date: its record is kept byte for byte and the date is listed in the view's `staleDates`. `updateRequestsStore` is serialized and re-reads, merges per date, prunes to 24 weeks, checks the configured owner, writes, then verifies the owner (and removes the key if a sign-out raced the write). A failed date with no record keeps the prior same-owner (or legacy) view's entries, in the view only.
+5. **Throw on total failure.** If no planned day succeeded, nothing is written, `log.warn('requests.refresh_failed', { plannedDays, failedDays, kind })` fires, and the queryFn throws (the first real `AuthError`, else the first rejection, else `NetworkError`). TanStack keeps the previous data with status `'error'` and retries per `shouldRetryQuery` (outages only, at most twice). **Seed-then-throw:** on a cold cache (no same-owner or legacy prior) with stored days, the queryFn first `setQueryData`s the stored view, so the error state still shows the list. Missing credentials throw `AuthError(NO_CREDENTIALS)` the same way, after the store read. A `loadConfig()` throw is logged as `requests.config_read_failed` and rethrown, with no seeding (the owner is not known yet). A malformed stored day record is dropped on read, so it is planned as never fetched.
+6. **Display.** `selectMyRequests` shows a view only to its owner: a legacy (unstamped) blob or the current `ownerKey`, and `'dev-mock'` only while `devManagerView` is on. `toRequestsError` maps the thrown error to `'auth'` (a real 401/403, including `NO_CREDENTIALS`) or `'network'` (anything else, including `AUTH_HTML_500`), and it wins over the view's own `error`. Since durable-data 04:
+   - `errorCode` is the thrown `AuthError`'s `errorCode` (e.g. `NO_CREDENTIALS`, `AUTH_LOGIN_LATCHED`) only when the error maps to `'auth'`, else `null`.
+   - The hook's `refetch` is forced: it calls `markMyRequestsForcedRefresh()`, then returns `query.refetch()`'s promise. Only user actions call it (pull-to-refresh, Retry), so each one re-plans the whole window.
+   - `isLoading` is restore-aware: `query.isLoading || useIsRestoring() || (configLoading && data === undefined)`. While the persister restores, `useConfig` reports `config: null` with `isLoading: false`, so without this a cold start flashes "No requests yet".
+   - The Requests screen (`app/(tabs)/approvals.tsx`) builds its rows with `buildMyRequestRows` (`src/lib/requestRows.ts`): "This Week", "Last Week" and "2 Weeks Ago" (bounded at `prevMonday2`), then a "Show older requests (N)" toggle, collapsed on every mount. Expanded, the older entries are grouped under month headers, newest first, with malformed dates under "Other dates", last.
+   - With entries visible, an error or `staleDates` is one quiet note under "My Requests" (`freshnessNote`, e.g. "Showing saved requests · updated 5 min ago"), never the red banner. With none, `myRequestsEmptyState` picks the red banner (`requestsBannerText`, neutral about the `'auth'` cause), an "incomplete" card when some days never refreshed (with Retry), or "No requests yet". `requestsErrorRetryable` offers Retry for every error except `'auth'` + `NO_CREDENTIALS`, which would throw again before any request.
+   - The pull spinner is a local `pulling` flag, held until the forced refetch settles (resolved or rejected), so background focus refetches never show it.
+7. **Sign-out.** `clearAll()` wipes `my_requests_v1`. An in-flight write then fails the owner pre-check or is removed by the post-write verify, and `queryClient.clear()` drops the view.
+8. **Env switch.** `handleSwitchEnvironment` (`app/modal.tsx`) calls `invalidateAuthToken()` (generation bump) before minting against the new environment. Then, inside one `startTransition`: `setQueryData(['config'], newConfig)`, `removeQueries({ queryKey: ['myRequests'] })`, then `invalidateQueries()`. The key carries no environment, so without the removal the old environment's (or a legacy) view would be a valid prior under the new one: carried forward on a partial success, or kept and shown on a total failure. The store itself reads as `empty` for the other owner.
+9. **Backfill (durable-data 05).** `src/hooks/useRequestsBackfill.ts` fills the days older than the window that were never fetched, back to `retentionStart`.
+   - **Trigger.** The Requests screen calls `useRequestsBackfill()`. It schedules `startRequestsBackfillOnce` `BACKFILL_START_DELAY_MS` (5 s) after mount, or after the owner (`toOwnerKey`) changes while mounted, so the foreground refresh goes first. There is no timer while signed out or with `devManagerView` on. Unmounting clears a pending timer; a started run continues.
+   - **Once per session per owner.** The gate re-reads config and credentials, then marks the `ownerKey` in a module `Set` with no `await` between the check and the mark. A signed-out user, the dev-mock preview or a missing keychain entry resolves `null` without marking the owner. The gate never rejects (an unexpected throw logs `requests.backfill_failed`).
+   - **Plan.** `planBackfillWeek` (`src/lib/requestsPlanner.ts`, pure) returns the newest Monday in `[retentionStart, catchUpStart)` with at least one date that has no record, and only those dates (21 weeks, 147 days). Resumable from the data: a date with a record is never requested, so once every date has one a session makes no backfill request.
+   - **Run.** `runRequestsBackfill` goes one week at a time, newest first: check the owner (`isOwnerConfigured`), `Promise.allSettled` over `fetchWorkDiary` (the shared limiter above), merge the days that came back as an array through `updateRequestsStore`, then pause `BACKFILL_WEEK_PAUSE_MS` (500 ms). A failed day is never written. A partial week is merged and skipped until the next session.
+   - **Stop reasons.** `'complete'` (nothing left to try), `'week-failed'` (no day of a week came back), `'auth'` (a non-retryable `AuthError`), `'throttled'` (a 429), `'signed-out'` (owner gone before a week, or the write returned `null`), `'unreadable'` (the store read failed at start) and `'cap'` (21 weeks, a defensive bound). One `log.info('requests.backfill_done', { weeksStored, daysStored, daysFailed, stopReason })` per run.
+   - **View update.** After each stored week, `['myRequests', assignmentId]` is rebuilt in place with `composeRequestsView`, only when the query's `status` is `'success'` and its data is same-owner or legacy, with `{ updatedAt: dataUpdatedAt }`. `setQueryData` dispatches a success, so over an errored view it would clear the error, and without `updatedAt` it would make the view look fresh. An errored view is left alone; the next successful refresh composes the stored weeks.
+
 ---
 
 ## 5. Screens & Routes (Expo Router)
@@ -233,7 +268,7 @@ app/
 
 `app/_layout.tsx:154-164`. Provider stack (outermost → innermost):
 
-`GestureHandlerRootView` → `PersistQueryClientProvider` (24h TTL) → `ThemeProvider` → router tree.
+`GestureHandlerRootView` → `PersistQueryClientProvider` (24h TTL) → `ThemeProvider` → router tree. `ThemeProvider`, `DarkTheme` and `DefaultTheme` come from `expo-router` (`app/_layout.tsx:11`); expo-router has shipped its own navigation fork since SDK 56.
 
 **Module-scope side effects**:
 - `Notifications.setNotificationHandler` (`:48-54`)
@@ -251,8 +286,8 @@ app/
 
 `app/(tabs)/_layout.tsx`. Platform-split rendering:
 
-- **iOS** (`NativeTabs` from `expo-router/unstable-native-tabs`): native `UITabBarController` with glass pill on iOS 26+.
-- **Android** (`Tabs` + custom `FloatingPillTabBar` at `:126-132`): default tab bar hidden, custom pill overlay. Content clearance comes from each tab screen's own scroll `paddingBottom: 100` (no navigator-level padding).
+- **iOS** (`NativeTabs` from `expo-router/native-tabs`, `:24`): native `UITabBarController` with glass pill on iOS 26+.
+- **Android** (`Tabs` from `expo-router/js-tabs`, `:25`, + custom `FloatingPillTabBar`): default tab bar hidden, custom pill overlay. Content clearance comes from each tab screen's own scroll `paddingBottom: 100` (no navigator-level padding).
 
 `TAB_SCREENS` constant (`:50-56`): Home, Overview, AI, Requests + hidden `explore`. Approvals badge shown when `items.length > 0` (`:79`).
 
@@ -293,6 +328,24 @@ Gated UI:
 - TEAM REQUESTS section, Approve All button, team queue badge on Requests.
 - Monday expiry notification (see §1.1).
 
+### 5.7 Native launch & lifecycle (UIKit scenes)
+
+From v1.2.0 (Expo SDK 58, store-compliance spec 10) the iOS app runs the UIKit scene lifecycle. An app built with the iOS 27 SDK asserts at launch without it (`node_modules/expo/ios/Expo/ExpoAppSceneDelegate.swift:12-13`). The project is CNG (`ios/` is gitignored), so the scene files come from the SDK 58 template at prebuild. Nothing in the repo configures scenes: there's no `enableSceneSupport` and no hand-written `UIApplicationSceneManifest`, and `__tests__/config/app-config.test.ts` keeps it that way.
+
+- **Generated files** (each checked in spec 10 FR9):
+  - `ios/Hourglassxo/SceneDelegate.swift`: `class SceneDelegate: ExpoAppSceneDelegate`.
+  - `ios/Hourglassxo/AppDelegate.swift`: `class AppDelegate: ExpoAppDelegate, ExpoReactNativeFactoryProvider`. It creates the React Native factory, but no window.
+  - `Info.plist` `UIApplicationSceneManifest`: `UIApplicationSupportsMultipleScenes = false` and one configuration whose delegate is `$(PRODUCT_MODULE_NAME).SceneDelegate`.
+- **Launch.** `ExpoAppSceneDelegate.scene(_:willConnectTo:options:)` creates the `UIWindow` from the connecting `UIWindowScene`, mirrors it onto the app delegate, and starts React Native in it (`ExpoAppSceneDelegate.swift:33-89`). Every scene event (active, resign, foreground, background, URLs, user activities) is forwarded to the app delegate and its subscribers.
+- **AppState.** React Native's `AppState` observes `UIApplication` notifications (`node_modules/react-native/React/CoreModules/RCTAppState.mm:85-89`), which UIKit still posts for a single-scene app. So the four listeners work unchanged: the TanStack focus manager (`app/_layout.tsx:63`), `useAIData.ts:376`, `useScheduledNotifications.ts:276` and `useRoleRefresh.ts:103`. The device check is the FR11 foreground-refresh smoke.
+- **Cold-start URL (`hourglassws://`, `app.json` `scheme`).** Under scenes, UIKit passes a cold-start URL in `connectionOptions`, not in the app delegate's launch options. `ExpoAppSceneDelegate` handles it twice:
+  - It rebuilds the launch options from `connectionOptions.urlContexts`, so React Native's `Linking.getInitialURL()` sees the URL (`ExpoAppSceneDelegate.swift:59-74`).
+  - It forwards each URL context to the app-delegate subscribers (`:76-79`). expo-linking's `LinkingAppDelegateSubscriber` stores it as the initial URL, and on iOS Expo Router reads its initial route from there through `getLinkingURL()` (`node_modules/expo-router/build/link/linking.js:103-108`).
+  - A warm link arrives through `scene(_:openURLContexts:)`, which forwards each context the same way (`ExpoAppSceneDelegate.swift:111-123`). The FR11 smoke checks both, cold and warm.
+- **Notifications.** expo-notifications hooks in through its app-delegate subscriber (`NotificationsAppDelegateSubscriber`, registered in its `expo-module.config.json`). Push-token registration and `didReceiveRemoteNotification` are app-level callbacks, so scenes don't change them. Foreground presentation still follows the app's `setNotificationHandler` (`app/_layout.tsx:48-55`, §1). The silent-push gap in §2 has nothing to do with scenes and is still open.
+- **No notification-tap routing.** The app registers no `addNotificationResponseReceivedListener`, `useLastNotificationResponse` or `getLastNotificationResponseAsync`. A tap from a killed app cold-launches to the default route, which the auth gate (§5.5) resolves. A tap while the app is running only brings it to the foreground.
+- **Window size.** On iOS 27, iPhone and iPad windows both resize. The app keeps `ios.supportsTablet: true` and sets no `requireFullScreen` (spec 10 Decision 10 (a)). So the four iPad orientations are written as on build 18, and layouts have to survive any width (FR11 resizability matrix).
+
 ---
 
 ## 6. Module Boundaries
@@ -306,8 +359,9 @@ Gated UI:
 | `components/`, `hooks/` (root) | **Legacy Expo Starter scaffolding** — themed-text, themed-view, use-color-scheme. Not used by the production app. Candidates for deletion. |
 | `constants/theme.ts` | **Legacy** — superseded by `src/lib/colors.ts` |
 | `server/` | Railway ping server (push dispatcher + cron) |
-| `ios/`, `android/` | Native build artifacts |
-| `assets/`, `dist/`, `patches/`, `scripts/` | Build / static assets |
+| `ios/`, `android/` | Native build artifacts, generated by prebuild (CNG, gitignored) |
+| `plugins/` | Local Expo config plugins for the iOS widget extension: its privacy manifest and native background (§7.2) |
+| `assets/`, `dist/`, `scripts/` | Build / static assets. `patches/` (patch-package) holds nothing today |
 | `__mocks__/`, `__tests__/` | Jest infrastructure + integration tests |
 
 ### 6.2 `src/` map
@@ -331,15 +385,16 @@ Pure async functions. No React, no hooks.
 
 | File | Exports |
 |---|---|
-| `client.ts` | `getAuthToken` (cached), `mintAuthToken` (cache-bypass), `invalidateAuthToken`, `apiGet<T>`, `apiPut<T>` |
+| `client.ts` | `getAuthToken` (cached, latched), `mintAuthToken` (cache-bypass), `invalidateIfCurrent`, `invalidateAuthToken`, `LOGIN_LATCH_MS`, `apiGet<T>`, `apiPut<T>`, `type AuthCreds` |
+| `authCreds.ts` | `AuthCreds`, `toAuthCreds` (pure; production code imports `toAuthCreds` from here, not from `client.ts`) |
 | `auth.ts` | `getProfileDetail`, `fetchAndBuildConfig`, `probeEnvironments` |
 | `timesheet.ts` | `fetchTimesheet` (3-strategy fallback) |
 | `approvals.ts` | `fetchPendingManual`, `fetchPendingOvertime`, `approveManual`, `rejectManual` |
 | `payments.ts` | `fetchPaymentHistory` |
-| `workDiary.ts` | `fetchWorkDiary` |
-| `errors.ts` | `AuthError`, `NetworkError`, `ApiError` |
+| `workDiary.ts` | `fetchWorkDiary` (app-wide limiter of `WORK_DIARY_CONCURRENCY = 4`, in-flight sharing; §4.4), `__resetWorkDiaryInFlightForTests` |
+| `errors.ts` | `AuthError`, `NetworkError`, `ApiError`, the `AUTH_HTML_500` / `AUTH_LOGIN_LATCHED` / `NO_CREDENTIALS` / `HTML_5XX_AFTER_RENEWAL` codes, `isRetryableError`, `shouldRetryQuery`, `MAX_QUERY_RETRIES` |
 
-Auth token is **cached in module-scope memory** (`client.ts`, spec 04). First call mints via `POST /api/v3/token`; subsequent calls reuse the cached `userId:secret` string. Concurrent first-callers share a single in-flight mint (request dedup). `invalidateAuthToken()` wipes the cache; called from `app/modal.tsx` on sign-out and env switch. `apiGet`/`apiPut` accept an optional fifth `creds` arg that opts into single-retry on auth failure (401 or Tomcat HTML 5xx). `mintAuthToken` (exported) bypasses the cache for `probeEnvironments`. Empty response bodies (approve/reject PUTs) parsed as `undefined`. Base URL switched via `getApiBase(useQA)` from `src/store/config.ts`.
+Auth token is **cached in module-scope memory** (`client.ts`, spec 04). First call mints via `POST /api/v3/token`; subsequent calls reuse the cached `userId:secret` string. Concurrent first-callers share a single in-flight mint (request dedup). `invalidateAuthToken()` is the hard reset (cache, in-flight mint, latch, generation); called from `app/modal.tsx` on sign-out and env switch and from `app/(auth)/not-contributor.tsx`. `apiGet`/`apiPut` take a fifth `creds?: AuthCreds` arg for a single renew-and-retry on auth failure (401 or Tomcat HTML 5xx); every production call passes it (§8.5). `mintAuthToken` (exported) bypasses the cache for `probeEnvironments`. Empty response bodies (approve/reject PUTs) parsed as `undefined`. Base URL switched via `getApiBase(useQA)` from `src/store/config.ts`.
 
 ### 6.4 `src/hooks/` (21 files)
 
@@ -347,7 +402,7 @@ All data and stateful logic. Composition pattern: API call → React Query wrapp
 
 Major hooks:
 - **Data**: `useTimesheet`, `usePayments`, `useHoursData`, `useAIData`, `useApprovalItems`, `useMyRequests`, `useOverviewData`, `useEarningsHistory`, `usePaymentHistory`, `useAppBreakdown`, `useWeeklyHistory`
-- **Lifecycle**: `useAuth` (`useSetup`), `useConfig`, `useRoleRefresh`, `useHistoryBackfill`, `useListCascade`
+- **Lifecycle**: `useAuth` (`useSetup`), `useConfig`, `useRoleRefresh`, `useHistoryBackfill`, `useRequestsBackfill` (Requests screen only, §4.4 step 9), `useListCascade`
 - **System integration**: `useWidgetSync`, `useScheduledNotifications`
 - **UI/animation**: `useScrubGesture`, `useStaggeredEntry`, `useFocusKey`
 
@@ -361,6 +416,10 @@ Notable:
 - `approvals.ts` — `parseManualItems`, `parseOvertimeItems`. Raw API → domain model.
 - `ai.ts`, `aiAppBreakdown.ts`, `aiCone.ts`, `aiTier.ts` — AI% computation, app breakdown, tier classification.
 - `weeklyHistory.ts` — snapshot persistence.
+- `requestsPlanner.ts` — pure My Requests refresh planner (`planRequestRefresh`, `requestWindows`, `isDaySettled`, TTL constants, local date helpers). Durable-data 02, §4.4. Also the backfill's `planBackfillWeek` (durable-data 05, §4.4 step 9).
+- `requestsStore.ts` — the `my_requests_v1` store (`readRequestsStore`, serialized `updateRequestsStore`, `pruneDays`, `buildRequestsView`, `composeRequestsView`). Holds a module write chain, so not stateless.
+- `limit.ts` — `createLimiter(max)`, a FIFO concurrency limiter (used by `fetchWorkDiary`).
+- `queryPersist.ts` — `shouldDehydrateQuery`, the `HOURGLASS_QUERY_CACHE` persist predicate, and `DEV_MOCK_OWNER_KEY`. Imports only `@tanstack/react-query`. Durable-data 03, §8.8.
 - `pushToken.ts` — Expo push token registration with Railway server.
 - `approvalMeshSignal.ts`, `panelState.ts` — UI state machines.
 - `devMock.ts` — `MOCK_TEAM_ITEMS` for `devManagerView` toggle.
@@ -442,17 +501,29 @@ WidgetData {
 
 ### 7.1 Write path
 
-`updateWidgetData(snapshot)` in `src/widgets/bridge.ts:18` writes the same JSON to:
-- **AsyncStorage** `widget_data` (Android reads this directly via `readWidgetData()` at `:427-435`).
-- **iOS App Group UserDefaults** via `expo-widgets` (`:868-896`): `createWidget('HourglassWidget', layoutJS).updateTimeline(entries)`.
+`updateWidgetData(snapshot)` in `src/widgets/bridge.ts:943` writes the same JSON to:
+- **AsyncStorage** `widget_data` (Android reads this directly via `readWidgetData()` at `:454-462`).
+- **iOS App Group UserDefaults** via `expo-widgets` (`:964-977`): `createWidget('HourglassWidget', WIDGET_LAYOUT_JS, buildSignedOutWidgetData(Date.now())).updateTimeline(entries)`. The third argument is stored as the widget's initial props (expo-widgets 58), which the placeholder and the gallery use (§7.2). `clearWidgetData()` (`:1022-1037`) makes the same call on sign-out, with one signed-out entry.
 
 ### 7.2 iOS timeline
 
-`buildTimelineEntries()` (`src/widgets/bridge.ts:389-418`) emits **96 entries** — 15-minute intervals across a 24-hour window. Each entry is `{ date, props: WidgetData }` with `urgency` recomputed for that timestamp vs `deadline`. This lets the widget visually transition through `low → high → critical → expired` without the extension having to wake.
+`buildTimelineEntries()` (`src/widgets/bridge.ts:406-445`, called with `(data, 96, 15, { extendToDeadline: true })` at `:971`) emits **96 entries** at 15-minute intervals across a 24-hour window, then, when the deadline is further away, **one entry per hour** at `deadline − k h + 1 s` (just after each hourly change of the "Due in …" label), and finally **one expired entry at `deadline + 1 s`**. The hourly run is capped at 8 days. Each entry is `{ date, props: WidgetData }` with `urgency` (and `hoursRemaining`, `0h left` once expired) recomputed for that timestamp vs `deadline`. This lets the widget visually transition through `low → high → critical → expired` without the extension having to wake. A full week (a Monday 00:00 open) is 241 entries, about 260 KB of JSON in App Group UserDefaults (96 entries were about 104 KB).
+
+**expo-widgets 58 runtime (v1.2.0, store-compliance spec 10 FR6).**
+
+- **Reload policy `.atEnd`.** expo-widgets' timeline provider hands WidgetKit the stored entries with `policy: .atEnd` (`node_modules/expo-widgets/ios/Widgets/TimelineProvider.swift:34`). So WidgetKit asks for a new timeline only after the last entry, just after the deadline (or 24 h after the app's last write, if the deadline was closer). Build 18's patch forced a reload every 15 minutes; it's gone. A reload would only re-read the same App Group data anyway, and 96 reloads a day would likely exceed WidgetKit's daily reload budget. That's why the stored timeline itself must reach the deadline: once the entries run out, WidgetKit keeps showing the last one (final review, 2026-10-21).
+- **`env.date`.** The layout is called with `(props, env)`, where `env.date` is the entry's date. The countdown and the end-of-week urgency read the later of the two clocks, `var nowMs = Math.max(entryMs, Date.now());` with `entryMs` = `env.date` (or 0) (`bridge.ts:549`). WidgetKit can render an entry before its time, so `env.date` wins then; and it keeps re-rendering the last entry after the timeline runs out, so real time wins then, and the countdown and the PENDING pill clear once the deadline passes. With the hourly entries, that's what keeps the countdown right between app opens.
+- **Stored layout wins.** `WidgetsLayoutRegistry.layout(for:)` returns the App Group key `__expo_widgets_HourglassWidget_layout` first, and a build-time embedded layout only after that (`node_modules/expo-widgets/ios/Widgets/WidgetsLayoutRegistry.swift:9-19`). The app embeds none (no `ios.initialLayout`). So after an App Store update, home-screen widgets keep evaluating the **previous build's** layout string until the new build runs `createWidget` once, which happens on its first data refresh in the app.
+- **Two `containerBackground`s, same color.** expo-widgets dropped its native background in SDK 56, and iOS 17+ shows an "adopt containerBackground" placeholder for a widget without one.
+  - JS: the small, medium and large roots carry `containerBackground('#0D0D1A', 'widget')` (`bridge.ts:710,755,852`). Lock-screen accessories don't; the system draws theirs.
+  - Native: `plugins/withHourglassWidgetBackground.js` rewrites the generated `ios/ExpoWidgetsTarget/HourglassWidget.swift` to `WidgetsEntryView(entry: entry).modifier(HourglassContainerBackground())`, an iOS 17+ `containerBackground(Color(red: 0.051, green: 0.051, blue: 0.102), for: .widget)`. It covers the update window above, when the stored build-18 layout has no background of its own.
+- **Transient placeholder red box before the first open after an update.** The placeholder (and the gallery when no timeline is stored) uses the stored initial props (`WidgetsLayoutRegistry.swift:21-26`, `TimelineProvider.swift:4-5,14,19`). Build 18 never stored any. So until 1.2.0 is opened once, an upgrader's placeholder evaluates build 18's layout with `undefined` props, which throws, and expo-widgets renders its red error box. A fresh install that was never opened shows the same box in the gallery. It clears on first open: the 58 layout starts with `props = props || {};` and `createWidget` stores signed-out initial props. This was accepted as transient (spec 10 Decision 5 (i)); adopting `ios.initialLayout` is the deferred follow-up. Widgets that have a stored timeline still show their real data.
+- **The extension has its own `PrivacyInfo.xcprivacy`.** React Native's privacy aggregation only writes a manifest for the app target. `plugins/withHourglassWidgetPrivacyManifest.js` writes `ios/ExpoWidgetsTarget/PrivacyInfo.xcprivacy` (UserDefaults `CA92.1` + `1C8F.1`, FileTimestamp `C617.1`, SystemBootTime `35F9.1`; no tracking, no collected data) and adds it to the `ExpoWidgetsTarget` Resources build phase. The data-collection declarations stay on the app's manifest (`app.json` `ios.privacyManifests`).
+- **Plugin order.** Both local plugins are listed in `app.json` `plugins` immediately before `expo-widgets`, the privacy one first. A later plugin's mod runs first, so both run after expo-widgets has generated the target. Each throws if its anchor is missing. Editing either one forks the runtime (`docs/RELEASING.md`, section E).
 
 ### 7.3 iOS layout function
 
-`src/widgets/bridge.ts:459-833` defines a ~900-line ES5 JS string compiled into the widget extension. Evaluated by the extension's JSContext to produce a SwiftUI tree. Implements three widget sizes (small/medium/large), deadline countdown, pace badge, glass cards, bar chart, approval rows, EOW urgency overlay.
+`src/widgets/bridge.ts:472-848` defines a ~380-line ES5 JS string compiled into the widget extension. Evaluated by the extension's JSContext to produce a SwiftUI tree. Implements three widget sizes (small/medium/large), deadline countdown, pace badge, glass cards, bar chart, approval rows, EOW urgency overlay.
 
 ---
 
@@ -480,13 +551,23 @@ Not a TODO list — a catalog of things to remember when touching these subsyste
 - **Mitigated** by spec `07-notification-lifecycle`, **broadened** by `09-orphan-sweep-migration`. On every `scheduleAll` mount, `sweepOrphanNotifications` calls `getAllScheduledNotificationsAsync()` and cancels **any** identifier not in `EXPECTED_IDENTIFIERS` (any prefix — `getAllScheduledNotificationsAsync` only returns this app's notifications). A reinstall, an AsyncStorage wipe, or a leftover build-9 random-id orphan is now self-healing on the next foreground.
 - **Residual risk**: any new scheduled notification introduced by a future spec must add its identifier to `EXPECTED_IDENTIFIERS` in the same PR, or the sweep will cancel it on next mount. Documented in `src/lib/scheduleLock.ts` JSDoc and `src/notifications/README.md` invariant 5.
 
-### 8.5 ~~Auth token refetched every request~~ (resolved by spec 04)
+### 8.5 ~~Auth token refetched every request~~ (resolved by spec 04; renewal wired by durable-data 01)
 
-Resolved 2026-05-28 by `04-auth-resilience` (resilience-fixes). `getAuthToken` (`src/api/client.ts:64`) now serves a module-scope `cachedToken`; concurrent first callers share a single in-flight mint via `mintInFlight`. `mintAuthToken` (exported) bypasses the cache for `probeEnvironments`. `invalidateAuthToken` is called from `app/modal.tsx` on sign-out (`handleSignOut` after `clearAll`) and env switch (`handleSwitchEnvironment` before `fetchAndBuildConfig`). `handleStatus` now recognizes Tomcat HTML 5xx (`content-type: text/html` on any `>= 500` response) as `AuthError(401, AUTH_HTML_500)` so the existing re-onboarding flow fires for expired tokens (the original CROSSOVER_API §15.F3 gap). Opt-in retry on `apiGet`/`apiPut` via optional fifth `creds` arg.
+Resolved 2026-05-28 by `04-auth-resilience` (resilience-fixes). `getAuthToken` (`src/api/client.ts:111`) now serves a module-scope `cachedToken`; concurrent first callers share a single in-flight mint via `mintInFlight`. `mintAuthToken` (exported) bypasses the cache for `probeEnvironments`. `handleStatus` recognizes Tomcat HTML 5xx (`content-type: text/html` on any `>= 500` response) as `AuthError(401, AUTH_HTML_500)` so the existing re-onboarding flow fires for expired tokens (the original CROSSOVER_API §15.F3 gap).
+
+Spec 04 built the renew-and-retry but wired no caller, so a cached token that expired stayed dead until the next cold start or sign-out. `01-auth-renewal` (durable-data, 2026-10-22) turned it on everywhere. Full lifecycle: CROSSOVER_API §2 "Token cache and renewal"; error codes and retry predicates: CROSSOVER_API §13.
+
+- **Wired at every call site.** Every API wrapper except `fetchWorkDiary` (which already takes `credentials`) takes a trailing `creds?: AuthCreds` and forwards it as the last `apiGet`/`apiPut` argument. Every production caller (hooks, `src/lib/crossoverData.ts`, `fetchAndBuildConfig`, `fetchWorkDiary`) builds it with `toAuthCreds` from `src/api/authCreds.ts` (in hooks, `toAuthCreds(credentials, config.useQA)`). That module is pure, so the many tests that factory-mock `src/api/client` still get a real `toAuthCreds`. The static guard `src/__tests__/api/creds-wiring.test.ts` fails if a production call to `apiGet`, `apiPut` or a wrapper omits creds.
+- **Single-flight renewal.** On a 401 or HTML 5xx, `apiGet`/`apiPut` call `invalidateIfCurrent(token)`, which clears the cache only if it still holds the failed token and never touches the in-flight mint. Then they get a token from `getAuthToken` and retry once. N concurrent 401s share one re-mint. A retried response that is still HTML 5xx becomes a retryable `ApiError(HTML_5XX_AFTER_RENEWAL)`, not "Authentication error".
+- **Failed-login latch.** A token-endpoint 401/403 latches a non-reversible FNV-1a fingerprint of env + username + password for `LOGIN_LATCH_MS` (60 s). Until then `getAuthToken` with the same credentials throws `AuthError(AUTH_LOGIN_LATCHED)` without a network call, so a password changed on the server cannot cause a storm of failed logins. Network, `ApiError` and `AUTH_HTML_500` mint failures never latch. A successful mint clears it. `mintAuthToken` ignores it.
+- **Generation guard.** `invalidateAuthToken()` is the hard reset, called only on sign-out (`handleSignOut` after `clearAll`), env switch (`handleSwitchEnvironment` before `fetchAndBuildConfig`) and not-contributor (`app/(auth)/not-contributor.tsx:28`). It clears the cache, the in-flight mint and the latch, and bumps `authGeneration`. A mint that started before the reset still resolves for its callers but writes neither the cache nor the latch.
+- **Residual risk.** The token TTL is still unknown, so renewal is reactive only. Callers that reuse one token across several calls (timesheet strategies, the history backfill loop, the 6 approval fetches) pay one extra 401 per remaining call after a renewal, with no extra mint. `useMyRequests` retries through `shouldRetryQuery` since durable-data 02; the other hooks keep their numeric `retry` until specs 03/05 switch them to `isRetryableError` / `shouldRetryQuery`.
 
 ### 8.6 Two `components/` and two `hooks/` directories
 
 Root-level `components/` and `hooks/` are Expo Starter scaffold leftovers. Production code lives in `src/components/` and `src/hooks/`. Imports from the root-level versions are legacy; check before adding new files in either spot.
+
+`components/haptic-tab.tsx` and its test were deleted in store-compliance spec 10 FR2. Nothing used it, and it imported the navigation packages that SDK 58 drops.
 
 ### 8.7 Manager role can change mid-session
 
@@ -495,6 +576,10 @@ Root-level `components/` and `hooks/` are Expo Starter scaffold leftovers. Produ
 ### 8.8 TanStack Query persisted cache + AsyncStorage caches overlap
 
 `hours_cache`, `ai_cache`, `widget_data`, `weekly_history`, and the `HOURGLASS_QUERY_CACHE` (full Query cache) all persist overlapping data. Manual AsyncStorage caches exist for instant-render on mount before queries resolve; Query persistence covers the rest. Clearing the Query cache does not clear the manual caches.
+
+**My Requests no longer depend on the persisted cache for history** (durable-data 02). Their history lives in `my_requests_v1` (§3.2), which only a successful per-day fetch writes, so a failed refresh, the persister's 24 h `maxAge` or a cleared Query cache cannot lose it. The persisted `['myRequests', assignmentId]` value is a view rebuilt from the store on every successful run, and seeded from it on a cold cache (§4.4). A legacy 1.1/1.2.0 blob is never imported into the store: its entries are carried forward in the view only, until the server gives each date a record.
+
+**Keep last good** (durable-data 03). A failed refresh never replaces stored data: it throws, or it skips the write. `fetchTimesheet` rejects when all three strategies threw (one that responded with no row still resolves `null`, a truthful zero), `fetchPayments` rethrows every error, `buildPaymentHistoryQueryFn` (shared by `usePaymentHistory` and `useEarningsHistory`) rethrows, and `buildTeamAggregateQueryFn` throws when the roster is non-empty and every member failed. TanStack then keeps the last good `data`, and `useHoursData`'s `isError` guard leaves `hours_cache` (and so `widget_data`) untouched. These queries retry through `shouldRetryOnce` (`src/api/errors.ts`): one retry, outages only. `useAIData` keeps `data` on an `AuthError`. The weekly-history writers (`useAIData`, `useEarningsHistory`, `runBackfill`, `wipeAIHistory`) read through `readWeeklyHistoryForWrite()`, which returns `null` only when `getItem` threw (logged as `history.read_failed`), and skip `saveWeeklyHistory` on `null`; readers keep `loadWeeklyHistory`. The persister's predicate, `shouldDehydrateQuery` (`src/lib/queryPersist.ts`), keeps `success` queries and errored queries that still hold data, so the last good values survive a restart: they come back as stored (`status: 'error'`, `error: {}`, `fetchStatus: 'idle'`) and refetch on mount. It never keeps a query whose data is stamped `ownerKey: 'dev-mock'` (the manager-preview My Requests view, §4.4); the literal is shared with `useMyRequests.ts`, not imported, and a test pins both.
 
 ### 8.9 Observability: local error log only (no automatic phone-home)
 

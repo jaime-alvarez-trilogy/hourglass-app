@@ -8,31 +8,29 @@
 //
 // Architecture:
 //   Outer View has pointerEvents="none" — guarantees touches pass through.
-//   ImageBackground handles tiling correctly (Image resizeMode="repeat" renders
-//   a fixed square on iOS; ImageBackground tiles properly).
+//   Skia Canvas fills the screen with NoiseShader at one noise pixel per device pixel.
+//   Opacity is a paint prop on <Fill>, not a style on the Canvas (Skia canvas +
+//   style.opacity < 1.0 = rendering glitch risk). See NoiseShader.tsx for why this is
+//   no longer an ImageBackground.
 
 import React from 'react';
-import { View, ImageBackground, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
+import { Canvas, Fill } from '@shopify/react-native-skia';
+import { NoiseShader, useNoiseImage } from './NoiseShader';
+
+const NOISE_OPACITY = 0.04;
 
 export default function NoiseOverlay(): React.JSX.Element {
+  const noise = useNoiseImage();
   return (
-    <View pointerEvents="none" style={styles.container}>
-      <ImageBackground
-        source={require('../../assets/images/noise.png')}
-        style={StyleSheet.absoluteFill}
-        resizeMode="repeat"
-      />
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      <Canvas style={StyleSheet.absoluteFill}>
+        {noise && (
+          <Fill opacity={NOISE_OPACITY}>
+            <NoiseShader image={noise} />
+          </Fill>
+        )}
+      </Canvas>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    opacity: 0.04,
-  },
-});

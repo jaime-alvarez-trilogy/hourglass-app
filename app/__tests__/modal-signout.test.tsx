@@ -304,3 +304,78 @@ describe('sign-out clears the iOS widget timeline and the debug log', () => {
     expect(source).toContain("from '@/src/widgets/bridge'");
   });
 });
+
+// Final review 2026-10-21: expo-secure-store 58 rejects deleteItemAsync with a KeyChainException
+// when the keychain refuses the delete (SDK 55 resolved). A clearAll rejection used to skip every
+// later step: the TanStack cache, notifications, the widget timeline, the log and the redirect.
+describe('sign-out completes when the keychain delete rejects (expo-secure-store 58)', () => {
+  let alertSpy: jest.SpyInstance;
+  let warnSpy: jest.SpyInstance;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const SecureStore = require('expo-secure-store') as { deleteItemAsync: jest.Mock; _reset: () => void };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    callOrder.length = 0;
+    mockUnregisterPushToken.mockImplementation(async () => {});
+    mockReplace.mockImplementation(() => {
+      callOrder.push('router.replace');
+    });
+    mockClearWidgetData.mockImplementation(async () => {
+      callOrder.push('clearWidgetData');
+    });
+    mockLogClear.mockImplementation(async () => {
+      callOrder.push('log.clear');
+    });
+    alertSpy = jest.spyOn(Alert, 'alert');
+    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    alertSpy.mockRestore();
+    warnSpy.mockRestore();
+    SecureStore._reset();
+  });
+
+  /** Presses Sign Out, confirms, and awaits the whole destructive handler (not just the press). */
+  async function signOutAndWait(): Promise<void> {
+    let renderer: any;
+    act(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      renderer = create(React.createElement(require('../modal').default));
+    });
+    let pipeline: Promise<void> | undefined;
+    alertSpy.mockImplementationOnce((_title: string, _msg: string, buttons: any[]) => {
+      pipeline = buttons.find((b: any) => b.style === 'destructive')?.onPress?.();
+    });
+    const nodes = renderer.root.findAll((node: any) => node.props?.onPress !== undefined);
+    await act(async () => {
+      await nodes[nodes.length - 1].props.onPress();
+      await pipeline;
+    });
+    expect(pipeline).toBeDefined();
+  }
+
+  it('the real clearAll with a rejecting deleteItemAsync still clears the widget and the log, then navigates', async () => {
+    mockClearAll.mockImplementationOnce(() => jest.requireActual('@/src/store/config').clearAll());
+    SecureStore.deleteItemAsync.mockRejectedValue(new Error('KeyChainException: -25308'));
+
+    await signOutAndWait();
+
+    expect(SecureStore.deleteItemAsync).toHaveBeenCalledTimes(2);
+    expect(mockClearWidgetData).toHaveBeenCalledTimes(1);
+    expect(mockLogClear).toHaveBeenCalledTimes(1);
+    expect(mockReplace).toHaveBeenCalledWith('/(auth)/welcome');
+    expect(callOrder).toEqual(['clearWidgetData', 'log.clear', 'router.replace']);
+  });
+
+  it('any clearAll rejection still runs the rest of the sign-out and navigates', async () => {
+    mockClearAll.mockRejectedValueOnce(new Error('AsyncStorage multiRemove failed'));
+
+    await signOutAndWait();
+
+    expect(mockClearWidgetData).toHaveBeenCalledTimes(1);
+    expect(mockLogClear).toHaveBeenCalledTimes(1);
+    expect(mockReplace).toHaveBeenCalledWith('/(auth)/welcome');
+  });
+});

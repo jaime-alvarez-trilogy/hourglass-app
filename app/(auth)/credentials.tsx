@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   KeyboardAvoidingView, ScrollView, Platform, Keyboard, StyleSheet,
+  type TextInputInstance,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useOnboarding } from '@/src/contexts/OnboardingContext';
@@ -17,7 +18,7 @@ export default function CredentialsScreen() {
   const [passwordError, setPasswordError] = useState('');
   const [emailFocused, setEmailFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
-  const passwordRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInputInstance>(null);
 
   useEffect(() => {
     if (step === 'verifying') router.push('/(auth)/verifying');
@@ -122,7 +123,7 @@ export default function CredentialsScreen() {
 
           {/* CTA */}
           <View style={styles.ctaWrap}>
-            <GradientButton label="Sign In" onPress={handleSignIn} loading={isLoading} />
+            <GradientButton label="Sign In" onPress={handleSignIn} loading={isLoading} testID="credentials-submit" />
           </View>
         </View>
       </ScrollView>

@@ -10,6 +10,14 @@
  * `invalidateAuthToken()` is called in beforeEach to reset state
  * between test cases (Jest module caching means top-level lets
  * survive across test cases within a file).
+ *
+ * The `DD1.*` blocks at the end cover features/app/durable-data spec
+ * 01-auth-renewal: single-flight renewal via `invalidateIfCurrent`, the
+ * mint generation guard, no-creds eviction, the `auth.*` log events, the
+ * 60 s failed-login latch, HTML 5xx after renewal
+ * (`ApiError(HTML_5XX_AFTER_RENEWAL)`, body unread) and how the errors the
+ * client throws classify under `isRetryableError`. The pure predicate and
+ * constant tables live in retry-policy.test.ts.
  */
 
 const mockFetch = jest.fn();
@@ -20,14 +28,22 @@ jest.mock('../../store/config', () => ({
     useQA ? 'https://api-qa.crossover.com' : 'https://api.crossover.com',
 }));
 
+jest.mock('../../lib/log', () => ({
+  log: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+}));
+
 import {
   apiGet,
   apiPut,
   getAuthToken,
   invalidateAuthToken,
+  invalidateIfCurrent,
+  LOGIN_LATCH_MS,
   mintAuthToken,
 } from '../../api/client';
-import { AuthError, ApiError } from '../../api/errors';
+import { AuthError, ApiError, NetworkError, isRetryableError } from '../../api/errors';
+import { log } from '../../lib/log';
+import { makeExpoLikeResponse } from '../../../__tests__/helpers/expoLikeResponse';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -484,5 +500,1071 @@ describe('FR9: handleStatus HTML 5xx → AuthError(AUTH_HTML_500)', () => {
 
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).statusCode).toBe(400);
+  });
+});
+
+// ===========================================================================
+// Durable-data 01-auth-renewal (DD1.*)
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// DD1 helpers
+// ---------------------------------------------------------------------------
+
+const TOKEN_PATH = '/api/v3/token';
+
+const mockLogInfo = log.info as jest.Mock;
+const mockLogWarn = log.warn as jest.Mock;
+const mockLogError = log.error as jest.Mock;
+
+function clearLogMocks() {
+  mockLogInfo.mockClear();
+  mockLogWarn.mockClear();
+  mockLogError.mockClear();
+}
+
+beforeEach(clearLogMocks);
+
+/** A promise whose settlement the test controls (holds a mint or a response open). */
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  let reject!: (e: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/** Let every queued promise continuation run (all callers reach the pending mint). */
+function flush(): Promise<void> {
+  return new Promise((res) => setTimeout(res, 0));
+}
+
+/**
+ * URL-routing fetch: POST /api/v3/token goes to `token()`, every other path goes
+ * to `data(authToken, url)`, keyed on the request's `x-auth-token` header.
+ */
+function routeFetch(handlers: {
+  token: () => unknown;
+  data?: (authToken: string, url: string) => unknown;
+}) {
+  mockFetch.mockImplementation(async (url: string, init: { headers: Record<string, string> }) => {
+    if (String(url).includes(TOKEN_PATH)) return handlers.token();
+    if (!handlers.data) throw new Error(`unexpected data fetch: ${url}`);
+    return handlers.data(init.headers['x-auth-token'], String(url));
+  });
+}
+
+/** Mint responses served in order; any extra mint gets an obviously wrong token. */
+function mintSequence(...tokens: string[]) {
+  return () => makeTokenResponse(tokens.shift() ?? 'unexpected-extra-mint');
+}
+
+function tokenPosts() {
+  return mockFetch.mock.calls.filter(([url]) => String(url).includes(TOKEN_PATH));
+}
+
+function dataFetches(): { url: string; authToken: string; body?: string }[] {
+  return mockFetch.mock.calls
+    .filter(([url]) => !String(url).includes(TOKEN_PATH))
+    .map(([url, init]) => ({
+      url: String(url),
+      authToken: init.headers['x-auth-token'],
+      body: init.body,
+    }));
+}
+
+function makeEmptyOkResponse() {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => undefined,
+    text: async () => '',
+    headers: { get: (_: string) => null },
+  };
+}
+
+/** Put `token` in the module cache through a real mint, then forget that mint's fetch and logs. */
+async function seedCachedToken(token: string) {
+  mockFetch.mockResolvedValueOnce(makeTokenResponse(token));
+  await expect(getAuthToken(CREDS.username, CREDS.password, CREDS.useQA)).resolves.toBe(token);
+  mockFetch.mockClear();
+  clearLogMocks();
+}
+
+function getCredsToken() {
+  return getAuthToken(CREDS.username, CREDS.password, CREDS.useQA);
+}
+
+function logEvents(mock: jest.Mock, category: string) {
+  return mock.mock.calls.filter(([c]) => c === category);
+}
+
+// ---------------------------------------------------------------------------
+// DD1.1 — a wave of concurrent auth failures shares one re-mint
+// ---------------------------------------------------------------------------
+
+describe('DD1.1: concurrent auth failures share a single re-mint', () => {
+  it('DD1.1.a: 15 concurrent apiGet 401s with the stale token make exactly 1 token POST and all resolve', async () => {
+    await seedCachedToken('stale');
+    const mint = deferred<unknown>();
+    routeFetch({
+      token: () => mint.promise,
+      data: (t) => (t === 'fresh' ? makeJsonOkResponse({ ok: true }) : makeJsonErrorResponse(401)),
+    });
+
+    const all = Promise.all(
+      Array.from({ length: 15 }, () =>
+        apiGet<{ ok: boolean }>('/test', {}, 'stale', false, CREDS),
+      ),
+    );
+    await flush(); // every caller has had its 401 and is waiting on the mint
+    mint.resolve(makeTokenResponse('fresh'));
+    const results = await all;
+
+    expect(results).toEqual(Array.from({ length: 15 }, () => ({ ok: true })));
+    expect(tokenPosts()).toHaveLength(1);
+    const fetches = dataFetches();
+    expect(fetches).toHaveLength(30);
+    expect(fetches.filter((f) => f.authToken === 'fresh')).toHaveLength(15);
+  });
+
+  it('DD1.1.b: apiPut mirror — 5 concurrent 401s share 1 mint and each retry re-sends its own body', async () => {
+    await seedCachedToken('stale');
+    const mint = deferred<unknown>();
+    routeFetch({
+      token: () => mint.promise,
+      data: (t) => (t === 'fresh' ? makeEmptyOkResponse() : makeJsonErrorResponse(401)),
+    });
+
+    const bodies = Array.from({ length: 5 }, (_, i) => ({ timecardId: i }));
+    const all = Promise.all(bodies.map((b) => apiPut('/put', b, 'stale', false, CREDS)));
+    await flush();
+    mint.resolve(makeTokenResponse('fresh'));
+    await all;
+
+    expect(tokenPosts()).toHaveLength(1);
+    const retries = dataFetches().filter((f) => f.authToken === 'fresh');
+    expect(retries.map((f) => f.body).sort()).toEqual(bodies.map((b) => JSON.stringify(b)).sort());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.2 — a late 401 with the old token never discards the fresh one
+// ---------------------------------------------------------------------------
+
+describe('DD1.2: interleaved renewal keeps the fresher token', () => {
+  it('DD1.2.a: B\'s late 401 with the stale token retries with A\'s fresh token, no second mint', async () => {
+    await seedCachedToken('stale');
+    const lateB = deferred<unknown>();
+    routeFetch({
+      token: mintSequence('fresh', 'fresh-2'),
+      data: (t, url) => {
+        if (t !== 'stale') return makeJsonOkResponse({ servedWith: t });
+        return url.endsWith('/b') ? lateB.promise : makeJsonErrorResponse(401);
+      },
+    });
+
+    // B's request leaves with the stale token; its 401 is held until A has renewed.
+    const b = apiGet<{ servedWith: string }>('/b', {}, 'stale', false, CREDS);
+    const a = await apiGet<{ servedWith: string }>('/a', {}, 'stale', false, CREDS);
+    expect(a).toEqual({ servedWith: 'fresh' });
+
+    lateB.resolve(makeJsonErrorResponse(401));
+    expect(await b).toEqual({ servedWith: 'fresh' });
+    expect(tokenPosts()).toHaveLength(1);
+
+    // The cache still holds A's token: the next getAuthToken makes 0 fetches.
+    const before = mockFetch.mock.calls.length;
+    await expect(getCredsToken()).resolves.toBe('fresh');
+    expect(mockFetch.mock.calls.length).toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.3 — invalidateIfCurrent only evicts the token it is given
+// ---------------------------------------------------------------------------
+
+describe('DD1.3: invalidateIfCurrent', () => {
+  it('DD1.3.a: a token other than the cached one is a no-op (next getAuthToken makes 0 fetches)', async () => {
+    await seedCachedToken('fresh');
+
+    invalidateIfCurrent('other');
+
+    await expect(getCredsToken()).resolves.toBe('fresh');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('DD1.3.b: the cached token is evicted (next getAuthToken mints once)', async () => {
+    await seedCachedToken('fresh');
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('fresh-2'));
+
+    invalidateIfCurrent('fresh');
+
+    await expect(getCredsToken()).resolves.toBe('fresh-2');
+    expect(tokenPosts()).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.4 — invalidateIfCurrent leaves an in-flight mint alone
+// ---------------------------------------------------------------------------
+
+describe('DD1.4: invalidateIfCurrent during an in-flight mint', () => {
+  it('DD1.4.a: a concurrent getAuthToken joins the pending mint, and that mint still fills the cache', async () => {
+    const mint = deferred<unknown>();
+    routeFetch({ token: () => mint.promise });
+
+    const first = getCredsToken();
+    invalidateIfCurrent('stale');
+    const second = getCredsToken();
+    mint.resolve(makeTokenResponse('tok'));
+
+    await expect(Promise.all([first, second])).resolves.toEqual(['tok', 'tok']);
+    expect(tokenPosts()).toHaveLength(1);
+    // The mint was still current (no generation bump), so the cache serves the next call.
+    await expect(getCredsToken()).resolves.toBe('tok');
+    expect(tokenPosts()).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.5 — a mint started before invalidateAuthToken() never fills the cache
+// ---------------------------------------------------------------------------
+
+describe('DD1.5: mint generation guard', () => {
+  it('DD1.5.a: env switch mid-mint — the caller gets its token, the next getAuthToken mints again', async () => {
+    const prodMint = deferred<unknown>();
+    mockFetch.mockReturnValueOnce(prodMint.promise);
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('qa-tok'));
+
+    const pending = getAuthToken('u', 'p', false);
+    invalidateAuthToken(); // env switch (app/modal.tsx)
+    prodMint.resolve(makeTokenResponse('prod-tok'));
+
+    await expect(pending).resolves.toBe('prod-tok');
+    await expect(getAuthToken('u', 'p', true)).resolves.toBe('qa-tok');
+    expect(tokenPosts()).toHaveLength(2);
+    expect(tokenPosts()[1][0]).toContain('api-qa.crossover.com');
+    // The stale mint was not cached, but it did mint: one auth.token_minted per POST.
+    expect(logEvents(mockLogInfo, 'auth.token_minted')).toHaveLength(2);
+  });
+
+  it('DD1.5.b: a stale mint settling does not clear a newer in-flight mint (later callers join it)', async () => {
+    const oldMint = deferred<unknown>();
+    const newMint = deferred<unknown>();
+    routeFetch({ token: () => makeTokenResponse('unexpected-extra-mint') });
+    mockFetch.mockReturnValueOnce(oldMint.promise);
+    mockFetch.mockReturnValueOnce(newMint.promise);
+
+    const beforeReset = getCredsToken();
+    invalidateAuthToken(); // sign-out
+    const afterReset = getCredsToken();
+    oldMint.resolve(makeTokenResponse('old-tok'));
+    await expect(beforeReset).resolves.toBe('old-tok');
+
+    const late = getCredsToken();
+    newMint.resolve(makeTokenResponse('new-tok'));
+
+    await expect(Promise.all([afterReset, late])).resolves.toEqual(['new-tok', 'new-tok']);
+    expect(tokenPosts()).toHaveLength(2);
+    await expect(getCredsToken()).resolves.toBe('new-tok');
+    expect(tokenPosts()).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.6 — without creds, an auth-like response evicts its token (no retry)
+// ---------------------------------------------------------------------------
+
+describe('DD1.6: no-creds eviction', () => {
+  it('DD1.6.a: apiGet 401 → AuthError(401) after 1 data fetch, and the next getAuthToken mints', async () => {
+    await seedCachedToken('stale');
+    routeFetch({ token: mintSequence('fresh'), data: () => makeJsonErrorResponse(401) });
+
+    const err = await apiGet('/test', {}, 'stale', false).catch((e) => e);
+
+    expect(err).toBeInstanceOf(AuthError);
+    expect((err as AuthError).statusCode).toBe(401);
+    expect(dataFetches()).toHaveLength(1);
+    expect(tokenPosts()).toHaveLength(0);
+    await expect(getCredsToken()).resolves.toBe('fresh');
+    expect(tokenPosts()).toHaveLength(1);
+  });
+
+  it('DD1.6.b: apiGet HTML 500 → AuthError(AUTH_HTML_500) after 1 data fetch, and the next getAuthToken mints', async () => {
+    await seedCachedToken('stale');
+    routeFetch({ token: mintSequence('fresh'), data: () => makeHtml5xxResponse(500) });
+
+    const err = await apiGet('/test', {}, 'stale', false).catch((e) => e);
+
+    expect(err).toBeInstanceOf(AuthError);
+    expect((err as AuthError).errorCode).toBe('AUTH_HTML_500');
+    expect(dataFetches()).toHaveLength(1);
+    expect(tokenPosts()).toHaveLength(0);
+    await expect(getCredsToken()).resolves.toBe('fresh');
+    expect(tokenPosts()).toHaveLength(1);
+  });
+
+  it('DD1.6.c: apiPut 401 → AuthError(401) after 1 data fetch, and the next getAuthToken mints', async () => {
+    await seedCachedToken('stale');
+    routeFetch({ token: mintSequence('fresh'), data: () => makeJsonErrorResponse(401) });
+
+    const err = await apiPut('/put', { a: 1 }, 'stale', false).catch((e) => e);
+
+    expect(err).toBeInstanceOf(AuthError);
+    expect(dataFetches()).toHaveLength(1);
+    await expect(getCredsToken()).resolves.toBe('fresh');
+    expect(tokenPosts()).toHaveLength(1);
+  });
+
+  it('DD1.6.d: a 401 for a token that is no longer cached keeps the cached one (0 fetches next)', async () => {
+    await seedCachedToken('fresh');
+    routeFetch({ token: mintSequence('fresh-2'), data: () => makeJsonErrorResponse(401) });
+
+    await expect(apiGet('/test', {}, 'stale', false)).rejects.toBeInstanceOf(AuthError);
+
+    await expect(getCredsToken()).resolves.toBe('fresh');
+    expect(tokenPosts()).toHaveLength(0);
+  });
+
+  it('DD1.6.e: a non-auth failure (JSON 500) keeps the cached token', async () => {
+    await seedCachedToken('fresh');
+    routeFetch({ token: mintSequence('fresh-2'), data: () => makeJsonErrorResponse(500) });
+
+    await expect(apiGet('/test', {}, 'fresh', false)).rejects.toBeInstanceOf(ApiError);
+
+    await expect(getCredsToken()).resolves.toBe('fresh');
+    expect(tokenPosts()).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.7 — a 401 that persists after renewal (FR4.c contract, unchanged)
+// ---------------------------------------------------------------------------
+
+describe('DD1.7: 401 that persists with a fresh token', () => {
+  it('DD1.7.a: with creds, 401 → mint → 401 rejects with AuthError(401) after exactly 2 data fetches', async () => {
+    routeFetch({ token: mintSequence('fresh'), data: () => makeJsonErrorResponse(401) });
+
+    const err = await apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e);
+
+    expect(err).toBeInstanceOf(AuthError);
+    expect((err as AuthError).statusCode).toBe(401);
+    expect(dataFetches().map((f) => f.authToken)).toEqual(['stale', 'fresh']);
+    expect(tokenPosts()).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.8 — auth log events (src/lib/log.ts)
+// ---------------------------------------------------------------------------
+
+describe('DD1.8: auth log events', () => {
+  it('DD1.8.a: auth.token_minted fires once per successful getAuthToken mint — not on cache hits, joins, failed mints or mintAuthToken', async () => {
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('tok-1'));
+    await getCredsToken();
+    await getCredsToken(); // cache hit
+    expect(logEvents(mockLogInfo, 'auth.token_minted')).toEqual([['auth.token_minted', {}]]);
+
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('probe-tok'));
+    await mintAuthToken(CREDS.username, CREDS.password, CREDS.useQA);
+
+    invalidateAuthToken();
+    mockFetch.mockResolvedValueOnce(makeJsonErrorResponse(401));
+    await expect(getCredsToken()).rejects.toBeInstanceOf(AuthError);
+    expect(logEvents(mockLogInfo, 'auth.token_minted')).toHaveLength(1);
+
+    invalidateAuthToken();
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('tok-2'));
+    await Promise.all([getCredsToken(), getCredsToken(), getCredsToken()]);
+    expect(logEvents(mockLogInfo, 'auth.token_minted')).toEqual([
+      ['auth.token_minted', {}],
+      ['auth.token_minted', {}],
+    ]);
+  });
+
+  it('DD1.8.b: auth.token_retried { triggerStatusCode: 401 } fires once per apiGet retry, never without one', async () => {
+    routeFetch({
+      token: mintSequence('fresh'),
+      data: (t) => (t === 'fresh' ? makeJsonOkResponse({ ok: true }) : makeJsonErrorResponse(401)),
+    });
+
+    await expect(apiGet('/test', {}, 'stale', false)).rejects.toBeInstanceOf(AuthError);
+    expect(logEvents(mockLogWarn, 'auth.token_retried')).toHaveLength(0);
+
+    await apiGet('/test', {}, 'stale', false, CREDS);
+    expect(logEvents(mockLogWarn, 'auth.token_retried')).toEqual([
+      ['auth.token_retried', { triggerStatusCode: 401 }],
+    ]);
+  });
+
+  it.each([500, 503])(
+    'DD1.8.c: an HTML %i trigger logs auth.token_retried with that status',
+    async (status) => {
+      routeFetch({
+        token: mintSequence('fresh'),
+        data: (t) => (t === 'fresh' ? makeJsonOkResponse({ ok: true }) : makeHtml5xxResponse(status)),
+      });
+
+      await apiGet('/test', {}, 'stale', false, CREDS);
+
+      expect(logEvents(mockLogWarn, 'auth.token_retried')).toEqual([
+        ['auth.token_retried', { triggerStatusCode: status }],
+      ]);
+    },
+  );
+
+  it('DD1.8.d: apiPut retry logs auth.token_retried { triggerStatusCode: 401 }', async () => {
+    routeFetch({
+      token: mintSequence('fresh'),
+      data: (t) => (t === 'fresh' ? makeEmptyOkResponse() : makeJsonErrorResponse(401)),
+    });
+
+    await apiPut('/put', { a: 1 }, 'stale', false, CREDS);
+
+    expect(logEvents(mockLogWarn, 'auth.token_retried')).toEqual([
+      ['auth.token_retried', { triggerStatusCode: 401 }],
+    ]);
+  });
+
+  it('DD1.8.e: a concurrent wave logs 1 auth.token_minted and 1 auth.token_retried per caller', async () => {
+    await seedCachedToken('stale');
+    const mint = deferred<unknown>();
+    routeFetch({
+      token: () => mint.promise,
+      data: (t) => (t === 'fresh' ? makeJsonOkResponse({ ok: true }) : makeJsonErrorResponse(401)),
+    });
+
+    const all = Promise.all([1, 2, 3].map(() => apiGet('/test', {}, 'stale', false, CREDS)));
+    await flush();
+    mint.resolve(makeTokenResponse('fresh'));
+    await all;
+
+    expect(logEvents(mockLogInfo, 'auth.token_minted')).toHaveLength(1);
+    expect(logEvents(mockLogWarn, 'auth.token_retried')).toEqual(
+      Array.from({ length: 3 }, () => ['auth.token_retried', { triggerStatusCode: 401 }]),
+    );
+  });
+
+  it('DD1.8.f: no auth log call carries the token, username or password', async () => {
+    const secret = { username: 'jane.doe@example.com', password: 'hunter2-secret', useQA: false };
+    routeFetch({
+      token: mintSequence('tok-stale-0001', 'tok-fresh-0002'),
+      data: (t) =>
+        t === 'tok-fresh-0002' ? makeJsonOkResponse({ ok: true }) : makeJsonErrorResponse(401),
+    });
+
+    await getAuthToken(secret.username, secret.password, secret.useQA);
+    await apiGet('/test', {}, 'tok-stale-0001', false, secret);
+
+    const calls = [...mockLogInfo.mock.calls, ...mockLogWarn.mock.calls, ...mockLogError.mock.calls];
+    expect(calls.map(([category]) => category)).toEqual(
+      expect.arrayContaining(['auth.token_minted', 'auth.token_retried']),
+    );
+    const serialized = JSON.stringify(calls);
+    for (const value of ['tok-stale-0001', 'tok-fresh-0002', secret.username, secret.password]) {
+      expect(serialized).not.toContain(value);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.9-DD1.17 helpers — failed-login latch
+// ---------------------------------------------------------------------------
+
+type TestCreds = typeof CREDS;
+
+/** A JSON error in Crossover's `{errorCode, type, httpStatus, text}` envelope (docs/CROSSOVER_API.md F4). */
+function makeEnvelopeErrorResponse(status: number, errorCode: string, text: string) {
+  const envelope = { errorCode, type: 'ERROR', httpStatus: status, text };
+  return {
+    ok: false,
+    status,
+    json: async () => envelope,
+    text: async () => JSON.stringify(envelope),
+    headers: { get: (k: string) =>
+      k.toLowerCase() === 'content-type' ? 'application/json' : null,
+    },
+  };
+}
+
+function tokenFor(creds: TestCreds) {
+  return getAuthToken(creds.username, creds.password, creds.useQA);
+}
+
+/**
+ * Have the token endpoint reject `CREDS` through getAuthToken (the rejection that latches),
+ * then forget that fetch and its logs. The endpoint keeps answering `status` afterwards,
+ * like a server that still holds a different password.
+ */
+async function rejectLogin(status: 401 | 403 = 401) {
+  routeFetch({ token: () => makeJsonErrorResponse(status) });
+  await expect(getCredsToken()).rejects.toBeInstanceOf(AuthError);
+  mockFetch.mockClear();
+  clearLogMocks();
+}
+
+function expectLatchedError(err: unknown, statusCode: 401 | 403 = 401) {
+  expect(err).toBeInstanceOf(AuthError);
+  expect(err).toMatchObject({ errorCode: 'AUTH_LOGIN_LATCHED', statusCode });
+}
+
+/** The original rejection from the token endpoint, not the latch's synthetic one. */
+function expectServerRejection(err: unknown, statusCode: 401 | 403 = 401) {
+  expect(err).toBeInstanceOf(AuthError);
+  expect((err as AuthError).statusCode).toBe(statusCode);
+  expect((err as AuthError).errorCode).not.toBe('AUTH_LOGIN_LATCHED');
+}
+
+// ---------------------------------------------------------------------------
+// DD1.9 — a rejected login is latched for its credentials
+// ---------------------------------------------------------------------------
+
+describe('DD1.9: failed-login latch', () => {
+  it('DD1.9.a: mint 401 → AuthError(401); the same creds inside 60 s → AUTH_LOGIN_LATCHED with 0 fetches; logged once', async () => {
+    routeFetch({ token: () => makeJsonErrorResponse(401) });
+
+    expectServerRejection(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(1);
+
+    // A TanStack retry, then another: both refused locally.
+    expectLatchedError(await getCredsToken().catch((e) => e));
+    expectLatchedError(await getCredsToken().catch((e) => e));
+
+    expect(tokenPosts()).toHaveLength(1);
+    expect(logEvents(mockLogWarn, 'auth.login_latched')).toEqual([
+      ['auth.login_latched', { statusCode: 401 }],
+    ]);
+    expect(logEvents(mockLogInfo, 'auth.token_minted')).toHaveLength(0);
+  });
+
+  it('DD1.9.b: callers that joined the rejected mint get its 401; a caller after it settles is latched', async () => {
+    const mint = deferred<unknown>();
+    routeFetch({ token: () => mint.promise });
+
+    const joined = Promise.all([1, 2, 3].map(() => getCredsToken().catch((e) => e)));
+    mint.resolve(makeJsonErrorResponse(401));
+    for (const err of await joined) expectServerRejection(err);
+    expect(tokenPosts()).toHaveLength(1);
+
+    expectLatchedError(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(1);
+    expect(logEvents(mockLogWarn, 'auth.login_latched')).toHaveLength(1);
+  });
+
+  it('DD1.9.c: neither the latched error nor any log call carries the username, password or Basic string', async () => {
+    const secret = { username: 'jane.doe@example.com', password: 'hunter2-secret', useQA: false };
+    routeFetch({ token: () => makeJsonErrorResponse(401) });
+
+    await expect(tokenFor(secret)).rejects.toBeInstanceOf(AuthError);
+    const latched = await tokenFor(secret).catch((e) => e);
+
+    expectLatchedError(latched);
+    expect(logEvents(mockLogWarn, 'auth.login_latched')).toHaveLength(1);
+    const exposed = JSON.stringify([
+      (latched as AuthError).message,
+      (latched as AuthError).serverText,
+      ...mockLogInfo.mock.calls,
+      ...mockLogWarn.mock.calls,
+      ...mockLogError.mock.calls,
+    ]);
+    for (const value of [secret.username, secret.password, btoa(`${secret.username}:${secret.password}`)]) {
+      expect(exposed).not.toContain(value);
+    }
+  });
+
+  // The cache and the in-flight mint are keyed by the env + credentials fingerprint
+  // (durable-data cross-spec review), so latched creds never join a mint for other
+  // credentials: they get the latched error, and the corrected creds get their token.
+  it('DD1.9.d: latched creds arriving while a mint for other creds is in flight get the latched error (no extra POST, never the other token)', async () => {
+    await rejectLogin(401);
+    const corrected = deferred<unknown>();
+    routeFetch({ token: () => corrected.promise });
+
+    const other = tokenFor({ ...CREDS, password: 'pw-corrected' });
+    const latched = await getCredsToken().catch((e) => e);
+    corrected.resolve(makeTokenResponse('tok-corrected'));
+
+    expectLatchedError(latched);
+    await expect(other).resolves.toBe('tok-corrected');
+    expect(tokenPosts()).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.10 — the latch lasts LOGIN_LATCH_MS from the rejection
+// ---------------------------------------------------------------------------
+
+describe('DD1.10: latch expiry', () => {
+  const T0 = Date.UTC(2026, 9, 22, 9, 0, 0);
+  let nowSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    nowSpy = jest.spyOn(Date, 'now').mockReturnValue(T0);
+  });
+  afterEach(() => nowSpy.mockRestore());
+
+  it('DD1.10.a: LOGIN_LATCH_MS is 60 s', () => {
+    expect(LOGIN_LATCH_MS).toBe(60_000);
+  });
+
+  it('DD1.10.b: latched through a 1 s / 2 s retry cycle and at 59 999 ms; from exactly 60 000 ms the same creds mint again', async () => {
+    await rejectLogin(401);
+
+    for (const elapsed of [1_000, 3_000, 59_999]) {
+      nowSpy.mockReturnValue(T0 + elapsed);
+      expectLatchedError(await getCredsToken().catch((e) => e));
+    }
+    expect(tokenPosts()).toHaveLength(0);
+
+    // Refused for LOGIN_LATCH_MS, not one millisecond longer (`Date.now() < until`).
+    nowSpy.mockReturnValue(T0 + 60_000);
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('tok-after-expiry'));
+
+    await expect(getCredsToken()).resolves.toBe('tok-after-expiry');
+    expect(tokenPosts()).toHaveLength(1);
+  });
+
+  it('DD1.10.c: a rejection after expiry latches again, for 60 s from that rejection', async () => {
+    await rejectLogin(401);
+
+    nowSpy.mockReturnValue(T0 + 60_001);
+    expectServerRejection(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(1);
+    expect(logEvents(mockLogWarn, 'auth.login_latched')).toEqual([
+      ['auth.login_latched', { statusCode: 401 }],
+    ]);
+
+    nowSpy.mockReturnValue(T0 + 60_001 + 59_999);
+    expectLatchedError(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.11 — the latch is keyed by environment + username + password
+// ---------------------------------------------------------------------------
+
+describe('DD1.11: other credentials are not blocked', () => {
+  it.each([
+    ['a different password, same username', { ...CREDS, password: 'pw-corrected' }],
+    ['the same username and password in the other environment', { ...CREDS, useQA: !CREDS.useQA }],
+    ['a different username, same password', { ...CREDS, username: 'someone.else@example.com' }],
+    // `u@example.com` + `pw` vs `u@example.comp` + `w`: the same characters, split differently.
+    ['the same characters split differently between username and password', {
+      ...CREDS,
+      username: `${CREDS.username}${CREDS.password[0]}`,
+      password: CREDS.password.slice(1),
+    }],
+  ])('DD1.11.a: while CREDS are latched, %s mints immediately', async (_label, other) => {
+    await rejectLogin(401);
+    expectLatchedError(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(0);
+
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('tok-other'));
+    await expect(tokenFor(other)).resolves.toBe('tok-other');
+
+    expect(tokenPosts()).toHaveLength(1);
+    const [url, init] = tokenPosts()[0];
+    expect(url).toContain(other.useQA ? 'https://api-qa.crossover.com' : 'https://api.crossover.com');
+    expect(init.headers.Authorization).toBe(`Basic ${btoa(`${other.username}:${other.password}`)}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.12 — invalidateAuthToken() (sign-out / env switch) clears the latch
+// ---------------------------------------------------------------------------
+
+describe('DD1.12: invalidateAuthToken clears the latch', () => {
+  it('DD1.12.a: after invalidateAuthToken() during the latch, the same creds mint', async () => {
+    await rejectLogin(401);
+    expectLatchedError(await getCredsToken().catch((e) => e));
+
+    invalidateAuthToken();
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('tok-after-reset'));
+
+    await expect(getCredsToken()).resolves.toBe('tok-after-reset');
+    expect(tokenPosts()).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.13 — a successful getAuthToken mint clears the latch
+// ---------------------------------------------------------------------------
+
+describe('DD1.13: a successful mint clears the latch', () => {
+  it('DD1.13.a: latch A, mint B, evict B with invalidateIfCurrent → getAuthToken(A) makes 1 fetch', async () => {
+    const credsB = { ...CREDS, password: 'pw-corrected' };
+    await rejectLogin(401);
+    expectLatchedError(await getCredsToken().catch((e) => e));
+
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('tok-b'));
+    await expect(tokenFor(credsB)).resolves.toBe('tok-b');
+    invalidateIfCurrent('tok-b'); // empties the cache; does not touch the latch itself
+    expect(tokenPosts()).toHaveLength(1);
+
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('tok-a'));
+    await expect(getCredsToken()).resolves.toBe('tok-a');
+    expect(tokenPosts()).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.14 — mintAuthToken (the onboarding probe) neither reads nor writes the latch
+// ---------------------------------------------------------------------------
+
+describe('DD1.14: mintAuthToken bypasses the latch', () => {
+  it('DD1.14.a: a probe during the latch makes 1 fetch, and its success leaves getAuthToken latched', async () => {
+    await rejectLogin(401);
+    expectLatchedError(await getCredsToken().catch((e) => e));
+
+    mockFetch.mockResolvedValueOnce(makeTokenResponse('probe-tok'));
+    await expect(mintAuthToken(CREDS.username, CREDS.password, CREDS.useQA)).resolves.toBe('probe-tok');
+    expect(tokenPosts()).toHaveLength(1);
+
+    expectLatchedError(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(1);
+  });
+
+  it('DD1.14.b: a rejected probe does not latch — getAuthToken still asks the server, and its own rejection latches', async () => {
+    routeFetch({ token: () => makeJsonErrorResponse(401) });
+
+    expectServerRejection(await mintAuthToken(CREDS.username, CREDS.password, CREDS.useQA).catch((e) => e));
+    expect(logEvents(mockLogWarn, 'auth.login_latched')).toHaveLength(0);
+
+    expectServerRejection(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(2);
+
+    expectLatchedError(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.15 — renewal inside apiGet/apiPut during the latch
+// ---------------------------------------------------------------------------
+
+describe('DD1.15: renewal during the latch', () => {
+  it.each([
+    ['apiGet', () => apiGet('/test', {}, 'stale', false, CREDS)],
+    ['apiPut', () => apiPut('/put', { a: 1 }, 'stale', false, CREDS)],
+  ])('DD1.15.a: %s 401 with creds rejects with the latched AuthError after 1 data fetch and 0 token POSTs', async (_name, call) => {
+    await rejectLogin(401);
+    routeFetch({ token: () => makeJsonErrorResponse(401), data: () => makeJsonErrorResponse(401) });
+
+    const err = await call().catch((e) => e);
+
+    expectLatchedError(err);
+    expect(dataFetches()).toHaveLength(1);
+    expect(tokenPosts()).toHaveLength(0);
+    expect(logEvents(mockLogWarn, 'auth.token_retried')).toHaveLength(0);
+  });
+
+  it('DD1.15.b: password changed on the server — a 401 wave makes 1 rejected re-mint, then later calls are latched with 0 token POSTs', async () => {
+    await seedCachedToken('stale');
+    const mint = deferred<unknown>();
+    routeFetch({ token: () => mint.promise, data: () => makeJsonErrorResponse(401) });
+
+    const wave = Promise.all(
+      [1, 2, 3, 4, 5].map(() => apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e)),
+    );
+    await flush(); // every caller has had its 401 and joined the re-mint
+    mint.resolve(makeJsonErrorResponse(401));
+    for (const err of await wave) expectServerRejection(err);
+
+    expect(tokenPosts()).toHaveLength(1);
+    expect(logEvents(mockLogWarn, 'auth.login_latched')).toEqual([
+      ['auth.login_latched', { statusCode: 401 }],
+    ]);
+
+    expectLatchedError(await apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e));
+    expect(tokenPosts()).toHaveLength(1);
+    expect(dataFetches()).toHaveLength(6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.16 — only a credential rejection (AuthError other than AUTH_HTML_500) latches
+// ---------------------------------------------------------------------------
+
+describe('DD1.16: which mint failures latch', () => {
+  it.each([
+    ['a NetworkError', () => Promise.reject(new TypeError('Network request failed')), NetworkError, undefined],
+    ['an HTML 500 (AUTH_HTML_500)', () => makeHtml5xxResponse(500), AuthError, 'AUTH_HTML_500'],
+    ['an HTML 503 (AUTH_HTML_500)', () => makeHtml5xxResponse(503), AuthError, 'AUTH_HTML_500'],
+    ['a JSON 500 (ApiError)', () => makeJsonErrorResponse(500), ApiError, undefined],
+  ])('DD1.16.a: %s from the token endpoint does not latch', async (_label, reply, ErrorClass, errorCode) => {
+    routeFetch({ token: reply });
+    const err = await getCredsToken().catch((e) => e);
+    expect(err).toBeInstanceOf(ErrorClass);
+    expect((err as { errorCode?: string }).errorCode).toBe(errorCode);
+    expect(logEvents(mockLogWarn, 'auth.login_latched')).toHaveLength(0);
+
+    // The next call still reaches the server. When the server does judge and reject the
+    // credentials, that rejection (and only that one) latches.
+    routeFetch({ token: () => makeJsonErrorResponse(401) });
+    expectServerRejection(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(2);
+
+    expectLatchedError(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(2);
+    expect(logEvents(mockLogWarn, 'auth.login_latched')).toHaveLength(1);
+  });
+
+  it('DD1.16.b: a mint 403 latches with statusCode 403 and rethrows the server\'s own error first', async () => {
+    routeFetch({ token: () => makeEnvelopeErrorResponse(403, 'CROS-0002', 'Forbidden') });
+
+    const first = await getCredsToken().catch((e) => e);
+    expectServerRejection(first, 403);
+    expect((first as AuthError).errorCode).toBe('CROS-0002');
+
+    expectLatchedError(await getCredsToken().catch((e) => e), 403);
+    expect(tokenPosts()).toHaveLength(1);
+    expect(logEvents(mockLogWarn, 'auth.login_latched')).toEqual([
+      ['auth.login_latched', { statusCode: 403 }],
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.17 — a rejection from a mint that is no longer current does not latch
+// ---------------------------------------------------------------------------
+
+describe('DD1.17: a stale mint rejection does not latch', () => {
+  it('DD1.17.a: a 401 that settles after invalidateAuthToken() reaches its caller, and the next same-creds call asks the server', async () => {
+    const staleMint = deferred<unknown>();
+    routeFetch({ token: () => makeJsonErrorResponse(401) });
+    mockFetch.mockReturnValueOnce(staleMint.promise);
+
+    const pending = getCredsToken().catch((e) => e);
+    invalidateAuthToken(); // sign-out / env switch while the login is in flight
+    staleMint.resolve(makeJsonErrorResponse(401));
+
+    expectServerRejection(await pending);
+    expect(logEvents(mockLogWarn, 'auth.login_latched')).toHaveLength(0);
+
+    // Not latched by the stale mint: this call reaches the server, and its own (current)
+    // rejection latches.
+    expectServerRejection(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(2);
+
+    expectLatchedError(await getCredsToken().catch((e) => e));
+    expect(tokenPosts()).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.18-DD1.20 helpers — HTML 5xx after renewal
+// ---------------------------------------------------------------------------
+
+const TOMCAT_HTML = 'text/html;charset=utf-8';
+
+/** A single-read Tomcat error page whose body reads are tracked (`reads`, the `text` mock). */
+function makeTrackedHtml5xx(status: number, contentType = TOMCAT_HTML) {
+  return makeExpoLikeResponse({
+    status,
+    body: `<!doctype html><html><head><title>HTTP Status ${status} - Internal Server Error</title></head><body>...</body></html>`,
+    headers: { 'content-type': contentType },
+  });
+}
+
+/** The data endpoint answers `first` to the stale token and `retried` to the renewed one. */
+function serveStaleThenFresh(first: unknown, retried: unknown) {
+  routeFetch({
+    token: mintSequence('fresh'),
+    data: (t) => (t === 'stale' ? first : retried),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// DD1.18 — apiGet: an HTML 5xx that survives a fresh token is a server error
+// ---------------------------------------------------------------------------
+
+describe('DD1.18: apiGet HTML 5xx after renewal', () => {
+  it.each([
+    ['HTML 503 → mint → HTML 503', () => makeHtml5xxResponse(503), 503, TOMCAT_HTML],
+    ['HTML 500 → mint → HTML 500', () => makeHtml5xxResponse(500), 500, 'text/html'],
+    ['JSON 401 → mint → HTML 502', () => makeJsonErrorResponse(401), 502, TOMCAT_HTML],
+  ])(
+    'DD1.18.a: with creds, %s rejects with a retryable ApiError(HTML_5XX_AFTER_RENEWAL) and never reads the retried body',
+    async (_label, trigger, status, contentType) => {
+      const retried = makeTrackedHtml5xx(status, contentType);
+      serveStaleThenFresh(trigger(), retried);
+
+      const err = await apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e);
+
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err).toMatchObject({
+        statusCode: status,
+        errorCode: 'HTML_5XX_AFTER_RENEWAL',
+        message: 'Server error after token renewal',
+      });
+      expect(isRetryableError(err)).toBe(true);
+      expect(retried.text).not.toHaveBeenCalled();
+      expect(retried.reads).toEqual([]);
+      expect(dataFetches().map((f) => f.authToken)).toEqual(['stale', 'fresh']);
+      expect(tokenPosts()).toHaveLength(1);
+    },
+  );
+
+  it('DD1.18.b: the renewed token stays cached — a query retry after the outage reuses it without minting', async () => {
+    await seedCachedToken('stale');
+    serveStaleThenFresh(makeHtml5xxResponse(503), makeTrackedHtml5xx(503));
+
+    const err = await apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e);
+    expect(err).toMatchObject({ statusCode: 503, errorCode: 'HTML_5XX_AFTER_RENEWAL' });
+    expect(tokenPosts()).toHaveLength(1);
+
+    await expect(getCredsToken()).resolves.toBe('fresh');
+    expect(tokenPosts()).toHaveLength(1);
+  });
+
+  // Pinned (passes before and after FR3): only a retried HTML 5xx is reclassified; any other
+  // non-OK retried response still goes through handleStatus, which reads the body once.
+  it.each([
+    [
+      'a JSON 503 envelope → ApiError(503) carrying the server errorCode',
+      () => makeEnvelopeErrorResponse(503, 'CROS-0503', 'Service unavailable'),
+      ApiError,
+      { statusCode: 503, errorCode: 'CROS-0503', serverText: 'Service unavailable' },
+    ],
+    ['a JSON 401 → AuthError(401)', () => makeJsonErrorResponse(401), AuthError, { statusCode: 401 }],
+    ['an HTML 404 → ApiError(404)', () => makeHtml4xxResponse(404), ApiError, { statusCode: 404 }],
+  ])('DD1.18.c: with creds, HTML 503 → mint → %s (handleStatus, unchanged)', async (_label, retried, ErrorClass, shape) => {
+    serveStaleThenFresh(makeHtml5xxResponse(503), retried());
+
+    const err = await apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ErrorClass);
+    expect(err).toMatchObject(shape);
+    expect((err as { errorCode?: string }).errorCode).not.toBe('HTML_5XX_AFTER_RENEWAL');
+    expect(dataFetches().map((f) => f.authToken)).toEqual(['stale', 'fresh']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DD1.19 — apiPut mirror
+// ---------------------------------------------------------------------------
+
+describe('DD1.19: apiPut HTML 5xx after renewal', () => {
+  it.each([
+    ['HTML 503 → mint → HTML 503', () => makeHtml5xxResponse(503), 503],
+    ['JSON 401 → mint → HTML 500', () => makeJsonErrorResponse(401), 500],
+  ])(
+    'DD1.19.a: with creds, %s rejects with a retryable ApiError(HTML_5XX_AFTER_RENEWAL); the retry re-sent the same body',
+    async (_label, trigger, status) => {
+      const body = { approverId: '2362707', timecardIds: [101, 102], allowOvertime: false };
+      const retried = makeTrackedHtml5xx(status);
+      serveStaleThenFresh(trigger(), retried);
+
+      const err = await apiPut('/put', body, 'stale', false, CREDS).catch((e) => e);
+
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err).toMatchObject({
+        statusCode: status,
+        errorCode: 'HTML_5XX_AFTER_RENEWAL',
+        message: 'Server error after token renewal',
+      });
+      expect(isRetryableError(err)).toBe(true);
+      expect(retried.text).not.toHaveBeenCalled();
+      expect(retried.reads).toEqual([]);
+      const puts = dataFetches();
+      expect(puts.map((f) => f.authToken)).toEqual(['stale', 'fresh']);
+      expect(puts.map((f) => f.body)).toEqual([JSON.stringify(body), JSON.stringify(body)]);
+      expect(tokenPosts()).toHaveLength(1);
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// DD1.20 — the errors the client actually throws, under the shared retry predicate
+// ---------------------------------------------------------------------------
+
+describe('DD1.20: client errors classify as outage (retry) or credential problem (no retry)', () => {
+  it.each([
+    [
+      'offline: fetch rejects → NetworkError',
+      async () => {
+        routeFetch({
+          token: mintSequence('fresh'),
+          data: () => Promise.reject(new TypeError('Network request failed')),
+        });
+        return apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e);
+      },
+      NetworkError,
+      undefined,
+    ],
+    [
+      'no creds, first-response HTML 503 → AuthError(AUTH_HTML_500)',
+      async () => {
+        routeFetch({ token: mintSequence('fresh'), data: () => makeHtml5xxResponse(503) });
+        return apiGet('/test', {}, 'stale', false).catch((e) => e);
+      },
+      AuthError,
+      'AUTH_HTML_500',
+    ],
+    [
+      'JSON 503 → ApiError(503)',
+      async () => {
+        routeFetch({ token: mintSequence('fresh'), data: () => makeJsonErrorResponse(503) });
+        return apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e);
+      },
+      ApiError,
+      undefined,
+    ],
+  ])('DD1.20.a: %s is retryable', async (_label, scenario, ErrorClass, errorCode) => {
+    const err = await scenario();
+
+    expect(err).toBeInstanceOf(ErrorClass);
+    expect((err as { errorCode?: string }).errorCode).toBe(errorCode);
+    expect(isRetryableError(err)).toBe(true);
+  });
+
+  it.each([
+    [
+      'JSON 404 → ApiError(404)',
+      async () => {
+        routeFetch({ token: mintSequence('fresh'), data: () => makeJsonErrorResponse(404) });
+        return apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e);
+      },
+      ApiError,
+      undefined,
+    ],
+    [
+      'with creds, 401 → mint → 401 → AuthError(401)',
+      async () => {
+        routeFetch({ token: mintSequence('fresh'), data: () => makeJsonErrorResponse(401) });
+        return apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e);
+      },
+      AuthError,
+      undefined,
+    ],
+    [
+      'with creds, 401 → re-mint rejected (password changed) → AuthError(401)',
+      async () => {
+        routeFetch({ token: () => makeJsonErrorResponse(401), data: () => makeJsonErrorResponse(401) });
+        return apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e);
+      },
+      AuthError,
+      undefined,
+    ],
+    [
+      'with creds during the latch → AuthError(AUTH_LOGIN_LATCHED)',
+      async () => {
+        await rejectLogin(401);
+        routeFetch({ token: () => makeJsonErrorResponse(401), data: () => makeJsonErrorResponse(401) });
+        return apiGet('/test', {}, 'stale', false, CREDS).catch((e) => e);
+      },
+      AuthError,
+      'AUTH_LOGIN_LATCHED',
+    ],
+  ])('DD1.20.b: %s is not retryable', async (_label, scenario, ErrorClass, errorCode) => {
+    const err = await scenario();
+
+    expect(err).toBeInstanceOf(ErrorClass);
+    expect((err as { errorCode?: string }).errorCode).toBe(errorCode);
+    expect(isRetryableError(err)).toBe(false);
   });
 });

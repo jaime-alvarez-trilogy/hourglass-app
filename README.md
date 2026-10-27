@@ -24,7 +24,7 @@ Data is pulled directly from the Crossover API using your own credentials, which
 
 | Layer | Technology |
 |-------|-----------|
-| Framework | Expo SDK 55 + React Native 0.81 |
+| Framework | Expo SDK 58 + React Native 0.88 |
 | Navigation | Expo Router (file-based) |
 | Data fetching | TanStack Query v5 + AsyncStorage persistence |
 | UI | NativeWind v4 (Tailwind CSS for RN) |
@@ -34,7 +34,7 @@ Data is pulled directly from the Crossover API using your own credentials, which
 | Android widget | react-native-android-widget |
 | Push server | Node.js + Railway (silent push every 30 min) |
 | Credentials | Expo SecureStore (on-device only) |
-| Builds | EAS Build + EAS Submit |
+| Builds | EAS Build (`eas build --local`, on this Mac) + EAS Submit |
 
 ---
 
@@ -63,7 +63,8 @@ hourglassws/
 │
 ├── features/               # Feature specs and design docs (development reference)
 ├── assets/                 # App icons, splash screen, notification icon
-├── patches/                # patch-package fixes for expo-widgets and reanimated
+├── patches/                # patch-package fixes, if any (none today; see TECH_STACK.md)
+├── plugins/                # Local Expo config plugins for the iOS widget extension
 └── tools/                  # UX tooling (multi-model UI generation scripts)
 ```
 
@@ -73,9 +74,9 @@ hourglassws/
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22.13+ (CI and EAS run Node 22)
 - Expo CLI (`npm install -g expo-cli`)
-- iOS: Xcode 15+ (for simulator or device builds)
+- iOS: Xcode 27, for simulator builds and for store builds, which run locally through `scripts/build-ios-local.sh` (`docs/RELEASING.md`). That script refuses an Xcode whose major isn't the one `eas.json` pins. The app requires iOS 16.4 or later
 - Android: Android Studio (for emulator builds)
 - A Crossover employee account
 
@@ -96,9 +97,9 @@ Then press `i` for iOS simulator, `a` for Android emulator, or scan the QR code 
 For the best experience (widgets, push notifications), build with EAS:
 
 ```bash
-# iOS — builds and submits to TestFlight
-eas build --platform ios --profile production
-eas submit --platform ios --latest
+# iOS: builds locally and tags build-<N>, then submit the IPA it prints (docs/RELEASING.md)
+scripts/build-ios-local.sh
+eas submit -p ios --profile production --path <ipa>
 
 # Android — builds AAB for Google Play
 eas build --platform android --profile production
@@ -129,7 +130,7 @@ Query results are persisted to AsyncStorage so the app shows cached data instant
 App fetches Crossover API
     └── writes to AsyncStorage (widget_data key + App Group shared storage)
             └── iOS/Android widget reads from shared storage
-                    └── Widget re-renders every 15 minutes
+                    └── iOS: widget steps through the stored timeline (every 15 min for 24 h, then hourly to the deadline)
 ```
 
 ---
@@ -168,11 +169,12 @@ cd server && npm test
 ### iOS (TestFlight / App Store)
 
 ```bash
-eas build --platform ios --profile production
-eas submit --platform ios --latest
+scripts/build-ios-local.sh --dry-run   # checks only: clean pushed tree, unused build number, Xcode, runtime
+scripts/build-ios-local.sh             # eas build --local, IPA check, local annotated tag build-<N>
+eas submit -p ios --profile production --path <ipa>   # from the main checkout
 ```
 
-Bump `buildNumber` in `app.json` before each submission.
+Bump `buildNumber` in `app.json` before each build. Push the `build-<N>` tag only once App Store Connect lists the build as `VALID`; `docs/RELEASING.md` (Native release) has the full procedure.
 
 ### Android (Google Play)
 

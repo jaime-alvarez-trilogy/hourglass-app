@@ -15,7 +15,7 @@
 
 import React from 'react';
 import { View, Text, Pressable } from 'react-native';
-import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import type { BottomTabBarProps } from 'expo-router/js-tabs';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import Animated, {
   useSharedValue,
@@ -178,7 +178,8 @@ function PillTabItem({
 
 export function FloatingPillTabBar({
   state,
-  navigation,
+  emitter,
+  navigateToTab,
   descriptors,
   tintColor,
   inactiveTintColor,
@@ -222,19 +223,21 @@ export function FloatingPillTabBar({
           badgeCounts?.[route.name] ??
           (typeof descriptorBadge === 'number' ? descriptorBadge : undefined);
 
+        // expo-router 58 passes the tab bar an event emitter and navigateToTab instead of a
+        // `navigation` object (10-sdk-58-ios-27 FR4); same flow as its own BottomTabBar.
         const onPress = () => {
-          const event = navigation.emit({
+          const event = emitter.emit({
             type: 'tabPress',
             target: route.key,
             canPreventDefault: true,
           });
           if (!isActive && !event.defaultPrevented) {
-            navigation.navigate(route.name);
+            navigateToTab(route.key);
           }
         };
 
         const onLongPress = () => {
-          navigation.emit({
+          emitter.emit({
             type: 'tabLongPress',
             target: route.key,
           });

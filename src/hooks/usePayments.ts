@@ -10,6 +10,8 @@ import { loadCredentials } from '../store/config';
 import type { CrossoverConfig } from '../types/config';
 import type { PaymentsResponse } from '../lib/hours';
 import { getAuthToken } from '../api/client';
+import { shouldRetryOnce } from '../api/errors';
+import { toAuthCreds } from '../api/authCreds';
 
 /**
  * React Query wrapper around fetchPayments for the current week's payment record.
@@ -26,10 +28,10 @@ export function usePayments(config: CrossoverConfig | null) {
       const creds = await loadCredentials();
       if (!creds) throw new Error('No credentials');
       const token = await getAuthToken(creds.username, creds.password, config.useQA);
-      return fetchPayments(config, token);
+      return fetchPayments(config, token, toAuthCreds(creds, config.useQA));
     },
     enabled: !!config,
     staleTime: 15 * 60 * 1000, // 15 minutes
-    retry: 1,
+    retry: shouldRetryOnce, // one retry, outages only (never a credential failure)
   });
 }

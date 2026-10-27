@@ -8,9 +8,9 @@
 //   1. Outer Animated.View      — swipe transforms + dark bg fallback (#16151F)
 //   2. expo-linear-gradient     — gradient border at card perimeter (violet accent)
 //   3. Skia Canvas              — BackdropFilter(blur=16) + RoundedRect(GLASS_FILL) + inner shadow
-//   4. Noise overlay View       — noise.png at 0.03 opacity (brand §1.5)
-//   5. Content View             — p-5, all card content
-//   6. Face overlays            — approve/reject icon + label, absoluteFill, pointerEvents=none
+//                                 + NoiseShader at 0.03 opacity (brand §1.5, see NoiseShader.tsx)
+//   4. Content View             — p-5, all card content
+//   5. Face overlays            — approve/reject icon + label, absoluteFill, pointerEvents=none
 //
 // Glow layers (behind card, rendered before GestureDetector):
 //   - Approve glow: colors.success, opacity 0→GLOW_OPACITY_MAX as translateX 0→SWIPE_THRESHOLD
@@ -27,7 +27,6 @@ import {
   View,
   Text,
   StyleSheet,
-  ImageBackground,
   Platform,
   useWindowDimensions,
 } from 'react-native';
@@ -57,6 +56,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { springBouncy, springSnappy, timingInstant } from '@/src/lib/reanimated-presets';
 import type { ApprovalItem, OvertimeApprovalItem } from '@/src/lib/approvals';
 import { colors } from '@/src/lib/colors';
+import { NoiseShader, useNoiseImage } from '@/src/components/NoiseShader';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -70,6 +70,7 @@ const SHADOW_TOP = 'rgba(0,0,0,0.6)';       // inner shadow top (dark inset)
 const SHADOW_BOTTOM = 'rgba(255,255,255,0.08)'; // inner shadow bottom (subtle highlight)
 const BLUR_RADIUS = 16;
 const BORDER_RADIUS_PX = 16; // corresponds to rounded-2xl
+const NOISE_OPACITY = 0.03;
 
 // ─── Type guard ──────────────────────────────────────────────────────────────
 
@@ -126,6 +127,7 @@ export function ApprovalCard({ item, onApprove, onReject }: {
 
   // Dims for Skia Canvas — updated by onLayout on wrapping View (new arch limitation)
   const [dims, setDims] = useState({ w: 0, h: 0 });
+  const noise = useNoiseImage();
 
   const translateX = useSharedValue(0);
   const startX = useSharedValue(0);
@@ -345,7 +347,7 @@ export function ApprovalCard({ item, onApprove, onReject }: {
               pointerEvents="none"
             />
 
-            {/* Layer 3: Skia Canvas — BackdropFilter + glass fill + inner shadow.
+            {/* Layer 3: Skia Canvas — BackdropFilter + glass fill + inner shadow + noise.
                 onLayout on wrapping View (not Canvas) — new arch limitation.
                 Render guarded by dims.w > 0 to prevent zero-canvas crash.  */}
             <View
@@ -377,24 +379,25 @@ export function ApprovalCard({ item, onApprove, onReject }: {
                       positions={[0, 0.12, 0.85, 1]}
                     />
                   </RoundedRect>
+                  {/* Noise texture — white noise at 0.03 opacity, one noise pixel per
+                      device pixel (brand §1.5). Adds organic grain to the glass surface. */}
+                  {noise && (
+                    <RoundedRect
+                      x={0}
+                      y={0}
+                      width={dims.w}
+                      height={dims.h}
+                      r={BORDER_RADIUS_PX}
+                      opacity={NOISE_OPACITY}
+                    >
+                      <NoiseShader image={noise} />
+                    </RoundedRect>
+                  )}
                 </Canvas>
               )}
             </View>
 
-            {/* Layer 4: Noise texture — white noise PNG at 0.03 opacity (brand §1.5).
-                Adds organic grain to the glass surface. pointerEvents=none — no interaction. */}
-            <View
-              style={[StyleSheet.absoluteFill, { opacity: 0.03 }]}
-              pointerEvents="none"
-            >
-              <ImageBackground
-                source={require('../../assets/images/noise.png')}
-                style={StyleSheet.absoluteFill}
-                resizeMode="repeat"
-              />
-            </View>
-
-            {/* Layer 5: Content */}
+            {/* Layer 4: Content */}
             <View className="p-5">
               {/* Header: name + category badge */}
               <View className="flex-row items-start justify-between mb-3">
@@ -477,7 +480,7 @@ export function ApprovalCard({ item, onApprove, onReject }: {
                 ← reject · approve →
               </Text>
 
-              {/* Layer 6: Face overlays — approve + reject icons, absoluteFill, pointerEvents=none.
+              {/* Layer 5: Face overlays — approve + reject icons, absoluteFill, pointerEvents=none.
                   Positioned inside the content View so they render above all card layers.
                   pointerEvents="none" is REQUIRED — must not intercept GestureDetector events. */}
 

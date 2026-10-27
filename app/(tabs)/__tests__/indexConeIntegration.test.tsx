@@ -15,6 +15,8 @@ import * as path from 'path';
 
 // Use official Reanimated mock + missing exports: prevents native binary initialization
 // and worklet background timer crashes when multiple test suites share a worker process.
+// 1.2: the pay-days query needs a QueryClient; the home screen hides the card without data
+jest.mock('@/src/hooks/usePayDays', () => ({ usePayDays: () => ({ data: undefined }) }));
 jest.mock('react-native-reanimated', () => {
   const mock = require('react-native-reanimated/mock');
   return { ...mock, useReducedMotion: () => false };
@@ -35,17 +37,12 @@ jest.mock('@/src/hooks/useConfig');
 jest.mock('@/src/hooks/useApprovalItems', () => ({
   useApprovalItems: () => ({ items: [], isLoading: false, error: null, refetch: jest.fn() }),
 }));
+// useFocusKey uses expo-router's useIsFocused, which requires a NavigationContainer;
+// the stub here lets it work in jest-expo/node (10-sdk-58-ios-27 FR2).
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: jest.fn() }),
   useFocusEffect: (cb: () => void) => { cb(); },
-}));
-
-// useFocusKey uses useIsFocused which requires NavigationContainer.
-// Mock @react-navigation/native so useFocusKey works in jest-expo/node.
-jest.mock('@react-navigation/native', () => ({
   useIsFocused: () => true,
-  useNavigation: () => ({ navigate: jest.fn(), replace: jest.fn(), push: jest.fn() }),
-  useRoute: () => ({ params: {} }),
 }));
 
 jest.mock('react-native-safe-area-context', () => {
@@ -77,7 +74,7 @@ jest.mock('react-native-web/dist/exports/TextInput/index.js', () => {
   };
 });
 
-// FadeInScreen — stub (uses useIsFocused from react-navigation)
+// FadeInScreen — stub (uses useIsFocused from expo-router)
 jest.mock('@/src/components/FadeInScreen', () => {
   const R = require('react');
   return {

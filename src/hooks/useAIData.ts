@@ -12,6 +12,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useConfig } from './useConfig';
 import { loadCredentials } from '../store/config';
 import { fetchWorkDiary } from '../api/workDiary';
+import { getAuthGeneration } from '../api/client';
 import {
   countDiaryTags,
   aggregateAICache,
@@ -27,7 +28,7 @@ import {
 import type { AppBreakdownEntry } from '../lib/aiAppBreakdown';
 import { AuthError, NetworkError } from '../api/errors';
 import type { TagData, AIWeekData } from '../lib/ai';
-import { loadWeeklyHistory, mergeWeeklySnapshot, saveWeeklyHistory } from '../lib/weeklyHistory';
+import { readWeeklyHistoryForWrite, mergeWeeklySnapshot, saveWeeklyHistory } from '../lib/weeklyHistory';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -138,6 +139,10 @@ export function useAIData(): UseAIDataResult {
     setError(null);
 
     const today = todayUTC();
+    // A sign-out / env switch (invalidateAuthToken) while this run is in flight makes its
+    // results belong to the previous owner: they are dropped, and nothing is written.
+    const authGen = getAuthGeneration();
+    const superseded = () => getAuthGeneration() !== authGen;
 
     try {
       // Load existing cache first — AsyncStorage works on locked device.
@@ -177,7 +182,9 @@ export function useAIData(): UseAIDataResult {
           const tagged = totalSlots - noTagSlots;
           const aiPct = tagged > 0 ? Math.round((aiSlots / tagged) * 100) : 0;
           const brainliftHours = sbSlots * 10 / 60;
-          loadWeeklyHistory().then(history => {
+          // Strict read: an unreadable history (null) skips the save (durable-data 03 FR4)
+          readWeeklyHistoryForWrite().then(history => {
+            if (!history) return;
             const existing = history.find(s => s.weekStart === prevWeekMonday);
             if (!existing || existing.aiPct === 0) {
               return saveWeeklyHistory(
@@ -236,6 +243,11 @@ export function useAIData(): UseAIDataResult {
         }),
       );
 
+      if (superseded()) {
+        setIsLoading(false);
+        return;
+      }
+
       // Merge fresh data into week cache
       for (const { date, tagData } of results) {
         weekCache[date] = tagData;
@@ -279,6 +291,7 @@ export function useAIData(): UseAIDataResult {
               .catch(() => null),
           ),
         ).then(results => {
+          if (superseded()) return;
           let totalSlots = 0, aiSlots = 0, noTagSlots = 0;
           for (const td of results) {
             if (!td) continue;
@@ -317,8 +330,10 @@ export function useAIData(): UseAIDataResult {
           const dd = String(d.getDate()).padStart(2, '0');
           const prevWeekStart = `${y}-${m}-${dd}`;
 
-          loadWeeklyHistory()
+          // Strict read: an unreadable history (null) skips the save (durable-data 03 FR4)
+          readWeeklyHistoryForWrite()
             .then(history => {
+              if (!history) return;
               const updated = mergeWeeklySnapshot(history, {
                 weekStart: prevWeekStart,
                 aiPct: midpoint,
@@ -335,9 +350,10 @@ export function useAIData(): UseAIDataResult {
       }
     } catch (err) {
       setIsLoading(false);
+      if (superseded()) return;
       if (err instanceof AuthError) {
         setError('auth');
-        setData(null); // Auth failure — cached data is likely wrong too, clear it
+        // Keep existing data — ai_cache is untouched by an auth failure; re-onboarding is useRoleRefresh's job
       } else if (err instanceof NetworkError) {
         setError('network');
         // Keep existing data — show stale cache rather than blank on network failure

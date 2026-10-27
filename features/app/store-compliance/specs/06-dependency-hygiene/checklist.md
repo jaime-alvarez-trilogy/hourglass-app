@@ -10,21 +10,21 @@ All commands run from the app repo root (`hourglassws/`). Branch: `chore/06-depe
 ## Pre-flight (before Phase 1.0)
 
 ### Preconditions
-- [ ] Spec 03 is merged. Confirm both of these print `undefined`:
+- [x] Spec 03 is merged. Confirm both of these print `undefined`:
   - `node -p "require('./package.json').dependencies['expo-background-fetch']"`
   - `node -p "require('./package.json').dependencies['expo-task-manager']"`
-- [ ] Spec 04 is merged: `node -p "JSON.stringify(require('./app.json').expo.runtimeVersion)"` prints `{"policy":"fingerprint"}`.
+- [x] Spec 04 is merged: `node -p "JSON.stringify(require('./app.json').expo.runtimeVersion)"` prints `{"policy":"fingerprint"}`.
 - [ ] Spec 05 is done: build 18 is submitted and `docs/RELEASING.md` §Native exists.
-- [ ] Spec 07 merge status recorded in Session Notes. `node -p "require('./package.json').scripts.typecheck"` prints `tsc --noEmit` if merged. This decides which gates apply.
-- [ ] `__tests__/config/` exists (created by spec 03). Create it if it's missing.
+- [x] Spec 07 merge status recorded in Session Notes. `node -p "require('./package.json').scripts.typecheck"` prints `tsc --noEmit` if merged. This decides which gates apply.
+- [x] `__tests__/config/` exists (created by spec 03). Create it if it's missing.
 
 ### Baseline captures (on the branch point, before any change)
-- [ ] `npm ci`, then record the patch-package output. Expect `expo-widgets@55.0.5 ✔` and `react-native-reanimated@4.2.1 ✔`.
-- [ ] `npm test 2>&1 | tail -5`: record pass/fail counts and any failing test names (expect 0 failures if spec 07 is merged).
-- [ ] If spec 07 is merged: `npm run typecheck` and `npm run lint` both exit 0 (record).
-- [ ] `EXPO_NO_DOTENV=1 npx expo config --type introspect --json > /tmp/06-introspect-before.json`
-- [ ] `EXPO_NO_DOTENV=1 npx expo-updates fingerprint:generate --platform ios | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).hash))"`: record as **fingerprint-before**.
-- [ ] `EXPO_NO_DOTENV=1 CI=1 npx expo install --check --json > /tmp/06-check-before.json; echo $?`: expect exit 1 and 24 entries. Record the list in Session Notes.
+- [x] `npm ci`, then record the patch-package output. Expect `expo-widgets@55.0.5 ✔` and `react-native-reanimated@4.2.1 ✔`.
+- [x] `npm test 2>&1 | tail -5`: record pass/fail counts and any failing test names (expect 0 failures if spec 07 is merged).
+- [x] If spec 07 is merged: `npm run typecheck` and `npm run lint` both exit 0 (record). **N/A:** spec 07 is not on this branch; raw `tsc`/`expo lint` counts recorded in Session Notes instead.
+- [x] `EXPO_NO_DOTENV=1 npx expo config --type introspect --json > /tmp/06-introspect-before.json`
+- [x] `EXPO_NO_DOTENV=1 npx expo-updates fingerprint:generate --platform ios | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).hash))"`: record as **fingerprint-before**.
+- [x] `EXPO_NO_DOTENV=1 CI=1 npx expo install --check --json > /tmp/06-check-before.json; echo $?`: expect exit 1 and 24 entries. Record the list in Session Notes.
 
 ---
 
@@ -37,42 +37,42 @@ Create `__tests__/config/deps.test.ts` following the spec's "Interface Contracts
 Commit message: `test(06-dependency-hygiene): add dependency guard tests (red)`.
 
 ### FR1: Pin every patched package to its patch version
-- [ ] Test: `getPatchFiles(ROOT/patches)` returns ≥ 1 file, and every filename parses (non-null `PatchDetails`).
-- [ ] Test: `dependencies['expo-widgets'] === '55.0.5'`.
-- [ ] Test: `collectPatchProblems(realPkg, realLock, realPatchFiles)` equals `[]`.
-- [ ] Fixture tests on `collectPatchProblems`. Each asserts the returned problem contains the package or filename and the rule phrase:
-  - [ ] `expo-widgets: '^55.0.5'` → contains `expo-widgets` and `exactly "55.0.5"`
-  - [ ] lockfile version `55.0.20` vs patch `55.0.5` → contains `orphaned patch`
-  - [ ] package missing from `lock.packages` → contains `not in package-lock.json`
-  - [ ] patch for a package not in `dependencies`/`devDependencies` → contains `not a direct dependency`
-  - [ ] `garbage.patch` → `Unrecognized patch file: garbage.patch`
-  - [ ] lockfile root spec `^55.0.5` vs `package.json` `55.0.5` → contains `package-lock root spec`
-  - [ ] nested `a++b+1.0.0.patch` with `lock.packages['node_modules/a/node_modules/b'].version === '1.0.0'` and `b` not a direct dependency → `[]`
+- [x] Test: `getPatchFiles(ROOT/patches)` returns ≥ 1 file, and every filename parses (non-null `PatchDetails`).
+- [x] Test: `dependencies['expo-widgets'] === '55.0.5'`.
+- [x] Test: `collectPatchProblems(realPkg, realLock, realPatchFiles)` equals `[]`.
+- [x] Fixture tests on `collectPatchProblems`. Each asserts the returned problem contains the package or filename and the rule phrase:
+  - [x] `expo-widgets: '^55.0.5'` → contains `expo-widgets` and `exactly "55.0.5"`
+  - [x] lockfile version `55.0.20` vs patch `55.0.5` → contains `orphaned patch`
+  - [x] package missing from `lock.packages` → contains `not in package-lock.json`
+  - [x] patch for a package not in `dependencies`/`devDependencies` → contains `not a direct dependency`
+  - [x] `garbage.patch` → `Unrecognized patch file: garbage.patch`
+  - [x] lockfile root spec `^55.0.5` vs `package.json` `55.0.5` → contains `package-lock root spec`
+  - [x] nested `a++b+1.0.0.patch` with `lock.packages['node_modules/a/node_modules/b'].version === '1.0.0'` and `b` not a direct dependency → `[]`
 
 ### FR2: A failed or mismatched patch fails the install
-- [ ] Test: `scripts.postinstall` matches `/^patch-package(\s|$)/` and contains `--error-on-fail` and `--error-on-warn`.
-- [ ] Test: `devDependencies['patch-package']` is defined.
+- [x] Test: `scripts.postinstall` matches `/^patch-package(\s|$)/` and contains `--error-on-fail` and `--error-on-warn`.
+- [x] Test: `devDependencies['patch-package']` is defined.
 
 ### FR3: Remove the unused dev tunnel helper
-- [ ] Test: `@expo/ngrok` is in neither `dependencies` nor `devDependencies`.
-- [ ] Test: no key of `lock.packages` starts with `node_modules/@expo/ngrok`.
+- [x] Test: `@expo/ngrok` is in neither `dependencies` nor `devDependencies`.
+- [x] Test: no key of `lock.packages` starts with `node_modules/@expo/ngrok`.
 
 ### FR4: Keep `expo install` away from `expo-widgets`
-- [ ] Test: `pkg.expo?.install?.exclude` is an array containing `'expo-widgets'`.
-- [ ] Test: every exclude entry is a key of `dependencies` or `devDependencies`.
+- [x] Test: `pkg.expo?.install?.exclude` is an array containing `'expo-widgets'`.
+- [x] Test: every exclude entry is a key of `dependencies` or `devDependencies`.
 
 ### FR5: Refresh to the latest SDK 55 patch line
-- [ ] Test: `versionAtLeast` units: `('55.0.31','55.0.31')` true, `('55.0.7','55.0.31')` false, `('0.83.10','0.83.2')` true, `('0.7.4','0.7.4')` true.
-- [ ] Test: lockfile `expo` ≥ `55.0.31` and starts with `55.`
-- [ ] Test: lockfile `react-native` ≥ `0.83.10` and starts with `0.83.`
-- [ ] Test: lockfile `expo-notifications` ≥ `55.0.27`, `expo-updates` ≥ `55.0.33`, `jest-expo` ≥ `55.0.22`
-- [ ] Test: lockfile `react-native-worklets` ≥ `0.7.4` and starts with `0.7.` (reanimated 4.2.x requires worklets `0.7.x`)
+- [x] Test: `versionAtLeast` units: `('55.0.31','55.0.31')` true, `('55.0.7','55.0.31')` false, `('0.83.10','0.83.2')` true, `('0.7.4','0.7.4')` true.
+- [x] Test: lockfile `expo` ≥ `55.0.31` and starts with `55.`
+- [x] Test: lockfile `react-native` ≥ `0.83.10` and starts with `0.83.`
+- [x] Test: lockfile `expo-notifications` ≥ `55.0.27`, `expo-updates` ≥ `55.0.33`, `jest-expo` ≥ `55.0.22`
+- [x] Test: lockfile `react-native-worklets` ≥ `0.7.4` and starts with `0.7.` (reanimated 4.2.x requires worklets `0.7.x`)
 
 ### FR6 / FR7
-- [ ] No new unit tests. FR6 is verified by the drift one-liner in Phase 1.1. FR7 is covered by the existing `__tests__/config/app-config.test.ts` (specs 03/04/05) plus the release verifications in Phase 1.3.
+- [x] No new unit tests. FR6 is verified by the drift one-liner in Phase 1.1. FR7 is covered by the existing `__tests__/config/app-config.test.ts` (specs 03/04/05) plus the release verifications in Phase 1.3.
 
 ### Red-phase confirmation
-- [ ] `npx jest __tests__/config/deps.test.ts`. These **fail**:
+- [x] `npx jest __tests__/config/deps.test.ts`. These **fail**:
   - expo-widgets exact pin
   - real-data `collectPatchProblems` (rules 3 and 6 for `expo-widgets`)
   - postinstall flags
@@ -102,15 +102,15 @@ Commit message: `test(06-dependency-hygiene): add dependency guard tests (red)`.
 Do FR1–FR4 first, so the strict `postinstall` guards the FR5 refresh.
 
 ### FR1: Pin every patched package to its patch version
-- [ ] `npm install expo-widgets@55.0.5 --save-exact`
-- [ ] `node -p "require('./package.json').dependencies['expo-widgets']"` prints `55.0.5`.
-- [ ] `node -p "require('./package-lock.json').packages[''].dependencies['expo-widgets']"` prints `55.0.5`.
-- [ ] `git diff --stat -- patches/` is empty.
+- [x] `npm install expo-widgets@55.0.5 --save-exact`
+- [x] `node -p "require('./package.json').dependencies['expo-widgets']"` prints `55.0.5`.
+- [x] `node -p "require('./package-lock.json').packages[''].dependencies['expo-widgets']"` prints `55.0.5`.
+- [x] `git diff --stat -- patches/` is empty.
 
 ### FR2: A failed or mismatched patch fails the install
-- [ ] Set `scripts.postinstall` to `"patch-package --error-on-fail --error-on-warn"`.
-- [ ] `npm ci`: exit 0; output contains `expo-widgets@55.0.5 ✔` and `react-native-reanimated@4.2.1 ✔`; output does **not** contain `patch-package finished with`.
-- [ ] **Negative check** (touches only `node_modules`):
+- [x] Set `scripts.postinstall` to `"patch-package --error-on-fail --error-on-warn"`.
+- [x] `npm ci`: exit 0; output contains `expo-widgets@55.0.5 ✔` and `react-native-reanimated@4.2.1 ✔`; output does **not** contain `patch-package finished with`.
+- [x] **Negative check** (touches only `node_modules`):
   ```bash
   node -e "const f='node_modules/expo-widgets/package.json';const p=JSON.parse(require('fs').readFileSync(f,'utf8'));p.version='55.0.6';require('fs').writeFileSync(f,JSON.stringify(p,null,2))"
   npx patch-package --error-on-fail --error-on-warn; echo "exit=$?"   # expect exit=1 and "patch file version mismatch"
@@ -118,15 +118,15 @@ Do FR1–FR4 first, so the strict `postinstall` guards the FR5 refresh.
   ```
 
 ### FR3: Remove the unused dev tunnel helper
-- [ ] `npm uninstall @expo/ngrok`
-- [ ] `node -p "Object.keys(require('./package-lock.json').packages).filter(k=>k.startsWith('node_modules/@expo/ngrok')).length"` prints `0`.
-- [ ] `grep -rn ngrok app src components hooks scripts app.json eas.json metro.config.js babel.config.js` returns nothing.
+- [x] `npm uninstall @expo/ngrok`
+- [x] `node -p "Object.keys(require('./package-lock.json').packages).filter(k=>k.startsWith('node_modules/@expo/ngrok')).length"` prints `0`.
+- [x] `grep -rn ngrok app src components hooks scripts app.json eas.json metro.config.js babel.config.js` returns nothing.
 
 ### FR4: Keep `expo install` away from `expo-widgets`
-- [ ] Add `"expo": { "install": { "exclude": ["expo-widgets"] } }` to `package.json`.
-- [ ] `node -p "require('./package.json').expo.install.exclude"` prints `[ 'expo-widgets' ]`.
-- [ ] `npx jest __tests__/config/deps.test.ts`: FR1–FR4 tests pass. FR5 floors still fail, which is expected.
-- [ ] Commit: `chore(06-dependency-hygiene): pin patched deps, strict postinstall, drop ngrok, install.exclude`.
+- [x] Add `"expo": { "install": { "exclude": ["expo-widgets"] } }` to `package.json`.
+- [x] `node -p "require('./package.json').expo.install.exclude"` prints `[ 'expo-widgets' ]`.
+- [x] `npx jest __tests__/config/deps.test.ts`: FR1–FR4 tests pass. FR5 floors still fail, which is expected.
+- [x] Commit: `chore(06-dependency-hygiene): pin patched deps, strict postinstall, drop ngrok, install.exclude`.
 
 ### FR5: Refresh to the latest SDK 55 patch line
 - [ ] `npx expo install --fix`. It must finish without a postinstall failure.
@@ -284,3 +284,35 @@ Follow `docs/RELEASING.md` §Native (spec 05) as written: its order, its owner t
 - **expo-doctor 1.21.5:** 18/20 checks pass. The 2 failures are schema (spec 03) and versions (this spec).
 - **`expo.install.exclude`:** supported by @expo/cli 55.0.17 and by 55.0.36, which `expo@55.0.31` ships.
 - **patch-package strict flags:** `npx patch-package --error-on-fail --error-on-warn` exits 0 with both patches ✔ on the current tree.
+
+**2026-10-20 (Phase 1.0)**: tests written, red phase confirmed.
+- **Branch / branch point:** orchestrator-assigned `feat/dependency-hygiene`, cut from `feat/store-compliance-build18` @ `1a9550c` (not `chore/06-dependency-hygiene` from `main`). Worktree `hg-worktrees/deps`. Not to be merged until FR7 preconditions hold.
+- **Preconditions:** spec 03 merged on this base (`expo-background-fetch` / `expo-task-manager` both `undefined`). Spec 04 merged (`runtimeVersion` = `{"policy":"fingerprint"}`). Spec 05: `docs/RELEASING.md` §Native exists, but "build 18 submitted" can't be verified offline, so it's left unticked. `app.json` is at `1.1.0` / build `18`.
+- **Spec 07 status: NOT on this branch.** There's no `scripts.typecheck` and no `@types/node`; spec 07 lives on `feat/ci-typecheck-lint`. Until this branch is rebased onto a base that has spec 07, the gate is research Decision 3 (`npm test` against the baseline, no `tsc` chain). Expected side effect: `tsc` reports 3 errors in `deps.test.ts` (TS2307 `fs`/`path`, TS2304 `__dirname`). These are the same missing-`@types/node` errors that `__tests__/approval-card.test.tsx` and `__tests__/config/fingerprint-config.test.ts` already have. With `types: ["jest","node"]` (a temp tsconfig, not committed), `deps.test.ts` typechecks with 0 errors.
+- **Baselines (branch point, before any package change):**
+  - `npm ci`: exit 0, `patch-package 8.0.1`, `expo-widgets@55.0.5 ✔`, `react-native-reanimated@4.2.1 ✔`, no `patch-package finished with`.
+  - `npx jest --silent`: without `deps.test.ts`, 4953 passed / 1 failed (`NativeWindSmoke.test.tsx`, the known out-of-repo read). With `deps.test.ts`, 4973 passed / 14 failed (the 13 red tests below + NativeWindSmoke).
+  - `npx tsc --noEmit`: 541 errors without `deps.test.ts`, 544 with it (the +3 above). `npx expo lint`: 9 errors / 494 warnings, the same with or without `deps.test.ts`. `npx eslint __tests__/config/deps.test.ts` is clean, so both `eslint-disable-next-line` directives are used.
+  - **fingerprint-before** (ios): `a0123e904dabf5610e315a75f845005f5f814b5c`.
+  - Introspect before: `/tmp/06-introspect-before.json` (`UIBackgroundModes` = `["remote-notification"]`, `NSFaceIDUsageDescription` absent).
+  - `CI=1 expo install --check --json`: exit 1, **24 entries**. These match the spec's FR5 table exactly (expo 55.0.7→~55.0.31 … jest-expo 55.0.11→~55.0.22; react-native 0.83.2→0.83.10, react-native-worklets 0.7.2→0.7.4). Neither expo-widgets nor reanimated is flagged. Saved to `/tmp/06-check-before.json`.
+- **Red phase (`npx jest __tests__/config/deps.test.ts`): 33 tests, 13 failed, 20 passed.** Every failure is an assertion on current tree state; none is a syntax, import or `require` error:
+  - FR1: exact pin (received `^55.0.5`). Real-data `collectPatchProblems` returns `expo-widgets: declared "^55.0.5" must be exactly "55.0.5" (expo-widgets+55.0.5.patch)`.
+  - FR2: postinstall argv is `["patch-package"]`.
+  - FR3: `@expo/ngrok` is in `dependencies` (`^4.1.0`), and there are 15 `node_modules/@expo/ngrok*` lock keys.
+  - FR4: both exclude tests receive `undefined`.
+  - FR5: all 6 lockfile floors fail: expo 55.0.7, react-native 0.83.2, expo-notifications 55.0.13, expo-updates 55.0.15, jest-expo 55.0.11, worklets 0.7.2.
+  - Passing as designed (pure logic): 11 `collectPatchProblems` fixtures and 7 `versionAtLeast` units.
+  - Green on today's tree as guards/characterization (behaviour already present): "patches/ has ≥ 1 file and every filename parses", and "patch-package stays a devDependency".
+- **Deviations from the spec text (no contract change):**
+  1. Real-data `collectPatchProblems` reports only **rule 3** today, not "rules 3 and 6". `package.json` and the lock root are both `^55.0.5`, so they agree. Rule 6 fires only when `package.json` is edited without regenerating the lockfile; a fixture covers it.
+  2. There are 15 `node_modules/@expo/ngrok*` lock keys on this base, not 16.
+  3. The file uses `import * as fs` / `import * as path`, matching `approval-card.test.tsx` and `fingerprint-config.test.ts`, instead of the spec sketch's default imports.
+  4. Extra tests beyond the plan:
+     - two positive controls (aligned tree; scoped exact-pinned devDependency, `@scope+tool+2.1.0.patch`)
+     - rule 3 with an exact pin at a different version
+     - nested-path lock drift
+     - `versionAtLeast` cases `('0.83.2','0.83.10')` false and `('56.0.0','55.0.31')` true, plus a throw on non-`x.y.z` input (so `NaN` comparisons can't pass silently)
+     - the `55.` line asserted for expo-notifications, expo-updates and jest-expo as well
+  5. The second exclude test is non-vacuous: a missing or empty `exclude` fails it.
+  6. Rule 6 compares against the same lock-root section (`dependencies` vs `devDependencies`) that declares the package in `package.json`.

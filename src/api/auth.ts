@@ -3,6 +3,7 @@
 // schema (no top-level `assignment`) and the /assignments Spring page envelope.
 
 import { getAuthToken, apiGet, mintAuthToken } from './client';
+import { toAuthCreds, type AuthCreds } from './authCreds';
 import { AuthError, NetworkError, NotContributorError } from './errors';
 import type { CrossoverConfig } from '../types/config';
 
@@ -49,12 +50,14 @@ type PartialConfig = Omit<CrossoverConfig, 'setupComplete' | 'setupDate'>;
 export async function getProfileDetail(
   token: string,
   useQA: boolean,
+  creds?: AuthCreds,
 ): Promise<DetailResponse> {
   return apiGet<DetailResponse>(
     '/api/identity/users/current/detail',
     {},
     token,
     useQA,
+    creds,
   );
 }
 
@@ -151,12 +154,14 @@ async function fetchConfigFromAssignments(
   token: string,
   useQA: boolean,
   username: string,
+  creds?: AuthCreds,
 ): Promise<PartialConfig | null> {
   const response = await apiGet<AssignmentsPage | AssignmentItem[] | null>(
     '/api/v2/teams/assignments',
     { avatarType: 'CANDIDATE', status: 'ACTIVE', page: '0' },
     token,
     useQA,
+    creds,
   );
 
   let list: AssignmentItem[] = [];
@@ -189,8 +194,9 @@ export async function fetchAndBuildConfig(
   password: string,
   useQA: boolean,
 ): Promise<CrossoverConfig> {
-  // Step 1: Auth
+  // Step 1: Auth. One creds object lets every request below renew and retry once.
   const token = await getAuthToken(username, password, useQA);
+  const creds = toAuthCreds({ username, password }, useQA);
 
   // Step 2: Try /detail. If it succeeds with usable data, use it. Otherwise
   // try /assignments. If neither yields an assignment, throw NotContributorError.
@@ -198,7 +204,7 @@ export async function fetchAndBuildConfig(
   let avatarTypes: string[] = [];
 
   try {
-    const detail = await getProfileDetail(token, useQA);
+    const detail = await getProfileDetail(token, useQA, creds);
     avatarTypes = detail.avatarTypes ?? [];
     partial = extractConfigFromDetail(detail, useQA);
   } catch (err) {
@@ -211,7 +217,7 @@ export async function fetchAndBuildConfig(
 
   if (!partial) {
     try {
-      partial = await fetchConfigFromAssignments(token, useQA, username);
+      partial = await fetchConfigFromAssignments(token, useQA, username, creds);
     } catch (err) {
       if (err instanceof AuthError) throw err;
       if (err instanceof NetworkError) throw err;
@@ -236,6 +242,7 @@ export async function fetchAndBuildConfig(
         { from, to },
         token,
         useQA,
+        creds,
       );
       if (Array.isArray(payments)) {
         for (const p of payments) {

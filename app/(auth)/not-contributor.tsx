@@ -20,6 +20,9 @@ export default function NotContributorScreen() {
   async function handleSignOut() {
     try {
       await clearAll();
+    } catch (err) {
+      // Still leave this screen if storage refuses (final review 2026-10-21).
+      console.warn('[not-contributor] sign-out: clearAll failed; continuing', err);
     } finally {
       // Spec 04 FR7: wipe the in-memory auth-token cache even if clearAll throws.
       invalidateAuthToken();

@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAIData } from '../src/hooks/useAIData';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthError, NetworkError } from '../src/api/errors';
+import { invalidateAuthToken } from '../src/api/client';
 import type { CrossoverConfig, Credentials } from '../src/types/config';
 import type { TagData } from '../src/lib/ai';
 
@@ -88,6 +89,18 @@ function makeSlots(aiCount: number, sbCount: number, emptyCount: number) {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Fakes only Date: timers and microtasks stay real for flushAsync, AsyncStorage and TanStack. */
+function fakeDateOnly(now: Date) {
+  jest.useFakeTimers({
+    now,
+    doNotFake: [
+      'hrtime', 'nextTick', 'performance', 'queueMicrotask', 'requestAnimationFrame',
+      'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback', 'setImmediate',
+      'clearImmediate', 'setInterval', 'clearInterval', 'setTimeout', 'clearTimeout',
+    ],
+  });
+}
 
 async function flushAsync() {
   await act(async () => { await new Promise<void>((res) => setTimeout(res, 0)); });
@@ -176,12 +189,75 @@ describe('FR7+FR8: useAIData', () => {
     expect(get().data?.totalSlots).toBeGreaterThan(0);
   });
 
-  it('sets error to "auth" when fetchWorkDiary throws AuthError', async () => {
-    mockFetchWorkDiary.mockRejectedValue(new AuthError(401));
-    const { get } = setupHook();
-    await flushAsync();
-    expect(get().error).toBe('auth');
-    expect(get().data).toBeNull();
+  // ── FR2 (03-keep-last-good): an auth failure keeps the AI tab's data ─────────
+  // ai_cache is untouched by an AuthError, so the cached week stays on screen and
+  // the auth state is reported through `error` alone, as the NetworkError branch does.
+
+  describe('FR2 (03-keep-last-good): AuthError keeps data', () => {
+    // Thursday 2026-10-22, midday UTC: not a Monday (no Monday flush), and the same UTC day
+    // in every host time zone, so the seeded day is always "today" for the hook.
+    const TODAY = '2026-10-22';
+    const SEEDED_TODAY: TagData = { total: 12, aiUsage: 4, secondBrain: 1, noTags: 2 };
+
+    beforeEach(() => fakeDateOnly(new Date(`${TODAY}T12:00:00.000Z`)));
+    afterEach(() => jest.useRealTimers());
+
+    /** Seeds ai_cache with today's day and returns the raw stored string.
+     *  No _lastFetchedAt, and today is always refetched, so fetchWorkDiary runs. */
+    async function seedTodayCache(): Promise<{ today: string; raw: string }> {
+      const raw = JSON.stringify({ [TODAY]: SEEDED_TODAY });
+      await AsyncStorage.setItem('ai_cache', raw);
+      return { today: TODAY, raw };
+    }
+
+    it.each([
+      { id: 'DD3.11', status: 401 as const },
+      { id: 'DD3.12', status: 403 as const },
+    ])('$id: AuthError($status) sets error "auth" and keeps the cached week', async ({ status }) => {
+      const { today } = await seedTodayCache();
+      mockFetchWorkDiary.mockRejectedValue(new AuthError(status));
+
+      const { get } = setupHook();
+      await flushAsync();
+
+      // Today was fetched, and that fetch is what failed
+      expect(mockFetchWorkDiary).toHaveBeenCalledWith(
+        VALID_CONFIG.assignmentId, today, VALID_CREDS, VALID_CONFIG.useQA,
+      );
+      expect(get().error).toBe('auth');
+      expect(get().isLoading).toBe(false);
+      expect(get().data).not.toBeNull();
+      expect(get().data?.totalSlots).toBe(SEEDED_TODAY.total);
+    });
+
+    it('DD3.13: ai_cache is unchanged after an AuthError', async () => {
+      const { raw } = await seedTodayCache();
+      mockFetchWorkDiary.mockRejectedValue(new AuthError(401));
+
+      const { get } = setupHook();
+      await flushAsync();
+
+      expect(get().error).toBe('auth');
+      expect(await AsyncStorage.getItem('ai_cache')).toBe(raw);
+    });
+
+    it('DD3.11 (in session): a refetch that fails with AuthError keeps the data already shown', async () => {
+      const { get } = setupHook();
+      await flushAsync();
+      const shownTotal = get().data?.totalSlots;
+      expect(shownTotal).toBe(4 * makeSlots(20, 3, 5).length); // Mon 19 .. Thu 22
+      const rawBefore = await AsyncStorage.getItem('ai_cache');
+
+      // The token goes bad, then the app comes back to the foreground (refetch)
+      mockFetchWorkDiary.mockRejectedValue(new AuthError(401));
+      await act(async () => { get().refetch(); });
+      await flushAsync();
+
+      expect(get().error).toBe('auth');
+      expect(get().data).not.toBeNull();
+      expect(get().data?.totalSlots).toBe(shownTotal);
+      expect(await AsyncStorage.getItem('ai_cache')).toBe(rawBefore);
+    });
   });
 
   it('sets error to "network" when fetchWorkDiary throws NetworkError', async () => {
@@ -361,5 +437,107 @@ describe('FR7+FR8: useAIData', () => {
     // causing another 7 prev-week calls on refetch.
     const increment = callsAfterSecondFetch - callsAfterFirstFetch;
     expect(increment).toBeLessThan(7);
+  });
+});
+
+// ── FR4 (03-keep-last-good): the week-transition flush never saves over an unreadable
+// weekly_history_v2. ai_cache still holds a day from the week just ended, so the flush runs;
+// when the history store cannot be read it must skip the write (writing would replace every
+// stored week with that one week), and the AI tab itself is unaffected.
+
+describe('FR4 (03-keep-last-good): week-transition flush with an unreadable weekly_history_v2', () => {
+  const HISTORY_KEY = 'weekly_history_v2';
+  // Thursday 2026-10-22, midday UTC: today, the current Monday (2026-10-19) and the
+  // previous week (Mon 2026-10-12 to Sun 2026-10-18) are the same in every host time zone.
+  // Not a Monday, so only the week-transition flush writes weekly history.
+  const NOW = new Date('2026-10-22T12:00:00.000Z');
+  const PREV_WEEK_MONDAY = '2026-10-12';
+  const PREV_WEEK_DAY = '2026-10-15';
+  const CURRENT_WEEK_DAYS = 4; // Mon 19 .. Thu 22, each fetched (nothing cached for them)
+  // Tagged 24 of 30 → aiPct 50; 6 second-brain slots → 1 h BrainLift.
+  const PREV_WEEK_TAGS: TagData = { total: 30, aiUsage: 12, secondBrain: 6, noTags: 6 };
+  const STORED_HISTORY = [
+    { weekStart: '2026-09-28', hours: 40, earnings: 2000, aiPct: 72, brainliftHours: 5 },
+    { weekStart: '2026-10-05', hours: 38, earnings: 1900, aiPct: 78, brainliftHours: 4.5 },
+  ];
+
+  const storage = AsyncStorage as unknown as { getItem: jest.Mock; setItem: jest.Mock };
+  const historyWrites = () => storage.setItem.mock.calls.filter(([k]) => k === HISTORY_KEY);
+
+  /** Seeds the last good weekly history and an ai_cache holding only last week's day. */
+  async function seed(): Promise<string> {
+    const historyRaw = JSON.stringify(STORED_HISTORY);
+    await AsyncStorage.setItem(HISTORY_KEY, historyRaw);
+    await AsyncStorage.setItem('ai_cache', JSON.stringify({ [PREV_WEEK_DAY]: PREV_WEEK_TAGS }));
+    storage.setItem.mockClear();
+    return historyRaw;
+  }
+
+  beforeEach(() => fakeDateOnly(NOW));
+  afterEach(() => jest.useRealTimers());
+
+  it('DD3.30: getItem rejects for weekly_history_v2 → no weekly_history_v2 write, and the hook still returns data', async () => {
+    const historyRaw = await seed();
+    const readStore = storage.getItem.getMockImplementation()!;
+    storage.getItem.mockImplementation((key: string) =>
+      key === HISTORY_KEY ? Promise.reject(new Error('SQLITE_IOERR')) : readStore(key),
+    );
+
+    const { get } = setupHook();
+    await flushAsync();
+
+    // The flush did run (it tried to read the history) and then wrote nothing
+    expect(storage.getItem).toHaveBeenCalledWith(HISTORY_KEY);
+    expect(historyWrites()).toEqual([]);
+
+    // The AI tab is unaffected: the current week was fetched and is shown
+    expect(get().data).not.toBeNull();
+    expect(get().data?.totalSlots).toBe(CURRENT_WEEK_DAYS * makeSlots(20, 3, 5).length);
+    expect(get().error).toBeNull();
+
+    // The stored weeks are still on disk, byte for byte
+    storage.getItem.mockImplementation(readStore);
+    expect(await AsyncStorage.getItem(HISTORY_KEY)).toBe(historyRaw);
+  });
+
+  it('DD3.30 (preserved): a readable history → the flush saves the week just ended once, merged into the stored weeks', async () => {
+    await seed();
+
+    setupHook();
+    await flushAsync();
+
+    expect(historyWrites()).toHaveLength(1);
+    expect(JSON.parse(historyWrites()[0][1])).toEqual([
+      ...STORED_HISTORY,
+      { weekStart: PREV_WEEK_MONDAY, hours: 0, earnings: 0, aiPct: 50, brainliftHours: 1 },
+    ]);
+  });
+});
+
+// ─── durable-data cross-spec review: sign-out while the AI fetch is in flight ─
+
+describe('cross-spec review: a fetch that settles after a hard reset writes nothing', () => {
+  it('ai_cache stays wiped and no error is shown when sign-out lands mid-fetch', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    mockFetchWorkDiary.mockImplementation(async () => {
+      await gate;
+      return makeSlots(20, 3, 5);
+    });
+
+    const { get } = setupHook();
+    await flushAsync();
+    expect(mockFetchWorkDiary).toHaveBeenCalled();
+
+    // Sign-out: clearAll() removes ai_cache, then invalidateAuthToken()
+    await AsyncStorage.removeItem('ai_cache');
+    invalidateAuthToken();
+
+    release();
+    await flushAsync();
+
+    expect(await AsyncStorage.getItem('ai_cache')).toBeNull();
+    expect(await AsyncStorage.getItem('previousWeekAIPercent')).toBeNull();
+    expect(get().error).toBeNull();
   });
 });

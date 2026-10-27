@@ -387,6 +387,230 @@ describe('FR3: scripts/ota-publish.sh', () => {
     });
   });
 
+  // 10-sdk-58-ios-27 FR1: eas-cli v22.0.0 replaced the build object's `runtimeVersion` and
+  // `channel` with `runtime: { id, version }` and `updateChannel` in `--json` output. The guard
+  // reads `(b.runtime && b.runtime.version) ?? b.runtimeVersion`, so it works on both CLIs.
+  describe('step 4: both eas-cli build JSON shapes (spec 10 FR1)', () => {
+    // eas-cli >= 22 shape (checked against eas-cli 25.3.0 `build:list --json`, 2026-10-20): no
+    // top-level runtimeVersion or channel; runtime and updateChannel are { id, ... } objects.
+    const modernBuild = (version: string): Record<string, unknown> => {
+      const b: Record<string, unknown> = {
+        ...build(),
+        updateChannel: { id: '019d6038-9c94-7833-be88-94fa6c2ba1aa', name: 'production' },
+        runtime: { id: '01a15889-0a75-7663-9449-cf5b2be4655e', version },
+      };
+      delete b.runtimeVersion;
+      delete b.channel;
+      return b;
+    };
+
+    it('accepts eas-cli >= 22 build JSON (runtime.version, no runtimeVersion) and publishes once', () => {
+      const fixture = modernBuild(RTV);
+      expect(fixture).not.toHaveProperty('runtimeVersion');
+      const r = run([MSG], { STUB_BUILDS_JSON: JSON.stringify([fixture]) });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('OTA published');
+      expect(r.updateCalls).toHaveLength(1);
+    });
+
+    it('accepts eas-cli 20 build JSON (runtimeVersion, no runtime) and publishes once', () => {
+      const fixture = build();
+      expect(fixture).not.toHaveProperty('runtime');
+      const r = run([MSG], { STUB_BUILDS_JSON: JSON.stringify([fixture]) });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('OTA published');
+      expect(r.updateCalls).toHaveLength(1);
+    });
+
+    it('--dry-run on eas-cli >= 22 JSON names the matched build', () => {
+      const r = run(['--dry-run', MSG], { STUB_BUILDS_JSON: JSON.stringify([modernBuild(RTV)]) });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('Dry run OK');
+      expect(r.stdout).toContain(BUILD_ID);
+      expect(r.stdout).toContain('1.1.0 (18)');
+      expect(r.updateCalls).toEqual([]);
+    });
+
+    it('reads runtime.version for real: a different runtime.version is refused by name', () => {
+      const r = run([MSG], { STUB_BUILDS_JSON: JSON.stringify([modernBuild(OTHER_RTV)]) });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain(
+        `Refusing to publish: eas build:list returned build ${BUILD_ID} with runtime "${OTHER_RTV}", not ${RTV}`,
+      );
+      expect(r.updateCalls).toEqual([]);
+    });
+  });
+
+  // 2026-10-27: store builds from build 21 on are local (`eas build --local`, via
+  // scripts/build-ios-local.sh), which leaves no EAS build record. Their annotated build-<N> tag
+  // carries the runtime instead, and counts once origin has that same tag object.
+  describe('step 4a: build tags from local builds', () => {
+    let origin: string;
+    const TAG_VERSION = '1.2.0';
+
+    const tagMessage = (n: number, opts: { runtime?: string; version?: string; build?: string; extra?: string[] } = {}) =>
+      [
+        `Hourglass ${opts.version ?? TAG_VERSION} (${opts.build ?? n}), local build`,
+        '',
+        `Version: ${opts.version ?? TAG_VERSION}`,
+        `Build: ${opts.build ?? n}`,
+        `Runtime: ${opts.runtime ?? RTV}`,
+        ...(opts.extra ?? []),
+        'Xcode: 27.0 (27A266a)',
+        'SDK: iphoneos27.0 (24A430)',
+        `IPA-SHA256: ${'5'.repeat(64)}`,
+      ].join('\n');
+
+    const gitId = (...args: string[]) =>
+      git('-c', 'user.name=test', '-c', 'user.email=test@example.com', '-c', 'tag.gpgsign=false', ...args);
+    const annotatedTag = (name: string, message: string) => gitId('tag', '-a', name, '-m', message);
+    const push = (name: string) => git('push', '-q', 'origin', `refs/tags/${name}`);
+    const buildListCalls = (r: ReturnType<typeof run>) => r.easCalls.filter((c) => c.argv[0] === 'build:list');
+
+    beforeEach(() => {
+      // The tree of a local build 21: app.json 1.2.0 (21).
+      fs.writeFileSync(
+        path.join(repo, 'app.json'),
+        `${JSON.stringify({ expo: { version: TAG_VERSION, ios: { buildNumber: '21' } } }, null, 2)}\n`,
+      );
+      gitId('commit', '-qam', 'build 21');
+      origin = path.join(tmp, 'origin.git');
+      spawnSync('git', ['init', '-q', '--bare', origin], { env: hermeticEnv() });
+      git('remote', 'add', 'origin', origin);
+      git('push', '-q', 'origin', 'HEAD:refs/heads/main');
+    });
+
+    it('a pushed annotated tag with this runtime publishes once, with no eas build:list call', () => {
+      annotatedTag('build-21', tagMessage(21));
+      push('build-21');
+      const r = run([MSG]);
+      expect(r.status).toBe(0);
+      expect(r.labels).toEqual(['npx expo-updates', 'eas update']);
+      expect(r.stdout).toContain('OTA published');
+      expect(r.stderr).not.toContain('WARNING:');
+    });
+
+    it('--dry-run names the tag and its version and build on the build: line', () => {
+      annotatedTag('build-21', tagMessage(21));
+      push('build-21');
+      const r = run(['--dry-run', MSG]);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('Dry run OK');
+      expect(r.stdout).toMatch(reportLine('build', 'tag build-21, 1.2.0 (21)'));
+      expect(r.labels).toEqual(['npx expo-updates']);
+    });
+
+    it('of two qualifying tags, the highest build number wins (numerically: 23 over 9)', () => {
+      annotatedTag('build-9', tagMessage(9));
+      annotatedTag('build-23', tagMessage(23));
+      push('build-9');
+      push('build-23');
+      const r = run(['--dry-run', MSG]);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toMatch(reportLine('build', 'tag build-23, 1.2.0 (23)'));
+      expect(buildListCalls(r)).toEqual([]);
+    });
+
+    it("the version check warns with the tag's Version: and Build: values", () => {
+      annotatedTag('build-22', tagMessage(22));
+      push('build-22');
+      const r = run([MSG]);
+      expect(r.status).toBe(0);
+      expect(r.stderr).toContain('WARNING: app.json is 1.2.0 (21) but the target build is 1.2.0 (22)');
+      expect(r.stderr).toContain("Settings still shows the binary's 1.2.0 (22)");
+      expect(r.updateCalls).toHaveLength(1);
+      expect(buildListCalls(r)).toEqual([]);
+    });
+
+    it('a matching tag that origin lacks falls back to eas build:list', () => {
+      annotatedTag('build-21', tagMessage(21));
+      const r = run(['--dry-run', MSG]);
+      expect(r.status).toBe(0);
+      expect(r.labels).toEqual(['npx expo-updates', 'eas build:list']);
+      expect(r.stdout).toMatch(reportLine('build', `${BUILD_ID}, 1.1.0 (18)`));
+    });
+
+    it('when the fallback finds nothing, the refusal names the unpushed tag and when to push it', () => {
+      annotatedTag('build-21', tagMessage(21));
+      const r = run([MSG], { STUB_BUILDS_JSON: '[]' });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain(`Refusing to publish: no finished iOS build on channel "production" has runtime ${RTV}`);
+      expect(r.stderr).toContain("Local tag build-21 has this runtime, but origin doesn't have that tag object");
+      expect(r.stderr).toContain('App Store Connect lists build 21 as VALID');
+      expect(r.updateCalls).toEqual([]);
+    });
+
+    it('a pushed tag with a different runtime falls back to eas build:list', () => {
+      annotatedTag('build-21', tagMessage(21, { runtime: OTHER_RTV }));
+      push('build-21');
+      const r = run([MSG], { STUB_BUILDS_JSON: '[]' });
+      expect(r.status).toBe(1);
+      expect(r.labels).toEqual(['npx expo-updates', 'eas build:list']);
+      expect(r.stderr).not.toContain('Local tag');
+      expect(r.updateCalls).toEqual([]);
+    });
+
+    it('a pushed lightweight tag is ignored (it has no message)', () => {
+      git('tag', 'build-21');
+      push('build-21');
+      const r = run(['--dry-run', MSG]);
+      expect(r.status).toBe(0);
+      expect(r.labels).toEqual(['npx expo-updates', 'eas build:list']);
+      expect(r.stdout).not.toContain('tag build-21');
+    });
+
+    it('a tag with two Runtime lines is ignored, even when one matches', () => {
+      annotatedTag('build-21', tagMessage(21, { extra: [`Runtime: ${OTHER_RTV}`] }));
+      push('build-21');
+      const r = run(['--dry-run', MSG]);
+      expect(r.status).toBe(0);
+      expect(r.labels).toEqual(['npx expo-updates', 'eas build:list']);
+    });
+
+    it('a tag not named build-<digits> is ignored', () => {
+      annotatedTag('build-21rc', tagMessage(21));
+      push('build-21rc');
+      const r = run(['--dry-run', MSG]);
+      expect(r.status).toBe(0);
+      expect(r.labels).toEqual(['npx expo-updates', 'eas build:list']);
+    });
+
+    it('a tag whose object on origin differs from the local one is ignored', () => {
+      annotatedTag('build-21', tagMessage(21));
+      push('build-21');
+      // Re-made locally after the push: same name and runtime, different tag object.
+      gitId('tag', '-f', '-a', 'build-21', '-m', `${tagMessage(21)}\nRe-tagged`);
+      const r = run([MSG], { STUB_BUILDS_JSON: '[]' });
+      expect(r.status).toBe(1);
+      expect(r.labels).toEqual(['npx expo-updates', 'eas build:list']);
+      expect(r.stderr).toContain("Local tag build-21 has this runtime, but origin doesn't have that tag object");
+    });
+
+    it('when git ls-remote fails, the tag path yields nothing and eas build:list decides', () => {
+      annotatedTag('build-21', tagMessage(21));
+      push('build-21');
+      git('remote', 'set-url', 'origin', path.join(tmp, 'missing.git'));
+      const ok = run([MSG]);
+      expect(ok.status).toBe(0);
+      expect(ok.labels).toEqual(['npx expo-updates', 'eas build:list', 'eas update']);
+      fs.rmSync(log);
+      const refused = run([MSG], { STUB_BUILDS_JSON: '[]' });
+      expect(refused.status).toBe(1);
+      expect(refused.stderr).toContain(
+        "Local tag build-21 has this runtime, but `git ls-remote --tags origin` failed, so it couldn't count.",
+      );
+      expect(refused.updateCalls).toEqual([]);
+    });
+
+    it('the EAS fallback still fails closed when build:list fails', () => {
+      annotatedTag('build-21', tagMessage(21, { runtime: OTHER_RTV }));
+      push('build-21');
+      const r = run([MSG], { STUB_BUILDS_EXIT: '1' });
+      expect(r.status).toBe(1);
+      expect(r.updateCalls).toEqual([]);
+    });
+  });
+
   describe('step 6: --dry-run', () => {
     it('prints Dry run OK with the runtime, the matched build and the exact publish command, and does not publish', () => {
       const r = run(['--dry-run', MSG]);

@@ -3,12 +3,12 @@ import '../global.css';
 import { useEffect, useRef } from 'react';
 import { ActivityIndicator, AppState, View } from 'react-native';
 import * as Notifications from 'expo-notifications';
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { focusManager, QueryClient } from '@tanstack/react-query';
+import { focusManager, QueryClient, useIsRestoring } from '@tanstack/react-query';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Stack, useRouter, useSegments } from 'expo-router';
+// 10-sdk-58-ios-27 FR4: the navigation themes come from expo-router 58 (its own navigation fork).
+import { DarkTheme, DefaultTheme, Stack, ThemeProvider, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
@@ -42,6 +42,7 @@ import { useRoleRefresh } from '@/src/hooks/useRoleRefresh';
 import { useScheduledNotifications } from '@/src/hooks/useScheduledNotifications';
 import { colors } from '@/src/lib/colors';
 import { registerPushToken } from '@/src/lib/pushToken';
+import { shouldDehydrateQuery } from '@/src/lib/queryPersist';
 import { registerBackgroundPushHandler } from '@/src/notifications/handler';
 
 // FR1: Configure foreground notification display before any component renders
@@ -78,6 +79,8 @@ const queryClient = new QueryClient({
 
 // Persist query cache to AsyncStorage so data survives app restarts.
 // Max age 24h — stale data is better than a blank screen on cold start.
+// durable-data 03 FR5: shouldDehydrateQuery also keeps errored queries that still hold
+// their last good data, and never keeps the 'dev-mock' manager-preview requests view.
 const asyncStoragePersister = createAsyncStoragePersister({
   storage: AsyncStorage,
   key: 'HOURGLASS_QUERY_CACHE',
@@ -86,6 +89,10 @@ const asyncStoragePersister = createAsyncStoragePersister({
 function RootLayout() {
   const colorScheme = useColorScheme();
   const { config, isLoading } = useConfig();
+  // durable-data 04 FR5: while PersistQueryClientProvider restores, queries neither subscribe
+  // nor fetch, so useConfig reports config: null with isLoading: false. The splash, the auth
+  // gate and the overlay all wait for the restore so a signed-in cold start never sees welcome.
+  const isRestoring = useIsRestoring();
   const router = useRouter();
   const segments = useSegments();
   useRoleRefresh();
@@ -125,26 +132,26 @@ function RootLayout() {
     SpaceMono_700Bold,
   });
 
-  // SC1.3: hide native splash once config resolves
+  // SC1.3: hide native splash once config resolves and the cache restore is done
   useEffect(() => {
-    if (!isLoading) {
+    if (!isLoading && !isRestoring) {
       SplashScreen.hideAsync();
     }
-  }, [isLoading]);
+  }, [isLoading, isRestoring]);
 
-  // SC1.1 + SC1.2: auth gate — redirect after config resolves
+  // SC1.1 + SC1.2: auth gate — redirect after config resolves and the cache restore is done
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoading || isRestoring) return;
     const inAuthGroup = segments[0] === '(auth)';
     if (!config?.setupComplete && !inAuthGroup) {
       router.replace('/(auth)/welcome');
     } else if (config?.setupComplete && inAuthGroup) {
       router.replace('/(tabs)');
     }
-  }, [isLoading, config, segments, router]);
+  }, [isLoading, isRestoring, config, segments, router]);
 
-  // SC1.3: overlay while config or fonts load
-  if (isLoading || !fontsLoaded) {
+  // SC1.3: overlay while config or fonts load, or the cache restores
+  if (isLoading || !fontsLoaded || isRestoring) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
         <ActivityIndicator size="large" color={colors.violet} />
@@ -158,6 +165,19 @@ function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="(auth)" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+        {/* 1.2 auto-approve: per-report settings, pushed from the Requests tab */}
+        <Stack.Screen
+          name="direct-reports"
+          options={{
+            title: 'Direct reports',
+            // (tabs) has no title of its own, so the back button would read "(tabs)"
+            headerBackTitle: 'Requests',
+            headerStyle: { backgroundColor: colors.background },
+            headerTintColor: colors.violet,
+            headerTitleStyle: { color: colors.textPrimary },
+            headerShadowVisible: false,
+          }}
+        />
         <Stack.Screen name="+not-found" />
       </Stack>
       <StatusBar style="auto" />
@@ -170,7 +190,11 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <PersistQueryClientProvider
         client={queryClient}
-        persistOptions={{ persister: asyncStoragePersister, maxAge: 1000 * 60 * 60 * 24 }}
+        persistOptions={{
+          persister: asyncStoragePersister,
+          maxAge: 1000 * 60 * 60 * 24,
+          dehydrateOptions: { shouldDehydrateQuery },
+        }}
       >
         <RootLayout />
       </PersistQueryClientProvider>

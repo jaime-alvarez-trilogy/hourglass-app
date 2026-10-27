@@ -44,6 +44,8 @@ jest.mock('@/src/hooks/useFocusKey', () => ({
   useFocusKey: () => 'focus-key-0',
 }));
 jest.mock('@/src/hooks/useApprovalItems');
+// 1.2: the pay-days query needs a QueryClient; the home screen hides the card without data
+jest.mock('@/src/hooks/usePayDays', () => ({ usePayDays: () => ({ data: undefined }) }));
 jest.mock('@/src/components/FadeInScreen', () => {
   const mockReact = require('react');
   return {
@@ -51,9 +53,6 @@ jest.mock('@/src/components/FadeInScreen', () => {
     default: ({ children }: any) => mockReact.createElement(mockReact.Fragment, null, children),
   };
 });
-jest.mock('@react-navigation/native', () => ({
-  useIsFocused: () => true,
-}));
 
 // useStaggeredEntry — return plain styles (no Reanimated shared values in tests)
 jest.mock('@/src/hooks/useStaggeredEntry', () => ({
@@ -64,6 +63,7 @@ jest.mock('@/src/hooks/useStaggeredEntry', () => ({
 }));
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: jest.fn() }),
+  useIsFocused: () => true,
 }));
 
 // @expo/vector-icons — ApprovalUrgencyCard renders an Ionicons glyph whose real

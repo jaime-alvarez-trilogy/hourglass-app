@@ -1,6 +1,25 @@
 // FR2: Typed error classes for Crossover API failures
 // Spec 03 (error-envelope): optional envelope parameter carries CROS-XXXX
 // errorCode, type, and human-readable text from the server.
+// durable-data 01-auth-renewal FR3: synthetic error codes and the shared query
+// retry predicate.
+// durable-data 03-keep-last-good FR1: the one-retry form, shouldRetryOnce.
+
+// ---------------------------------------------------------------------------
+// Synthetic (client-side) error codes, carried in `errorCode`
+// ---------------------------------------------------------------------------
+
+/** First-response Tomcat HTML 5xx, mapped to AuthError(401) by handleStatus. */
+export const AUTH_HTML_500 = 'AUTH_HTML_500';
+/** getAuthToken refused locally: the same credentials were rejected < LOGIN_LATCH_MS ago. */
+export const AUTH_LOGIN_LATCHED = 'AUTH_LOGIN_LATCHED';
+/** A config exists but loadCredentials() returned null. */
+export const NO_CREDENTIALS = 'NO_CREDENTIALS';
+/** Still an HTML 5xx after a freshly minted token: a server outage, not an auth failure. */
+export const HTML_5XX_AFTER_RENEWAL = 'HTML_5XX_AFTER_RENEWAL';
+
+/** Query-level retry cap for `shouldRetryQuery` (matches today's `retry: 2`). */
+export const MAX_QUERY_RETRIES = 2;
 
 export type ErrorEnvelope = {
   errorCode?: string;
@@ -49,6 +68,20 @@ export class ApiError extends Error {
 }
 
 /**
+ * A request that was made before a hard reset (`invalidateAuthToken()`: sign-out,
+ * env switch, not-contributor) and would otherwise have minted or renewed a token
+ * after it. It is dropped instead, so a stale caller never logs in with the old
+ * account's credentials or environment. Never retried; no consumer shows it.
+ */
+export class AuthResetError extends Error {
+  constructor() {
+    super('Request superseded by sign-out or environment switch');
+    this.name = 'AuthResetError';
+    Object.setPrototypeOf(this, AuthResetError.prototype);
+  }
+}
+
+/**
  * Thrown by `fetchAndBuildConfig` when the authenticated account has no
  * contributor (CANDIDATE) role and Hourglass cannot proceed with onboarding.
  *
@@ -64,4 +97,46 @@ export class NotContributorError extends Error {
     this.avatarTypes = avatarTypes;
     Object.setPrototypeOf(this, NotContributorError.prototype);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Shared query retry predicate
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether a failure looks like an outage (retry) rather than a credential or
+ * request problem (never retry).
+ *
+ * - AuthError: only the first-response HTML 5xx (`AUTH_HTML_500`). A real
+ *   401/403, a latched login and missing credentials are not retried.
+ * - NetworkError: always.
+ * - ApiError: 5xx (including `HTML_5XX_AFTER_RENEWAL`), 408 and 429.
+ * - AuthResetError: never (the caller belongs to a signed-out account or old env).
+ * - Anything else (TypeError, unknown throws): retried.
+ */
+export function isRetryableError(err: unknown): boolean {
+  if (err instanceof AuthResetError) return false;
+  if (err instanceof AuthError) return err.errorCode === AUTH_HTML_500;
+  if (err instanceof NetworkError) return true;
+  if (err instanceof ApiError) {
+    return err.statusCode >= 500 || err.statusCode === 408 || err.statusCode === 429;
+  }
+  return true;
+}
+
+/**
+ * TanStack `retry` option: up to MAX_QUERY_RETRIES retries, and only for
+ * retryable errors. TanStack v5 passes `failureCount` starting at 0.
+ */
+export function shouldRetryQuery(failureCount: number, error: unknown): boolean {
+  return failureCount < MAX_QUERY_RETRIES && isRetryableError(error);
+}
+
+/**
+ * TanStack `retry` option: one retry (today's `retry: 1`), and only for retryable
+ * errors. Used by the hours, payments, earnings-trend and team hooks
+ * (durable-data 03-keep-last-good).
+ */
+export function shouldRetryOnce(failureCount: number, error: unknown): boolean {
+  return failureCount < 1 && isRetryableError(error);
 }
